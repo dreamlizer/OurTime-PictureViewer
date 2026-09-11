@@ -217,6 +217,24 @@ function updateToolVisuals(){
 function currentBrowseContext(){return {q:state.q,filter:state.view,person:state.person,directory:state.directory,sort:state.sort,max_id:state.maxId};}
 function contextLabel(c){const person=state.people.find(p=>String(p.id)===c.person);const filter=c.filter||'';const heading=c.person?(person?.name||'人物 '+c.person):filter.startsWith('year:')?(filter.slice(5)==='unknown'?'时间未记录':filter.slice(5)+' 年'):filter.startsWith('group:')?(filter.slice(6)==='10plus'?'10人及以上':Number(filter.slice(6))+'人合影'):filter.startsWith('place:')?(filter.slice(6)==='unknown'?'地点未记录':filter.slice(6)):titles[filter]?.[0]||'照片';return [heading,c.directory?basename(c.directory):'',c.q?'搜索：'+c.q:''].filter(Boolean).join(' · ');}
 function viewerMessage(text){$('#viewer-message').textContent=text;}
+function setViewerLoading(loading){
+ const dialog=$('#detail-dialog'),img=$('#detail-img'),signature=$('#photo-signature'),faces=$('#face-name-layer'),stage=document.querySelector('.viewer-stage');
+ if(!dialog)return;
+ let indicator=$('#viewer-loading');
+ if(!indicator&&stage){indicator=document.createElement('div');indicator.id='viewer-loading';indicator.textContent='加载中…';indicator.setAttribute('aria-live','polite');stage.appendChild(indicator);}
+ dialog.classList.toggle('is-loading',Boolean(loading));
+ if(indicator)indicator.hidden=!loading;
+ if(loading){
+  if(img){img.hidden=true;img.removeAttribute('src');}
+  if(signature){signature.hidden=true;signature.replaceChildren();}
+  if(faces){faces.hidden=true;faces.replaceChildren();}
+  viewerMessage('');
+ }else{
+  if(img)img.hidden=false;
+  if(signature)signature.hidden=false;
+ }
+}
+function waitViewerFrames(count=2){return new Promise(resolve=>{const next=()=>count--<=0?resolve():requestAnimationFrame(next);next();});}
 function stopSlides(){viewer.playing=false;clearTimeout(viewer.timer);viewer.timer=null;syncViewerTools();}
 function pressTool(id, on){const el=$(id); if(!el)return; el.setAttribute('aria-pressed', String(!!on));}
 function syncViewerTools(){
@@ -471,45 +489,54 @@ function renderFaceNames(photo){
 }
 function zoomTo(scale){viewer.fit=false;viewer.scale=Math.max(.05,Math.min(4,scale));updateZoom();}
 async function displayPhoto(id){
+ const ticket=renderPhoto.ticket+1;
+ setViewerLoading(true);
  if(viewer.loader){viewer.loader.onload=null;viewer.loader.onerror=null;viewer.loader.src='';}
- if(!await renderPhoto(id))return false;
+ try{
+  if(!await renderPhoto(id))return false;
+ }catch(err){
+  if(ticket===renderPhoto.ticket){viewerMessage(err.message||'照片资料读取失败');setViewerLoading(false);}
+  throw err;
+ }
+ if(ticket!==renderPhoto.ticket)return false;
  const root=(viewer.context?.directory||'').replace(/[\/]+$/,'').toLowerCase();
  const files=[...state.detail.files].sort((a,b)=>a.excluded-b.excluded||b.exists_now-a.exists_now||a.id-b.id);
  const scoped=files.find(f=>!root||f.path.toLowerCase().startsWith(root+String.fromCharCode(92))||f.path.toLowerCase()===root);
- renderSignature(state.detail,scoped||files[0]);
  if(scoped)$('#detail-name').textContent=basename(scoped.path);
  $('#detail-dialog').dataset.photoId=String(id);
  const draft=viewer.drafts.get(id);if(draft)for(const [key,value] of Object.entries(draft))$(key).value=value;
  const file=scoped||files[0];
  const src=viewerImageSrc(state.detail, file, id);
- const current=($('#detail-img').getAttribute('src')||'');
- const applySrc=(url)=>{
-  if(!$('#detail-dialog').open||state.detail?.id!==id)return;
+ const applySrc=async(url)=>{
+  if(!$('#detail-dialog').open||state.detail?.id!==id||ticket!==renderPhoto.ticket)return false;
   viewer.fit=true;
   $('#detail-img').src=url;
+  renderSignature(state.detail,scoped||files[0]);
   updateZoom(true);
   renderFaceNames(state.detail);
   viewerMessage(draft?'这张照片有尚未保存的补录，已暂存在本页。':!state.detail.in_library?'已排除 · 缓存已清理':'');
+  await waitViewerFrames(2);
+  if(ticket===renderPhoto.ticket&&$('#detail-dialog').open&&state.detail?.id===id)setViewerLoading(false);
+  return true;
  };
  updatePosition();
- if(current===src || current.endsWith(src)){applySrc(current);return true;}
  const image=new Image();viewer.loader=image;
  await new Promise(resolve=>{
-  image.onload=()=>{applySrc(image.src);resolve();};
+  image.onload=async()=>{try{if(typeof image.decode==='function')await image.decode();}catch(e){}await applySrc(image.src);resolve();};
   image.onerror=()=>{
    if(!src.includes('/api/preview/')){
     const fallback=new Image(); viewer.loader=fallback;
-    fallback.onload=()=>{applySrc(fallback.src);resolve();};
-    fallback.onerror=()=>{viewerMessage('这张图暂时无法显示');resolve();};
+    fallback.onload=async()=>{try{if(typeof fallback.decode==='function')await fallback.decode();}catch(e){}await applySrc(fallback.src);resolve();};
+    fallback.onerror=()=>{if(ticket===renderPhoto.ticket){viewerMessage('这张图暂时无法显示');setViewerLoading(false);}resolve();};
     fallback.src='/api/preview/'+id+'?v='+state.thumbRevision;
     return;
    }
-   viewerMessage('这张图暂时无法显示');
+   if(ticket===renderPhoto.ticket){viewerMessage('这张图暂时无法显示');setViewerLoading(false);}
    resolve();
   };
   image.src=src;
  });
- return true;
+ return ticket===renderPhoto.ticket;
 }
 async function openPhoto(id,context=null){
  if(!$('#detail-dialog').open)viewer.returnScroll=scrollY;
