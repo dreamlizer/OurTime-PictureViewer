@@ -1,0 +1,421 @@
+/*
+ * OurTime PictureViewer - lightweight large-view redesign
+ * Add this file beside viewer.js. The replacement viewer.js loads it automatically.
+ */
+:root{
+  --viewer-signature-h:68px;
+  --face-font-size:13px;
+  --face-font-family:"Iowan Old Style","Palatino Linotype","STSong","SimSun",serif;
+  --face-text-color:#f6f1e6;
+  --face-bg-rgba:rgba(20,24,18,.38);
+  --face-radius:4px;
+  --face-padding-x:7px;
+  --face-padding-y:5px;
+  --face-shadow:0 1px 10px rgba(0,0,0,.65);
+}
+
+/* ---------- photo first: image + quiet metadata strip ---------- */
+#detail-dialog #image-canvas{
+  align-items:center;
+  padding:0;
+}
+#detail-dialog #photo-mat{
+  overflow:visible;
+  background:transparent;
+}
+#detail-dialog #photo-signature{
+  display:block !important;
+  height:var(--viewer-signature-h);
+  min-height:var(--viewer-signature-h);
+  margin:0;
+  padding:0;
+  border:0;
+  background:rgba(249,248,244,.985);
+  color:#222922;
+  box-shadow:0 1px 0 rgba(255,255,255,.35) inset;
+  overflow:hidden;
+}
+#detail-dialog .signature-v2{
+  height:100%;
+  display:grid;
+  grid-template-columns:auto minmax(130px,1.05fr) minmax(100px,1.5fr) auto;
+  align-items:center;
+  gap:15px;
+  padding:10px 15px 10px 13px;
+  font-family:var(--sans);
+}
+#detail-dialog .signature-seal-v2{
+  display:grid;
+  place-items:center;
+  width:30px;
+  height:30px;
+  flex:none;
+  border-radius:50%;
+  background:#b92e31;
+  color:#fffaf5;
+  font:17px/1 var(--serif);
+  box-shadow:0 1px 2px rgba(70,10,10,.16);
+}
+#detail-dialog .signature-primary{
+  min-width:0;
+  display:flex;
+  align-items:baseline;
+  flex-wrap:wrap;
+  column-gap:8px;
+  row-gap:2px;
+}
+#detail-dialog .signature-primary strong{
+  min-width:0;
+  max-width:100%;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  font-size:13px;
+  line-height:1.2;
+  font-weight:600;
+  letter-spacing:.12px;
+  font-variant-numeric:tabular-nums;
+}
+#detail-dialog .signature-primary small{
+  flex:none;
+  color:#90958e;
+  font-size:9px;
+  line-height:1.2;
+  white-space:nowrap;
+}
+#detail-dialog .signature-primary .signature-place{
+  flex-basis:100%;
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  color:#687069;
+  font-size:10px;
+  line-height:1.3;
+}
+#detail-dialog .signature-primary .signature-inline{
+  flex-basis:100%;
+  color:#6f766f;
+  font-size:10px;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+#detail-dialog .signature-secondary{
+  min-width:0;
+  display:flex;
+  align-items:center;
+  justify-content:flex-start;
+  gap:0;
+  overflow:hidden;
+  border-left:1px solid #dfded8;
+  padding-left:15px;
+  color:#4d544e;
+  font-size:10px;
+  font-variant-numeric:tabular-nums;
+  white-space:nowrap;
+}
+#detail-dialog .signature-secondary span{
+  position:relative;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+#detail-dialog .signature-secondary span+span::before{
+  content:"·";
+  display:inline-block;
+  margin:0 7px;
+  color:#b2b5b0;
+}
+#detail-dialog .signature-file{
+  max-width:210px;
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  color:#8c918b;
+  font-size:9px;
+  font-variant-numeric:tabular-nums;
+  text-align:right;
+}
+#detail-dialog #photo-mat.compact-signature #photo-signature{
+  display:block !important;
+  height:var(--viewer-signature-h);
+  min-height:var(--viewer-signature-h);
+  padding:0;
+}
+#detail-dialog #photo-mat.compact-signature .signature-v2{
+  grid-template-columns:auto minmax(0,1fr) auto;
+  gap:9px;
+  padding-inline:10px;
+}
+#detail-dialog #photo-mat.compact-signature .signature-secondary{
+  display:none;
+}
+#detail-dialog #photo-mat.compact-signature .signature-file{
+  max-width:110px;
+  font-size:8px;
+}
+#detail-dialog #photo-mat.compact-signature .signature-seal-v2{
+  width:27px;height:27px;font-size:15px;
+}
+#detail-dialog #photo-mat.compact-signature .signature-primary strong{font-size:11px}
+#detail-dialog #photo-mat.compact-signature .signature-primary small,
+#detail-dialog #photo-mat.compact-signature .signature-primary .signature-place,
+#detail-dialog #photo-mat.compact-signature .signature-primary .signature-inline{font-size:8.5px}
+
+/* Name layer only covers the photograph, never the metadata strip. */
+#detail-dialog .face-name-layer{
+  inset:0 0 var(--viewer-signature-h) 0;
+}
+#detail-dialog .face-name{
+  padding:var(--face-padding-y) var(--face-padding-x);
+  border-radius:var(--face-radius);
+  background:var(--face-bg-rgba);
+  color:var(--face-text-color);
+  font-family:var(--face-font-family);
+  font-size:var(--face-font-size);
+  line-height:1.2;
+  font-weight:400;
+  text-shadow:var(--face-shadow);
+  box-shadow:0 1px 2px rgba(0,0,0,.08);
+  backdrop-filter:blur(2px);
+}
+#detail-dialog .face-name-layer.horizontal .face-name{
+  padding:calc(var(--face-padding-y) - 1px) calc(var(--face-padding-x) + 1px);
+}
+#detail-dialog .face-name.unnamed{
+  opacity:.76;
+  background:var(--face-bg-rgba);
+}
+
+/* ---------- slim, grouped toolbar ---------- */
+#detail-dialog .viewer-tools{
+  position:absolute;
+  z-index:7;
+  right:13px;
+  top:50%;
+  transform:translateY(-50%);
+  width:44px;
+  min-width:44px;
+  max-height:calc(100dvh - 110px);
+  padding:0;
+  gap:9px;
+  display:flex;
+  flex-direction:column;
+  align-items:stretch;
+  background:transparent;
+  border:0;
+  border-radius:0;
+  backdrop-filter:none;
+  overflow:visible;
+  transition:right .18s ease;
+}
+#detail-dialog .viewer-tool-group{
+  display:flex;
+  flex-direction:column;
+  gap:3px;
+  padding:4px;
+  border:1px solid rgba(255,255,255,.13);
+  border-radius:14px;
+  background:rgba(18,23,20,.52);
+  box-shadow:0 5px 18px rgba(0,0,0,.13);
+  backdrop-filter:blur(13px) saturate(1.1);
+}
+#detail-dialog .viewer-tools button,
+#detail-dialog .viewer-tools select{
+  width:34px;
+  min-width:34px;
+  height:34px;
+  min-height:34px;
+  margin:0;
+  padding:0;
+  border:0;
+  border-radius:10px;
+  background:transparent;
+  color:rgba(242,246,243,.88);
+  font:11px/1 var(--sans);
+  box-shadow:none;
+  outline:none;
+}
+#detail-dialog .viewer-tools button svg{
+  display:block;
+  width:18px;
+  height:18px;
+  margin:auto;
+  fill:none;
+  stroke:currentColor;
+  stroke-width:1.65;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+}
+#detail-dialog .viewer-tools button:hover:not(:disabled),
+#detail-dialog .viewer-tools select:hover:not(:disabled){
+  background:rgba(255,255,255,.11);
+  color:#fff;
+}
+#detail-dialog .viewer-tools button[aria-pressed="true"]{
+  position:relative;
+  background:rgba(108,151,123,.24);
+  color:#f7fff9;
+  box-shadow:none;
+}
+#detail-dialog .viewer-tools button[aria-pressed="true"]::after{
+  content:"";
+  position:absolute;
+  right:4px;
+  top:4px;
+  width:5px;
+  height:5px;
+  border-radius:50%;
+  background:#78dda0;
+  box-shadow:0 0 0 2px rgba(22,30,25,.7);
+}
+#detail-dialog .viewer-tools button:disabled{opacity:.28}
+#detail-dialog #zoom-level{
+  width:34px;
+  min-height:19px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  color:rgba(220,229,223,.65);
+  font-size:9px;
+  font-variant-numeric:tabular-nums;
+  pointer-events:none;
+}
+#detail-dialog .viewer-tools select{
+  appearance:none;
+  -webkit-appearance:none;
+  text-align:center;
+  text-align-last:center;
+  color-scheme:dark;
+  background-image:none;
+  cursor:pointer;
+  font-size:9px;
+  padding:0 1px;
+}
+#detail-dialog .viewer-tools option{background:#242b27;color:#fff}
+#detail-dialog:not(.hide-info) .viewer-tools{right:404px}
+#detail-dialog .viewer-arrow.right{right:69px}
+#detail-dialog:not(.hide-info) .viewer-arrow.right{right:69px}
+
+/* ---------- low-frequency face-label style popover ---------- */
+#detail-dialog .face-style-popover{
+  position:absolute;
+  z-index:9;
+  right:68px;
+  top:50%;
+  transform:translateY(-50%);
+  width:278px;
+  padding:15px;
+  border:1px solid rgba(230,232,225,.9);
+  border-radius:15px;
+  background:rgba(252,251,247,.97);
+  color:#283028;
+  box-shadow:0 16px 50px rgba(0,0,0,.25);
+  backdrop-filter:blur(18px);
+  font:11px/1.4 var(--sans);
+  transition:right .18s ease;
+}
+#detail-dialog:not(.hide-info) .face-style-popover{right:459px}
+#detail-dialog .face-style-popover[hidden]{display:none!important}
+#detail-dialog .face-style-head{
+  display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;
+}
+#detail-dialog .face-style-head b{font-size:13px;font-weight:600}
+#detail-dialog .face-style-head button{
+  width:25px;height:25px;padding:0;border-radius:50%;background:#eef0eb;color:#657066;font-size:18px;
+}
+#detail-dialog .face-style-preview{
+  height:52px;
+  display:grid;
+  place-items:center;
+  margin:0 0 13px;
+  border-radius:10px;
+  background:linear-gradient(135deg,#d7d4ca,#7d887c 55%,#d6cfc0);
+  overflow:hidden;
+}
+#detail-dialog #face-style-preview-label{
+  display:inline-block;
+  padding:5px 7px;
+  writing-mode:horizontal-tb;
+  white-space:nowrap;
+}
+#detail-dialog .face-style-popover>label{
+  display:grid;
+  grid-template-columns:auto auto;
+  align-items:center;
+  gap:4px 10px;
+  margin:10px 0 0;
+  color:#596159;
+}
+#detail-dialog .face-style-popover label output{
+  justify-self:end;color:#92988f;font-size:9px;
+}
+#detail-dialog .face-style-popover input[type="range"]{
+  grid-column:1/-1;
+  width:100%;height:18px;padding:0;border:0;background:transparent;accent-color:#54735a;
+}
+#detail-dialog .face-style-popover select{
+  justify-self:end;
+  width:138px;
+  min-height:29px;
+  padding:4px 24px 4px 8px;
+  border:1px solid #dfe2da;
+  border-radius:7px;
+  background-color:#fff;
+  color:#364037;
+  font-size:10px;
+}
+#detail-dialog .face-style-colors{
+  display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px;
+}
+#detail-dialog .face-style-colors label{
+  display:flex;align-items:center;justify-content:space-between;gap:8px;color:#596159;
+}
+#detail-dialog .face-style-colors input[type="color"]{
+  width:36px;height:25px;padding:1px;border:1px solid #dfe2da;border-radius:6px;background:#fff;
+}
+#detail-dialog .face-style-popover .face-shadow-row{
+  display:flex;align-items:center;gap:6px;margin-top:11px;
+}
+#detail-dialog .face-style-popover .face-shadow-row input{margin:0;accent-color:#54735a}
+#detail-dialog .face-style-reset{
+  width:100%;
+  margin-top:13px;
+  padding:8px 10px;
+  border:1px solid #dfe2da;
+  border-radius:8px;
+  background:#f7f8f4;
+  color:#667067;
+  font:10px var(--sans);
+}
+#detail-dialog .face-style-reset:hover{background:#eef1eb;color:#344238}
+
+/* Keep the info drawer visually secondary to the photograph. */
+#detail-dialog .detail-info{
+  z-index:6;
+  box-shadow:-16px 10px 55px rgba(0,0,0,.24);
+}
+
+@media(max-width:900px){
+  :root{--viewer-signature-h:62px}
+  #detail-dialog .viewer-tools{right:8px;width:40px;min-width:40px;gap:6px}
+  #detail-dialog .viewer-tool-group{padding:3px;border-radius:12px}
+  #detail-dialog .viewer-tools button,#detail-dialog .viewer-tools select{width:32px;min-width:32px;height:32px;min-height:32px}
+  #detail-dialog #zoom-level{width:32px}
+  #detail-dialog .viewer-arrow.right{right:55px}
+  #detail-dialog .signature-v2{grid-template-columns:auto minmax(0,1fr) auto;gap:9px;padding-inline:10px}
+  #detail-dialog .signature-secondary{display:none}
+  #detail-dialog .signature-file{max-width:135px}
+  #detail-dialog:not(.hide-info) .viewer-tools{right:8px;opacity:.18;pointer-events:none}
+  #detail-dialog:not(.hide-info) .face-style-popover{right:55px}
+  #detail-dialog .face-style-popover{right:55px;width:260px}
+}
+@media(max-width:600px){
+  :root{--viewer-signature-h:58px}
+  #detail-dialog .signature-file{display:none}
+  #detail-dialog .signature-primary strong{font-size:10px}
+  #detail-dialog .signature-primary small,#detail-dialog .signature-primary .signature-place,#detail-dialog .signature-primary .signature-inline{font-size:8px}
+  #detail-dialog .signature-seal-v2{width:25px;height:25px;font-size:14px}
+  #detail-dialog .face-style-popover{left:12px;right:58px;width:auto;top:auto;bottom:12px;transform:none}
+}

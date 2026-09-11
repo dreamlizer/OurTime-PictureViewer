@@ -1,5 +1,210 @@
 // Browsing order is an immutable list of IDs from the current collection.
-const viewer={ids:[],index:0,target:0,offset:0,total:0,context:null,generation:0,busy:false,timer:null,playing:false,scale:1,fit:true,loader:null,drafts:new Map(),window:200,faceNames:true,faceAlias:false,faceVertical:true};
+// UI redesign: lightweight viewer toolbar, persistent face-label preferences,
+// adaptive photo metadata strip. 2026-09-11.
+
+const VIEWER_PREFS_KEY='ourtime.viewer.preferences.v2';
+const DEFAULT_FACE_STYLE={
+  fontSize:13,
+  fontFamily:'serif',
+  textColor:'#f6f1e6',
+  backgroundColor:'#141812',
+  backgroundOpacity:.38,
+  radius:4,
+  paddingX:7,
+  paddingY:5,
+  shadow:true
+};
+function readViewerPrefs(){
+  try{
+    const raw=localStorage.getItem(VIEWER_PREFS_KEY);
+    return raw?JSON.parse(raw):{};
+  }catch(e){return {};}
+}
+const storedViewerPrefs=readViewerPrefs();
+const viewer={
+  ids:[],index:0,target:0,offset:0,total:0,context:null,generation:0,busy:false,
+  timer:null,playing:false,scale:1,fit:true,loader:null,drafts:new Map(),window:200,
+  faceNames:storedViewerPrefs.faceNames!==false,
+  faceAlias:storedViewerPrefs.faceAlias===true,
+  faceVertical:storedViewerPrefs.faceVertical!==false,
+  faceStyle:{...DEFAULT_FACE_STYLE,...(storedViewerPrefs.faceStyle||{})}
+};
+function saveViewerPrefs(){
+  try{
+    localStorage.setItem(VIEWER_PREFS_KEY,JSON.stringify({
+      faceNames:viewer.faceNames!==false,
+      faceAlias:viewer.faceAlias===true,
+      faceVertical:viewer.faceVertical!==false,
+      faceStyle:viewer.faceStyle,
+      slideDelay:Number($('#slide-delay')?.value||storedViewerPrefs.slideDelay||5)
+    }));
+  }catch(e){}
+}
+function injectViewerOverrideCss(){
+  if(document.querySelector('link[data-viewer-overrides]'))return;
+  const link=document.createElement('link');
+  link.rel='stylesheet';
+  link.href='/viewer-overrides.css';
+  link.dataset.viewerOverrides='true';
+  document.head.appendChild(link);
+}
+injectViewerOverrideCss();
+
+const iconSvg={
+  minus:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 12h12"/></svg>',
+  plus:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6v12M6 12h12"/></svg>',
+  fit:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M3 16v5h5M21 16v5h-5"/></svg>',
+  actual:'<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 8h8v8H8z"/></svg>',
+  person:'<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.5"/><path d="M5 20v-1.5a7 7 0 0 1 14 0V20"/></svg>',
+  alias:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12 12 4h6l2 2v6l-8 8-8-8Z"/><circle cx="16.5" cy="7.5" r="1"/></svg>',
+  horizontal:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M5 12h10M5 17h14"/></svg>',
+  vertical:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5v14M12 5v10M17 5v14"/></svg>',
+  style:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19 10.5 5h3L19 19M7 14h10"/><circle cx="18.5" cy="6" r="2"/></svg>',
+  info:'<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 10v7M12 7h.01"/></svg>',
+  play:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 7 8 5-8 5V7Z"/></svg>',
+  pause:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7v10M15 7v10"/></svg>',
+  locate:'<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>'
+};
+function setToolIcon(selector,svg,label){
+  const el=$(selector); if(!el)return;
+  el.innerHTML=svg;
+  el.title=label;
+  el.setAttribute('aria-label',label);
+}
+function buildViewerToolbar(){
+  const tools=document.querySelector('.viewer-tools');
+  if(!tools||tools.dataset.redesigned)return;
+  tools.dataset.redesigned='true';
+
+  const zoomGroup=document.createElement('div');zoomGroup.className='viewer-tool-group viewer-tool-zoom';
+  const peopleGroup=document.createElement('div');peopleGroup.className='viewer-tool-group viewer-tool-people';
+  const actionGroup=document.createElement('div');actionGroup.className='viewer-tool-group viewer-tool-actions';
+
+  ['#zoom-out','#zoom-fit','#zoom-level','#zoom-actual','#zoom-in'].forEach(sel=>{const el=$(sel);if(el)zoomGroup.appendChild(el);});
+  ['#toggle-face-names','#toggle-face-alias','#toggle-face-dir'].forEach(sel=>{const el=$(sel);if(el)peopleGroup.appendChild(el);});
+
+  const styleBtn=document.createElement('button');
+  styleBtn.type='button';styleBtn.id='face-style-button';styleBtn.setAttribute('aria-expanded','false');
+  styleBtn.innerHTML=iconSvg.style;styleBtn.title='人名标签样式';styleBtn.setAttribute('aria-label','人名标签样式');
+  peopleGroup.appendChild(styleBtn);
+
+  ['#viewer-info','#viewer-play','#slide-delay','#reveal-button'].forEach(sel=>{const el=$(sel);if(el)actionGroup.appendChild(el);});
+  tools.replaceChildren(zoomGroup,peopleGroup,actionGroup);
+
+  setToolIcon('#zoom-out',iconSvg.minus,'缩小');
+  setToolIcon('#zoom-fit',iconSvg.fit,'适应窗口');
+  setToolIcon('#zoom-actual',iconSvg.actual,'原尺寸 1:1');
+  setToolIcon('#zoom-in',iconSvg.plus,'放大');
+  setToolIcon('#toggle-face-names',iconSvg.person,'显示/隐藏人名');
+  setToolIcon('#toggle-face-alias',iconSvg.alias,'显示/隐藏别名');
+  setToolIcon('#viewer-info',iconSvg.info,'详细资料');
+  setToolIcon('#viewer-play',iconSvg.play,'播放幻灯片');
+  setToolIcon('#reveal-button',iconSvg.locate,'在资源管理器中定位');
+
+  const delay=$('#slide-delay');
+  if(delay){
+    const saved=Number(storedViewerPrefs.slideDelay);
+    if([3,5,10].includes(saved))delay.value=String(saved);
+    delay.title='幻灯片切换间隔';
+  }
+  buildFaceStylePopover();
+}
+function buildFaceStylePopover(){
+  if($('#face-style-popover'))return;
+  const body=document.querySelector('.viewer-body'); if(!body)return;
+  const pop=document.createElement('section');
+  pop.id='face-style-popover';pop.className='face-style-popover';pop.hidden=true;
+  pop.setAttribute('aria-label','人名标签样式设置');
+  pop.innerHTML=`
+    <div class="face-style-head"><b>人名标签</b><button type="button" id="face-style-close" aria-label="关闭">×</button></div>
+    <div class="face-style-preview"><span id="face-style-preview-label">关恺欣</span></div>
+    <label>字号 <output id="face-font-size-value"></output><input id="face-font-size" type="range" min="10" max="22" step="1"></label>
+    <label>字体 <select id="face-font-family"><option value="sans">黑体 / 无衬线</option><option value="serif">宋体 / 衬线</option><option value="kai">楷体</option></select></label>
+    <div class="face-style-colors"><label>文字<input id="face-text-color" type="color"></label><label>底色<input id="face-bg-color" type="color"></label></div>
+    <label>底色透明度 <output id="face-bg-opacity-value"></output><input id="face-bg-opacity" type="range" min="0" max="90" step="1"></label>
+    <label>圆角 <select id="face-radius"><option value="0">直角</option><option value="4">微圆角</option><option value="10">圆角</option><option value="999">胶囊</option></select></label>
+    <label class="face-shadow-row"><input id="face-shadow" type="checkbox"> 文字阴影（亮背景更清楚）</label>
+    <button type="button" id="face-style-reset" class="face-style-reset">恢复默认</button>`;
+  body.appendChild(pop);
+
+  const bind=(id,event,fn)=>{const el=$(id);if(el)el.addEventListener(event,fn);};
+  bind('#face-style-close','click',()=>toggleFaceStylePopover(false));
+  bind('#face-font-size','input',e=>updateFaceStyle({fontSize:Number(e.target.value)}));
+  bind('#face-font-family','change',e=>updateFaceStyle({fontFamily:e.target.value}));
+  bind('#face-text-color','input',e=>updateFaceStyle({textColor:e.target.value}));
+  bind('#face-bg-color','input',e=>updateFaceStyle({backgroundColor:e.target.value}));
+  bind('#face-bg-opacity','input',e=>updateFaceStyle({backgroundOpacity:Number(e.target.value)/100}));
+  bind('#face-radius','change',e=>updateFaceStyle({radius:Number(e.target.value)}));
+  bind('#face-shadow','change',e=>updateFaceStyle({shadow:e.target.checked}));
+  bind('#face-style-reset','click',()=>{viewer.faceStyle={...DEFAULT_FACE_STYLE};applyFaceStyle();saveViewerPrefs();if(state.detail)renderFaceNames(state.detail);});
+  applyFaceStyle();
+}
+function faceFontStack(kind){
+  if(kind==='sans')return '"Microsoft YaHei UI","Microsoft YaHei","PingFang SC","Noto Sans CJK SC",sans-serif';
+  if(kind==='kai')return '"KaiTi","STKaiti","Kaiti SC",serif';
+  return '"Iowan Old Style","Palatino Linotype","STSong","SimSun",serif';
+}
+function applyFaceStyle(){
+  const root=$('#detail-dialog')||document.documentElement;
+  const s=viewer.faceStyle||DEFAULT_FACE_STYLE;
+  root.style.setProperty('--face-font-size',`${s.fontSize}px`);
+  root.style.setProperty('--face-font-family',faceFontStack(s.fontFamily));
+  root.style.setProperty('--face-text-color',s.textColor);
+  root.style.setProperty('--face-bg-color',s.backgroundColor);
+  root.style.setProperty('--face-bg-opacity',String(s.backgroundOpacity));
+  root.style.setProperty('--face-bg-rgba',hexToRgba(s.backgroundColor,s.backgroundOpacity));
+  root.style.setProperty('--face-radius',s.radius>=999?'999px':`${s.radius}px`);
+  root.style.setProperty('--face-padding-x',`${s.paddingX}px`);
+  root.style.setProperty('--face-padding-y',`${s.paddingY}px`);
+  root.style.setProperty('--face-shadow',s.shadow?'0 1px 10px rgba(0,0,0,.65)':'none');
+
+  const fontSize=$('#face-font-size'),family=$('#face-font-family'),text=$('#face-text-color'),bg=$('#face-bg-color'),op=$('#face-bg-opacity'),radius=$('#face-radius'),shadow=$('#face-shadow');
+  if(fontSize)fontSize.value=String(s.fontSize);
+  if(family)family.value=s.fontFamily;
+  if(text)text.value=s.textColor;
+  if(bg)bg.value=s.backgroundColor;
+  if(op)op.value=String(Math.round(s.backgroundOpacity*100));
+  if(radius)radius.value=String(s.radius);
+  if(shadow)shadow.checked=!!s.shadow;
+  if($('#face-font-size-value'))$('#face-font-size-value').textContent=`${s.fontSize}px`;
+  if($('#face-bg-opacity-value'))$('#face-bg-opacity-value').textContent=`${Math.round(s.backgroundOpacity*100)}%`;
+  const preview=$('#face-style-preview-label');
+  if(preview){
+    preview.style.fontSize=`${s.fontSize}px`;preview.style.fontFamily=faceFontStack(s.fontFamily);preview.style.color=s.textColor;
+    preview.style.backgroundColor=hexToRgba(s.backgroundColor,s.backgroundOpacity);preview.style.borderRadius=s.radius>=999?'999px':`${s.radius}px`;preview.style.textShadow=s.shadow?'0 1px 10px rgba(0,0,0,.65)':'none';
+  }
+}
+function hexToRgba(hex,alpha){
+  const h=String(hex||'#000000').replace('#','');
+  const full=h.length===3?h.split('').map(x=>x+x).join(''):h.padEnd(6,'0').slice(0,6);
+  const n=parseInt(full,16);if(!Number.isFinite(n))return `rgba(0,0,0,${alpha})`;
+  return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${alpha})`;
+}
+function updateFaceStyle(patch){
+  viewer.faceStyle={...viewer.faceStyle,...patch};applyFaceStyle();saveViewerPrefs();
+  if(state.detail)requestAnimationFrame(()=>renderFaceNames(state.detail));
+}
+function toggleFaceStylePopover(force){
+  const pop=$('#face-style-popover'),btn=$('#face-style-button');if(!pop)return;
+  const open=force==null?pop.hidden:!!force;
+  pop.hidden=!open;if(btn)btn.setAttribute('aria-expanded',String(open));
+  if(open)applyFaceStyle();
+}
+function updateToolVisuals(){
+  const dir=$('#toggle-face-dir');
+  if(dir){
+    const vertical=viewer.faceVertical!==false;
+    dir.innerHTML=vertical?iconSvg.vertical:iconSvg.horizontal;
+    const next=vertical?'切换为横排':'切换为竖排';
+    dir.title=next;dir.setAttribute('aria-label',next);
+  }
+  const play=$('#viewer-play');
+  if(play){
+    play.innerHTML=viewer.playing?iconSvg.pause:iconSvg.play;
+    const label=viewer.playing?'暂停幻灯片':'播放幻灯片';play.title=label;play.setAttribute('aria-label',label);
+  }
+}
+
 function currentBrowseContext(){return {q:state.q,filter:state.view,person:state.person,directory:state.directory,sort:state.sort,max_id:state.maxId};}
 function contextLabel(c){const person=state.people.find(p=>String(p.id)===c.person);const filter=c.filter||'';const heading=c.person?(person?.name||'人物 '+c.person):filter.startsWith('year:')?(filter.slice(5)==='unknown'?'时间未记录':filter.slice(5)+' 年'):filter.startsWith('group:')?(filter.slice(6)==='10plus'?'10人及以上':Number(filter.slice(6))+'人合影'):filter.startsWith('place:')?(filter.slice(6)==='unknown'?'地点未记录':filter.slice(6)):titles[filter]?.[0]||'照片';return [heading,c.directory?basename(c.directory):'',c.q?'搜索：'+c.q:''].filter(Boolean).join(' · ');}
 function viewerMessage(text){$('#viewer-message').textContent=text;}
@@ -13,6 +218,8 @@ function syncViewerTools(){
  pressTool('#viewer-play', viewer.playing);
  const aliasBtn=$('#toggle-face-alias'); if(aliasBtn) aliasBtn.disabled=viewer.faceNames===false;
  const dirBtn=$('#toggle-face-dir'); if(dirBtn) dirBtn.disabled=viewer.faceNames===false;
+ const styleBtn=$('#face-style-button');if(styleBtn)styleBtn.disabled=viewer.faceNames===false;
+ updateToolVisuals();
 }
 function scheduleSlide(){clearTimeout(viewer.timer);viewer.timer=setTimeout(async()=>{try {await movePhoto(1,true);}catch(e){viewerMessage(e.message);stopSlides();}},Number($('#slide-delay').value)*1000);}
 function updatePosition(){
@@ -23,15 +230,16 @@ function updatePosition(){
 }
 function updateZoom(reset=false){
  const img=$('#detail-img'),area=$('#image-viewport'),mat=$('#photo-mat');if(!img.naturalWidth)return;
- const padding=0;
+ const signature=$('#photo-signature');
+ const signatureHeight=signature&&!signature.hidden?Number(getComputedStyle(document.documentElement).getPropertyValue('--viewer-signature-h').replace('px',''))||68:0;
  if(viewer.fit){
   const width=Math.max(40, area.clientWidth);
-  const height=Math.max(40, area.clientHeight);
+  const height=Math.max(40, area.clientHeight-signatureHeight);
   viewer.scale=Math.max(.01, Math.min(width/img.naturalWidth, height/img.naturalHeight));
  }
- mat.classList.remove('compact-signature');
  const w=Math.max(1,Math.round(img.naturalWidth*viewer.scale));
  const h=Math.max(1,Math.round(img.naturalHeight*viewer.scale));
+ mat.classList.toggle('compact-signature',w<560);
  area.classList.toggle('zoomed', !viewer.fit);
  mat.style.width=w+'px';
  img.style.width=w+'px';
@@ -41,31 +249,59 @@ function updateZoom(reset=false){
  if(state.detail && viewer.faceNames!==false) requestAnimationFrame(()=>renderFaceNames(state.detail));
 }
 function renderSignature(a,file){
+ const signature=$('#photo-signature');if(!signature)return;
  const tags=a.metadata?.ExifTool||{};
  const tag=name=>Object.entries(tags).find(([key])=>key.split(':').at(-1)===name)?.[1];
  const clean=value=>String(value||'').replace(/\0/g,'').trim();
+ const number=name=>{const raw=tag(name);const n=Number(raw);return Number.isFinite(n)&&n>0?n:null;};
  const make=clean(tag('Make')),model=clean(tag('Model'));
- $('#signature-camera').textContent=model?(model.toLowerCase().startsWith(make.toLowerCase())?model:[make,model].filter(Boolean).join(' ')):clean(a.camera)||'拍摄设备未记录';
+ const camera=model?(make&&model.toLowerCase().startsWith(make.toLowerCase())?model:[make,model].filter(Boolean).join(' ')):clean(a.camera);
  const source=a.effective_source||'';
- const timeKind=source.includes('修改')?'修改时间参考':source.includes('推测')?'推测时间':source==='人工确认'?'补录时间':'拍摄时间';
- const size=file?.size;
- const fileSize=Number.isFinite(size)?(size>=1024*1024?(size/1024/1024).toFixed(2)+' MB':(size/1024).toFixed(1)+' KB'):'大小未记录';
- $('#signature-format').textContent=[a.format||'图片',fileSize].join('  ·  ');
- $('#signature-format').title=Number.isFinite(size)?`原文件大小：${size.toLocaleString('zh-CN')} 字节`:'原文件大小未记录';
- const number=name=>{const n=Number(tag(name));return Number.isFinite(n)&&n>0?n:null;};
- const focal=number('FocalLengthIn35mmFormat')||number('FocalLength'),aperture=number('FNumber'),shutter=number('ExposureTime'),iso=number('ISO');
- const parts=[];
- if(focal)parts.push([`${Number(focal.toFixed(1))} 毫米`,number('FocalLengthIn35mmFormat')?'等效焦距':'焦距']);
- if(aperture)parts.push([`ƒ/${Number(aperture.toFixed(1))}`,'光圈']);
- if(shutter)parts.push([shutter<1?`1/${Math.round(1/shutter)} 秒`:`${Number(shutter.toFixed(2))} 秒`,'快门']);
- if(iso)parts.push([String(iso),'感光度']);
- $('#signature-settings').innerHTML=parts.length?parts.map(([value,label])=>`<div><b>${esc(value)}</b><span>${label}</span></div>`).join(''):'<span class="no-exposure">曝光参数未记录</span>';
- const date=a.effective_date||'时间待确认';
- const shownDate=/^\d{4}-\d\d-\d\dT/.test(date)?date.slice(0,16).replaceAll('-','.').replace('T','  '):date;
- $('#signature-date').innerHTML=`<span class="signature-time-label">${a.effective_date?timeKind:'时间'}</span><span class="signature-time-value">${esc(shownDate)}</span>`;
- $('#signature-date').title=timeKind+'：'+date;
- $('#signature-place').textContent=prettyPlace(a.effective_place)||'地点待补充';
- $('#signature-place').title=a.manual_place?'人工补录地点':a.place_source||'未记录地点';
+ const timeKind=source.includes('修改')?'文件时间参考':source.includes('推测')?'推测时间':source==='人工确认'?'补录时间':'拍摄时间';
+ const rawDate=clean(a.effective_date);
+ const shownDate=/^\d{4}-\d\d-\d\dT/.test(rawDate)?rawDate.slice(0,16).replaceAll('-','.').replace('T','  '):rawDate;
+ const place=prettyPlace(a.effective_place)||'';
+ const focal=number('FocalLengthIn35mmFormat')||number('FocalLength');
+ const aperture=number('FNumber'),shutter=number('ExposureTime'),iso=number('ISO');
+ const exposure=[];
+ if(focal)exposure.push(`${Number(focal.toFixed(1))}mm`);
+ if(aperture)exposure.push(`ƒ/${Number(aperture.toFixed(1))}`);
+ if(shutter)exposure.push(shutter<1?`1/${Math.round(1/shutter)}s`:`${Number(shutter.toFixed(2))}s`);
+ if(iso)exposure.push(`ISO ${Math.round(iso)}`);
+ const size=Number(file?.size);
+ const fileSize=Number.isFinite(size)&&size>0?(size>=1024*1024?(size/1024/1024).toFixed(1)+' MB':(size/1024).toFixed(0)+' KB'):'';
+ const dimensions=(Number(a.width)>0&&Number(a.height)>0)?`${a.width} × ${a.height}`:'';
+ const format=clean(a.format)||clean(file?.path?.split('.').pop()?.toUpperCase());
+ const basics=[dimensions,format,fileSize].filter(Boolean);
+ const filename=file?.path?basename(file.path):'';
+ const hasMemory=Boolean(shownDate||place);
+ const hasCapture=Boolean(camera||exposure.length);
+
+ let mainHtml='';
+ if(hasMemory){
+  mainHtml=`<div id="signature-date" class="signature-primary">${shownDate?`<strong>${esc(shownDate)}</strong><small>${esc(timeKind)}</small>`:''}${place?`<span id="signature-place" class="signature-place">${esc(place)}</span>`:''}</div>`;
+ }else if(hasCapture){
+  mainHtml=`<div id="signature-camera" class="signature-primary"><strong>${esc(camera||'拍摄信息')}</strong>${exposure.length?`<span class="signature-inline">${exposure.map(esc).join(' · ')}</span>`:''}</div>`;
+ }else{
+  mainHtml=`<div class="signature-primary"><strong>${esc(filename||'图片')}</strong><small>基础文件信息</small></div>`;
+ }
+ const captureBits=[];
+ if(hasMemory&&camera)captureBits.push(camera);
+ if(hasMemory&&exposure.length)captureBits.push(...exposure);
+ if(!hasMemory&&hasCapture&&basics.length)captureBits.push(...basics);
+ if(!hasMemory&&!hasCapture)captureBits.push(...basics);
+ const fallbackBits=(hasMemory||hasCapture)?basics:[];
+ const captureMarkup=captureBits.length?captureBits.map((v,i)=>`<span${hasMemory&&camera&&i===0?' id="signature-camera"':''}>${esc(v)}</span>`).join(''):'';
+
+ signature.innerHTML=`
+  <div class="signature-v2">
+   <span class="signature-seal-v2" aria-hidden="true">拾</span>
+   ${mainHtml}
+   <div id="signature-settings" class="signature-secondary">${captureMarkup}</div>
+   ${fallbackBits.length?`<div id="signature-format" class="signature-file">${fallbackBits.map(esc).join(' · ')}</div>`:''}
+  </div>`;
+ signature.hidden=false;
+ signature.title=[shownDate&&`${timeKind}：${rawDate}`,place&&`地点：${place}`,camera&&`设备：${camera}`,exposure.join(' · '),basics.join(' · ')].filter(Boolean).join('\n');
 }
 function namedFaces(photo){return (photo&&photo.faces||[]).filter(f=>f.name&&!f.ignored);}
 function visibleFaces(photo){return (photo&&photo.faces||[]).filter(f=>!f.ignored);}
@@ -83,7 +319,6 @@ function viewerImageSrc(photo, file, id){
  }
  return '/api/original/'+id;
 }
-
 function faceBox(face){
  let box=face.bbox; if(typeof box==='string'){try{box=JSON.parse(box);}catch(e){box=null;}}
  if(!Array.isArray(box)||box.length<4)return null;
@@ -258,7 +493,6 @@ async function ensureViewerWindow(absolute, generation=viewer.generation){
  viewer.index=viewer.target=idx;
  return idx;
 }
-
 async function movePhoto(delta,automatic=false){
  if(!automatic)stopSlides();
  const total=viewer.total||viewer.ids.length;
@@ -269,7 +503,6 @@ async function movePhoto(delta,automatic=false){
  if(goal===current){stopSlides();return;}
  await consumeViewerGoal(automatic);
 }
-
 async function consumeViewerGoal(automatic=false){
  if(viewer.busy)return;
  viewer.busy=true;
@@ -279,13 +512,8 @@ async function consumeViewerGoal(automatic=false){
    const want=Number.isFinite(viewer.goal)?viewer.goal:(Number.isFinite(viewer.absolute)?viewer.absolute:0);
    const local=await ensureViewerWindow(want, generation);
    if(!$('#detail-dialog').open)return;
-   if(generation!==viewer.generation){
-    continue;
-   }
-   if(local==null){
-    if(generation!==viewer.generation) continue;
-    return;
-   }
+   if(generation!==viewer.generation){continue;}
+   if(local==null){if(generation!==viewer.generation) continue;return;}
    viewer.absolute=want;
    viewer.index=viewer.target=want-(viewer.offset||0);
    const id=viewer.ids[viewer.index];
@@ -304,11 +532,13 @@ async function consumeViewerGoal(automatic=false){
  }catch(e){stopSlides();throw e;}
  finally{
   viewer.busy=false;updatePosition();
-  if($('#detail-dialog').open && Number.isFinite(viewer.goal) && viewer.goal!==viewer.absolute){
-   consumeViewerGoal(automatic);
-  }
+  if($('#detail-dialog').open && Number.isFinite(viewer.goal) && viewer.goal!==viewer.absolute){consumeViewerGoal(automatic);}
  }
 }
+
+buildViewerToolbar();
+applyFaceStyle();
+syncViewerTools();
 
 $('#viewer-prev').addEventListener('click',action(()=>movePhoto(-1)));
 $('#viewer-next').addEventListener('click',action(()=>movePhoto(1)));
@@ -328,16 +558,17 @@ faceLayer&&faceLayer.addEventListener('click',e=>{
  const id=Number(b.dataset.facePerson);
  if(typeof openQuickName==='function') openQuickName(id);
 });
-$('#toggle-face-names').addEventListener('click',()=>{viewer.faceNames=!viewer.faceNames;renderFaceNames(state.detail);});
-$('#toggle-face-alias').addEventListener('click',()=>{viewer.faceAlias=!viewer.faceAlias;renderFaceNames(state.detail);});
-$('#toggle-face-dir').addEventListener('click',()=>{viewer.faceVertical=!viewer.faceVertical;renderFaceNames(state.detail);});
+$('#toggle-face-names').addEventListener('click',()=>{viewer.faceNames=!viewer.faceNames;saveViewerPrefs();renderFaceNames(state.detail);});
+$('#toggle-face-alias').addEventListener('click',()=>{viewer.faceAlias=!viewer.faceAlias;saveViewerPrefs();renderFaceNames(state.detail);});
+$('#toggle-face-dir').addEventListener('click',()=>{viewer.faceVertical=!viewer.faceVertical;saveViewerPrefs();renderFaceNames(state.detail);});
+$('#face-style-button')?.addEventListener('click',e=>{e.stopPropagation();toggleFaceStylePopover();});
 $('#detail-img').addEventListener('dblclick',()=>{if(viewer.fit)zoomTo(1);else{viewer.fit=true;updateZoom(true);}});
 function toggleInfo(){$('#detail-dialog').classList.toggle('hide-info');syncViewerTools();}
 $('#viewer-info').addEventListener('click',toggleInfo);
 $('#close-info').addEventListener('click',toggleInfo);
 $('#viewer-play').addEventListener('click',()=>{if(viewer.playing){stopSlides();syncViewerTools();return;}const current=Number.isFinite(viewer.absolute)?viewer.absolute:(viewer.offset||0)+(viewer.target||0);if(current>=(viewer.total||viewer.ids.length)-1){viewerMessage('已经是最后一张，请先返回前面的照片。');return;}viewer.playing=true;syncViewerTools();scheduleSlide();});
-$('#slide-delay').addEventListener('change',()=>{if(viewer.timer)scheduleSlide();});
-$('#detail-dialog').addEventListener('close',()=>{stopSlides();viewer.generation++;viewer.queued=null;viewer.goal=null;renderPhoto.ticket++;if(viewer.loader){viewer.loader.onload=null;viewer.loader.onerror=null;viewer.loader.src='';}if(document.fullscreenElement)document.exitFullscreen().catch(()=>{});});
+$('#slide-delay').addEventListener('change',()=>{saveViewerPrefs();if(viewer.timer)scheduleSlide();});
+$('#detail-dialog').addEventListener('close',()=>{stopSlides();toggleFaceStylePopover(false);viewer.generation++;viewer.queued=null;viewer.goal=null;renderPhoto.ticket++;if(viewer.loader){viewer.loader.onload=null;viewer.loader.onerror=null;viewer.loader.src='';}if(document.fullscreenElement)document.exitFullscreen().catch(()=>{});});
 $('#detail-dialog').addEventListener('cancel',()=>{viewer.generation++;renderPhoto.ticket++;});
 document.addEventListener('visibilitychange',()=>{if(document.hidden)stopSlides();});
 document.addEventListener('keydown',action(async e=>{
@@ -354,7 +585,7 @@ new ResizeObserver(()=>{if($('#detail-dialog').open)updateZoom();}).observe(view
 // Remember where a gesture began: dragging a zoomed photo onto the background
 // must not close it. Buttons, links and the detail drawer keep their own actions.
 let outsidePhotoDown=false;
-const keepOpenSelector='#detail-img,button,a,input,textarea,select,.detail-info,.face-name-layer,.face-name,.viewer-tools,.viewer-arrow,.dialog-close,#photo-mat,#photo-signature';
+const keepOpenSelector='#detail-img,button,a,input,textarea,select,.detail-info,.face-name-layer,.face-name,.viewer-tools,.viewer-arrow,.dialog-close,#photo-mat,#photo-signature,.face-style-popover';
 $('#detail-dialog').addEventListener('pointerdown',e=>{
  outsidePhotoDown=e.button===0&&!e.target.closest(keepOpenSelector);
 });
