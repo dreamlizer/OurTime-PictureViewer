@@ -150,6 +150,11 @@ function loadViewer(apiImpl) {
 
 async function run() {
   const results = [];
+  const viewerSource = fs.readFileSync(path.join(root, 'web', 'viewer.js'), 'utf8');
+  const fallbackTerms = ['rectOverflow(candidate', 'otherFaceOverlap', 'placedOverlap', 'compareFaceLabelScore(score,bestScore)'];
+  results.push({id: 'R06-fallback-score', status: fallbackTerms.every(term => viewerSource.includes(term)) ? 'PASS' : 'FAIL', actual: {terms: fallbackTerms}});
+  results.push({id: 'R06-position-copy', status: viewerSource.includes('优先左侧') && viewerSource.includes('优先右侧') ? 'PASS' : 'FAIL'});
+  results.push({id: 'R06-reset-position', status: viewerSource.includes("viewer.faceLabelPosition='auto'") ? 'PASS' : 'FAIL'});
   // R01 target selection
   const people = loadAppHelpers();
   const pool = [

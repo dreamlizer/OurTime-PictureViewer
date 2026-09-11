@@ -877,12 +877,10 @@ def exclude_directory(body:DirectoryExclusion):
     with RULE_LOCK:
         with db() as c:
             c.execute('INSERT OR IGNORE INTO excluded_roots(path,created_at) VALUES (?,?)',(preview['path'],now()))
-            ids=[r[0] for r in c.execute('SELECT DISTINCT asset_id FROM files WHERE '+where,values)]
             c.execute('UPDATE files SET excluded=1 WHERE '+where,values)
             c.execute('INSERT INTO edits(created_at,target,after_json) VALUES (?,?,?)',(now(),'excluded_root',json.dumps(preview,ensure_ascii=False)))
         refresh_rules()
-    released=sum(cleanup_asset_cache(aid) for aid in ids)
-    return {**preview,'released_bytes':released}
+    return {**preview,'released_bytes':0}
 
 @app.delete('/api/exclusions/roots/{rid}')
 def restore_directory(rid:int):
@@ -913,7 +911,7 @@ def drives():
 @app.get('/api/folders')
 def folders(path:str=''):
     if not path:
-        return {'path':'','parent':None,'items':[{'name':p,'path':p} for p in drives()['roots']]}
+        return {'path':'','parent':None,'items':[{'name':p,'path':p} for p in drives()['roots'] if str(p).upper().startswith('I:')]}
     p=Path(path).expanduser().resolve()
     if not p.is_dir(): raise HTTPException(400,'文件夹不存在或无法访问')
     if str(p).startswith('\\\\'): raise HTTPException(400,'第一版只浏览本机目录')
@@ -1224,6 +1222,38 @@ def people(ignored:int=0, q:str='', offset:int=0, limit:int=48, ids:str=''):
         raise HTTPException(400, str(exc)) from exc
     return {'total':result['total'],'items':result['items'],'offset':result['offset'],'limit':result['limit']}
 
+def normalize_person_text(value):
+    """Normalize only surrounding and repeated ordinary spaces for name checks."""
+    return re.sub(r' {2,}', ' ', str(value or '').strip())
+
+@app.get('/api/people/matches')
+def people_matches(name:str='', alias:str='', exclude_id:int=0):
+    name_key=normalize_person_text(name)
+    alias_key=normalize_person_text(alias)
+    if not name_key:
+        return {'exact':[], 'same_name':[]}
+    with db() as c:
+        rows=c.execute(
+            '''SELECT p.id,p.name,p.alias,p.confirmed,p.ignored,
+                      count(f.id) face_count,count(DISTINCT f.asset_id) photo_count,min(f.id) cover
+               FROM people p JOIN faces f ON f.person_id=p.id
+               WHERE p.confirmed=1 AND coalesce(p.ignored,0)=0 AND p.id<>?
+               GROUP BY p.id ORDER BY photo_count DESC,p.id''',
+            (int(exclude_id or 0),),
+        ).fetchall()
+    same_name=[]
+    exact=[]
+    for row in rows:
+        item=dict(row)
+        item_name=normalize_person_text(item.get('name'))
+        item_alias=normalize_person_text(item.get('alias'))
+        if item_name!=name_key:
+            continue
+        same_name.append(item)
+        if item_alias==alias_key:
+            exact.append(item)
+    return {'exact':exact, 'same_name':same_name}
+
 @app.get('/api/people/{pid}')
 def person_detail(pid:int, offset:int=0, limit:int=48):
     with db() as c:
@@ -1243,9 +1273,9 @@ class PersonEdit(BaseModel):
 
 @app.patch('/api/people/{pid}')
 def name_person(pid:int,body:PersonEdit):
-    name=body.name.strip()
+    name=normalize_person_text(body.name)
     if not name: raise HTTPException(400,'请输入姓名')
-    alias=(body.alias or '').strip()
+    alias=normalize_person_text(body.alias)
     with db() as c:
         old=c.execute('SELECT * FROM people WHERE id=?',(pid,)).fetchone()
         if not old: raise HTTPException(404,'人物不存在')

@@ -298,11 +298,16 @@ dialog::backdrop { background: #162b2466; backdrop-filter: blur(4px); }
 .person-notice { margin: 0 0 14px; padding: 10px 12px; border-radius: 8px; background: #eaf3ea; color: #2f4a38; font-size: 13px; }
 .person-notice.error { background: #f8e8e4; color: #8a3a32; }
 #person-faces-more { width: 100%; margin-top: 12px; }
-.person-name-form { grid-template-columns: minmax(0,140px) minmax(0,110px) auto; gap: 8px; background: #f0f5f1; padding: 8px 10px; border-radius: 8px; margin: 8px 0 8px; }
-.person-name-form input { min-width: 0; }
-.merge-row { gap: 10px; padding-bottom: 20px; border-bottom: 1px solid var(--line); margin-bottom: 20px; }
-#merge-search { min-width: 0; width: 180px; font-size: 13px; border-color: var(--control-line); }
-.merge-row select { min-width: 0; max-width: 240px; }
+.person-chrome { padding-bottom: 8px; }
+.person-dialog .eyebrow { margin-bottom: 2px; }
+.person-dialog h2 { font-size: 20px; margin: 0 40px 8px 0; }
+.person-name-form { display:flex; flex-wrap:nowrap; align-items:center; gap: 8px; background: #f0f5f1; padding: 6px 8px; border-radius: 8px; margin: 0 0 8px; }
+.person-name-form input { min-width: 0; width: 120px; max-width: 140px; }
+.person-name-form .primary { min-width: 72px; width: auto; padding: 0 14px; }
+.merge-row { display:flex; flex-wrap:nowrap; align-items:center; gap: 8px; padding-bottom: 8px; border-bottom: 1px solid var(--line); margin: 0 0 8px; }
+#merge-search { min-width: 0; width: 150px; font-size: 13px; border-color: var(--control-line); }
+.merge-row select { min-width: 0; width: 160px; max-width: 180px; }
+#merge-person, #show-person-photos, #ignore-person { white-space: nowrap; }
 .person-faces { grid-template-columns: repeat(auto-fill,minmax(135px,1fr)); gap: 20px 14px; }
 .face-item { min-width: 0; }
 .face-item img { border-radius: 8px; background: #e9eeea; }
@@ -588,18 +593,19 @@ dialog::backdrop { background: #162b2466; backdrop-filter: blur(4px); }
 #folders-list[data-depth="0"]{grid-template-columns:repeat(auto-fill,minmax(220px,1fr));}
 #folders-list[data-depth="1"]{grid-template-columns:repeat(auto-fill,minmax(180px,1fr));}
 #folders-list[data-depth="2"],#folders-list[data-depth="3"]{grid-template-columns:repeat(auto-fill,minmax(160px,1fr));}
-.folder-card{display:flex;align-items:center;justify-content:space-between;gap:10px;border:1px solid var(--line);border-radius:10px;background:#fff;}
-.folder-card.drive{padding:18px 16px;background:#e7efe8;border-color:#c3d4c8;}
-.folder-card.drive span{font-size:20px;font-weight:600;}
-.folder-card.folder{padding:12px 14px;background:#f4f7f1;}
-.folder-card.folder span{font-size:14px;}
-.folder-card.sub{padding:10px 12px;background:#fbfaf4;border-color:#e4e1d3;}
-.folder-card.sub span{font-size:13px;}
-.folder-card.deep{padding:8px 10px;background:#fff;}
-.folder-card.deep span{font-size:12px;color:#555c52;}
-
-.folder-check{display:flex;align-items:center;gap:10px;min-width:0;}
-.folder-check span{font-size:15px;overflow-wrap:anywhere;}
+.folder-card{position:relative;display:flex;align-items:flex-start;gap:10px;border:1px solid var(--line);border-radius:10px;background:#fff;cursor:pointer;padding:16px 40px 16px 14px;min-height:72px;}
+.folder-card:hover{border-color:#a3b28f;background:#f7faf4;}
+.folder-name{display:block;min-width:0;flex:1;font-size:14px;line-height:1.35;overflow-wrap:anywhere;white-space:normal;}
+.folder-tick{position:absolute;top:10px;right:10px;width:16px;height:16px;margin:0;}
+.folder-add{position:absolute;right:10px;bottom:8px;font-size:12px;}
+.folder-card.drive{background:#e7efe8;border-color:#c3d4c8;min-height:88px;padding-right:96px;}
+.folder-card.drive .folder-name{font-size:22px;font-weight:600;}
+.folder-card.folder{background:#f4f7f1;}
+.folder-card.sub{background:#fbfaf4;border-color:#e4e1d3;}
+.folder-card.deep{background:#fff;}
+.folder-card.deep .folder-name{font-size:13px;color:#555c52;}
+#folders-list[data-depth="0"]{grid-template-columns:repeat(auto-fill,minmax(240px,1fr));}
+#folders-list[data-depth="1"]{grid-template-columns:repeat(auto-fill,minmax(220px,1fr));}
 
 .person-dialog .eyebrow{margin-bottom:4px;}
 .person-name-form input{max-width:180px;}

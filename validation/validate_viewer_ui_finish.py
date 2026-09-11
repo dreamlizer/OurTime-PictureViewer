@@ -51,7 +51,12 @@ def open_photo(page, asset_id):
     detail = req('/api/photos/' + str(asset_id))
     name = Path(detail['files'][0]['path']).name
     page.goto(URL)
-    page.fill('#search', name)
+    search = page.locator('[data-ot="search"]')
+    if not search.is_visible():
+        search = page.locator('#search')
+    search.fill(name)
+    search.press('Enter')
+    page.wait_for_selector(f'[data-photo="{asset_id}"]', timeout=30000)
     page.locator(f'[data-photo="{asset_id}"]').dblclick(timeout=30000)
     page.wait_for_function(
         "document.querySelector('#detail-img').complete && document.querySelector('#detail-img').naturalWidth>0"
@@ -131,6 +136,11 @@ def main():
         named = next((face['name'] for face in detail.get('faces', []) if face.get('name') and not face.get('ignored')), None)
         check(page.locator('#face-style-preview-label').inner_text() == (named or '示例姓名'), '人名样式预览使用当前照片真实姓名或示例姓名')
         check(page.locator('#face-label-position').input_value() == 'auto', '标签位置默认自动')
+        check(page.locator('#face-label-position option[value="left"]').inner_text() == '优先左侧' and page.locator('#face-label-position option[value="right"]').inner_text() == '优先右侧', '标签位置文案符合安全 fallback 语义')
+        check(page.locator('#face-style-preview-label').evaluate('(e)=>getComputedStyle(e).writingMode') in ('vertical-rl', 'vertical-lr'), '竖排状态下样式预览为竖排')
+        page.click('#toggle-face-dir')
+        check(page.locator('#face-style-preview-label').evaluate('(e)=>getComputedStyle(e).writingMode') == 'horizontal-tb', '切换横排时打开的样式预览立即刷新')
+        page.click('#toggle-face-dir')
         for value in ('left', 'right', 'auto'):
             page.select_option('#face-label-position', value)
             check(page.evaluate("JSON.parse(localStorage.getItem('ourtime.viewer.preferences.v2')).faceLabelPosition") == value,
@@ -139,6 +149,9 @@ def main():
             open_photo(page, ids['single'])
             open_style(page)
             check(page.locator('#face-label-position').input_value() == value, f'标签位置 {value} 重新打开后仍保存')
+        page.select_option('#face-label-position', 'right')
+        page.click('#face-style-reset')
+        check(page.locator('#face-label-position').input_value() == 'auto' and page.evaluate("JSON.parse(localStorage.getItem('ourtime.viewer.preferences.v2')).faceLabelPosition") == 'auto', '恢复默认同时把标签位置恢复为 auto')
 
         for label, asset_id in (('单人照', ids['single']), ('部分 EXIF', ids['partial']), ('近乎无 EXIF 截图', ids['screenshot'])):
             open_photo(page, asset_id)

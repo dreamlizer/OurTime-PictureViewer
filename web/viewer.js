@@ -122,7 +122,7 @@ function buildFaceStylePopover(){
     <div class="face-style-preview"><span id="face-style-preview-label">示例姓名</span></div>
     <label>字号 <output id="face-font-size-value"></output><input id="face-font-size" type="range" min="10" max="22" step="1"></label>
     <label>字体 <select id="face-font-family"><option value="sans">黑体 / 无衬线</option><option value="serif">宋体 / 衬线</option><option value="kai">楷体</option></select></label>
-    <label>标签位置 <select id="face-label-position"><option value="auto">自动</option><option value="left">统一左侧</option><option value="right">统一右侧</option></select></label>
+    <label>标签位置 <select id="face-label-position"><option value="auto">自动</option><option value="left">优先左侧</option><option value="right">优先右侧</option></select></label>
     <div class="face-style-colors"><label>文字<input id="face-text-color" type="color"></label><label>底色<input id="face-bg-color" type="color"></label></div>
     <label>底色透明度 <output id="face-bg-opacity-value"></output><input id="face-bg-opacity" type="range" min="0" max="90" step="1"></label>
     <label>圆角 <select id="face-radius"><option value="0">直角</option><option value="4">微圆角</option><option value="10">圆角</option><option value="999">胶囊</option></select></label>
@@ -140,7 +140,7 @@ function buildFaceStylePopover(){
   bind('#face-bg-opacity','input',e=>updateFaceStyle({backgroundOpacity:Number(e.target.value)/100}));
   bind('#face-radius','change',e=>updateFaceStyle({radius:Number(e.target.value)}));
   bind('#face-shadow','change',e=>updateFaceStyle({shadow:e.target.checked}));
-  bind('#face-style-reset','click',()=>{viewer.faceStyle={...DEFAULT_FACE_STYLE};applyFaceStyle();saveViewerPrefs();if(state.detail)renderFaceNames(state.detail);});
+  bind('#face-style-reset','click',()=>{viewer.faceStyle={...DEFAULT_FACE_STYLE};viewer.faceLabelPosition='auto';applyFaceStyle();saveViewerPrefs();if(state.detail)renderFaceNames(state.detail);});
   applyFaceStyle();
 }
 function faceFontStack(kind){
@@ -179,6 +179,8 @@ function applyFaceStyle(){
     preview.textContent=currentFaces[0]?.name||'示例姓名';
     preview.style.fontSize=`${s.fontSize}px`;preview.style.fontFamily=faceFontStack(s.fontFamily);preview.style.color=s.textColor;
     preview.style.backgroundColor=hexToRgba(s.backgroundColor,s.backgroundOpacity);preview.style.borderRadius=s.radius>=999?'999px':`${s.radius}px`;preview.style.textShadow=s.shadow?'0 1px 10px rgba(0,0,0,.65)':'none';
+    preview.style.writingMode=viewer.faceVertical!==false?'vertical-rl':'horizontal-tb';
+    preview.style.textOrientation=viewer.faceVertical!==false?'upright':'mixed';
   }
 }
 function hexToRgba(hex,alpha){
@@ -338,6 +340,23 @@ function faceLabelText(face, alias){
 function rectsOverlap(a,b,gap=6){
   return a.x<b.x+b.w+gap && a.x+a.w+gap>b.x && a.y<b.y+b.h+gap && a.y+a.h+gap>b.y;
 }
+function rectOverlapArea(a,b){
+ const w=Math.max(0,Math.min(a.x+a.w,b.x+b.w)-Math.max(a.x,b.x));
+ const h=Math.max(0,Math.min(a.y+a.h,b.y+b.h)-Math.max(a.y,b.y));
+ return w*h;
+}
+function rectOverflow(rect,layerW,layerH,pad=4){
+ return Math.max(0,pad-rect.x)+Math.max(0,pad-rect.y)+Math.max(0,rect.x+rect.w-(layerW-pad))+Math.max(0,rect.y+rect.h-(layerH-pad));
+}
+function faceLabelDistance(rect,item){
+ const dx=Math.max(item.fx-(rect.x+rect.w),rect.x-(item.fx+item.fw),0);
+ const dy=Math.max(item.fy-(rect.y+rect.h),rect.y-(item.fy+item.fh),0);
+ return dx+dy;
+}
+function compareFaceLabelScore(a,b){
+ for(let i=0;i<a.length;i++)if(a[i]!==b[i])return a[i]-b[i];
+ return 0;
+}
 function clampFaceLabel(rect, layerW, layerH, pad=6){
   rect.x=Math.min(Math.max(pad, rect.x), Math.max(pad, layerW-rect.w-pad));
   rect.y=Math.min(Math.max(pad, rect.y), Math.max(pad, layerH-rect.h-pad));
@@ -393,7 +412,7 @@ function layoutFaceNameButtons(layer, faces, alias){
   const vertical=viewer.faceVertical!==false;
   const placed=[];
   const gap=6;
-  const preferredSide=faceLabelSide(items,ox,imgW);
+  const preferredSide=vertical?faceLabelSide(items,ox,imgW):'bottom';
   const offsets=[0,-12,12,-24,24,-36,36];
   const faceRects=items.map(item=>({x:item.fx,y:item.fy,w:item.fw,h:item.fh}));
   buttons.forEach((btn,i)=>{
@@ -401,7 +420,7 @@ function layoutFaceNameButtons(layer, faces, alias){
     it.btn=btn;
     const w=Math.max(18, btn.offsetWidth);
     const h=Math.max(18, btn.offsetHeight);
-    const sides=vertical?[preferredSide,preferredSide==='left'?'right':'left']:['top','bottom'];
+    const sides=vertical?[preferredSide,preferredSide==='left'?'right':'left']:[preferredSide,'top'];
     let chosen=null;
     for(const side of sides){
       for(const offset of offsets){
@@ -413,7 +432,17 @@ function layoutFaceNameButtons(layer, faces, alias){
       if(chosen)break;
     }
     if(!chosen){
-      chosen=faceLabelCandidate(it,sides[0],vertical,w,h,0,gap);
+      let best=null;let bestScore=null;
+      for(const side of sides){
+        for(const offset of offsets){
+          const candidate=faceLabelCandidate(it,side,vertical,w,h,offset,gap);
+          const otherFaceOverlap=faceRects.reduce((sum,faceRect,faceIndex)=>sum+(faceIndex===i?0:rectOverlapArea(candidate,faceRect)),0);
+          const placedOverlap=placed.reduce((sum,other)=>sum+rectOverlapArea(candidate,other),0);
+          const score=[rectOverflow(candidate,layerW,layerH,4),otherFaceOverlap,placedOverlap,side===preferredSide?0:1,faceLabelDistance(candidate,it)];
+          if(!bestScore||compareFaceLabelScore(score,bestScore)<0){best=candidate;bestScore=score;}
+        }
+      }
+      chosen=best||faceLabelCandidate(it,sides[0],vertical,w,h,0,gap);
       clampFaceLabel(chosen,layerW,layerH,4);
     }
     placed.push(chosen);
@@ -592,7 +621,7 @@ faceLayer&&faceLayer.addEventListener('click',e=>{
 });
 $('#toggle-face-names').addEventListener('click',()=>{viewer.faceNames=!viewer.faceNames;saveViewerPrefs();renderFaceNames(state.detail);});
 $('#toggle-face-alias').addEventListener('click',()=>{viewer.faceAlias=!viewer.faceAlias;saveViewerPrefs();renderFaceNames(state.detail);});
-$('#toggle-face-dir').addEventListener('click',()=>{viewer.faceVertical=!viewer.faceVertical;saveViewerPrefs();renderFaceNames(state.detail);});
+$('#toggle-face-dir').addEventListener('click',()=>{viewer.faceVertical=!viewer.faceVertical;saveViewerPrefs();renderFaceNames(state.detail);if(!$('#face-style-popover')?.hidden)applyFaceStyle();});
 $('#face-style-button')?.addEventListener('click',e=>{e.stopPropagation();toggleFaceStylePopover();});
 $('#detail-img').addEventListener('dblclick',()=>{if(viewer.fit)zoomTo(1);else{viewer.fit=true;updateZoom(true);}});
 function toggleInfo(){$('#detail-dialog').classList.toggle('hide-info');syncViewerTools();}
