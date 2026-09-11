@@ -184,8 +184,17 @@
   padding:calc(var(--face-padding-y) - 1px) calc(var(--face-padding-x) + 1px);
 }
 #detail-dialog .face-name.unnamed{
-  opacity:.76;
-  background:var(--face-bg-rgba);
+  width:24px;
+  min-width:24px;
+  height:24px;
+  padding:0;
+  display:grid;
+  place-items:center;
+  opacity:.46;
+  background:rgba(20,24,18,.24);
+  color:rgba(246,241,230,.82);
+  font:16px/1 var(--sans);
+  letter-spacing:0;
 }
 
 /* ---------- slim, grouped toolbar ---------- */
@@ -254,21 +263,17 @@
   color:#fff;
 }
 #detail-dialog .viewer-tools button[aria-pressed="true"]{
-  position:relative;
   background:rgba(108,151,123,.24);
   color:#f7fff9;
   box-shadow:none;
 }
-#detail-dialog .viewer-tools button[aria-pressed="true"]::after{
-  content:"";
-  position:absolute;
-  right:4px;
-  top:4px;
-  width:5px;
-  height:5px;
-  border-radius:50%;
-  background:#78dda0;
-  box-shadow:0 0 0 2px rgba(22,30,25,.7);
+#detail-dialog .viewer-tools button:focus-visible,
+#detail-dialog .viewer-tools select:focus-visible,
+#detail-dialog .face-style-popover button:focus-visible,
+#detail-dialog .face-style-popover select:focus-visible,
+#detail-dialog .face-style-popover input:focus-visible{
+  outline:2px solid rgba(117,164,132,.72);
+  outline-offset:2px;
 }
 #detail-dialog .viewer-tools button:disabled{opacity:.28}
 #detail-dialog #zoom-level{
@@ -366,6 +371,8 @@
   color:#364037;
   font-size:10px;
 }
+#detail-dialog .face-style-popover [hidden],
+#detail-dialog .signature-v2 [hidden]{display:none!important}
 #detail-dialog .face-style-colors{
   display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px;
 }

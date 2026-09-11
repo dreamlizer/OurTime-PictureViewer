@@ -27,6 +27,7 @@ const viewer={
   faceNames:storedViewerPrefs.faceNames!==false,
   faceAlias:storedViewerPrefs.faceAlias===true,
   faceVertical:storedViewerPrefs.faceVertical!==false,
+  faceLabelPosition:['auto','left','right'].includes(storedViewerPrefs.faceLabelPosition)?storedViewerPrefs.faceLabelPosition:'auto',
   faceStyle:{...DEFAULT_FACE_STYLE,...(storedViewerPrefs.faceStyle||{})}
 };
 function saveViewerPrefs(){
@@ -35,6 +36,7 @@ function saveViewerPrefs(){
       faceNames:viewer.faceNames!==false,
       faceAlias:viewer.faceAlias===true,
       faceVertical:viewer.faceVertical!==false,
+      faceLabelPosition:viewer.faceLabelPosition,
       faceStyle:viewer.faceStyle,
       slideDelay:Number($('#slide-delay')?.value||storedViewerPrefs.slideDelay||5)
     }));
@@ -117,9 +119,10 @@ function buildFaceStylePopover(){
   pop.setAttribute('aria-label','人名标签样式设置');
   pop.innerHTML=`
     <div class="face-style-head"><b>人名标签</b><button type="button" id="face-style-close" aria-label="关闭">×</button></div>
-    <div class="face-style-preview"><span id="face-style-preview-label">关恺欣</span></div>
+    <div class="face-style-preview"><span id="face-style-preview-label">示例姓名</span></div>
     <label>字号 <output id="face-font-size-value"></output><input id="face-font-size" type="range" min="10" max="22" step="1"></label>
     <label>字体 <select id="face-font-family"><option value="sans">黑体 / 无衬线</option><option value="serif">宋体 / 衬线</option><option value="kai">楷体</option></select></label>
+    <label>标签位置 <select id="face-label-position"><option value="auto">自动</option><option value="left">统一左侧</option><option value="right">统一右侧</option></select></label>
     <div class="face-style-colors"><label>文字<input id="face-text-color" type="color"></label><label>底色<input id="face-bg-color" type="color"></label></div>
     <label>底色透明度 <output id="face-bg-opacity-value"></output><input id="face-bg-opacity" type="range" min="0" max="90" step="1"></label>
     <label>圆角 <select id="face-radius"><option value="0">直角</option><option value="4">微圆角</option><option value="10">圆角</option><option value="999">胶囊</option></select></label>
@@ -131,6 +134,7 @@ function buildFaceStylePopover(){
   bind('#face-style-close','click',()=>toggleFaceStylePopover(false));
   bind('#face-font-size','input',e=>updateFaceStyle({fontSize:Number(e.target.value)}));
   bind('#face-font-family','change',e=>updateFaceStyle({fontFamily:e.target.value}));
+  bind('#face-label-position','change',e=>{viewer.faceLabelPosition=e.target.value;saveViewerPrefs();if(state.detail)renderFaceNames(state.detail);});
   bind('#face-text-color','input',e=>updateFaceStyle({textColor:e.target.value}));
   bind('#face-bg-color','input',e=>updateFaceStyle({backgroundColor:e.target.value}));
   bind('#face-bg-opacity','input',e=>updateFaceStyle({backgroundOpacity:Number(e.target.value)/100}));
@@ -158,9 +162,10 @@ function applyFaceStyle(){
   root.style.setProperty('--face-padding-y',`${s.paddingY}px`);
   root.style.setProperty('--face-shadow',s.shadow?'0 1px 10px rgba(0,0,0,.65)':'none');
 
-  const fontSize=$('#face-font-size'),family=$('#face-font-family'),text=$('#face-text-color'),bg=$('#face-bg-color'),op=$('#face-bg-opacity'),radius=$('#face-radius'),shadow=$('#face-shadow');
+  const fontSize=$('#face-font-size'),family=$('#face-font-family'),position=$('#face-label-position'),text=$('#face-text-color'),bg=$('#face-bg-color'),op=$('#face-bg-opacity'),radius=$('#face-radius'),shadow=$('#face-shadow');
   if(fontSize)fontSize.value=String(s.fontSize);
   if(family)family.value=s.fontFamily;
+  if(position)position.value=viewer.faceLabelPosition;
   if(text)text.value=s.textColor;
   if(bg)bg.value=s.backgroundColor;
   if(op)op.value=String(Math.round(s.backgroundOpacity*100));
@@ -170,6 +175,8 @@ function applyFaceStyle(){
   if($('#face-bg-opacity-value'))$('#face-bg-opacity-value').textContent=`${Math.round(s.backgroundOpacity*100)}%`;
   const preview=$('#face-style-preview-label');
   if(preview){
+    const currentFaces=typeof state!=='undefined'?namedFaces(state.detail):[];
+    preview.textContent=currentFaces[0]?.name||'示例姓名';
     preview.style.fontSize=`${s.fontSize}px`;preview.style.fontFamily=faceFontStack(s.fontFamily);preview.style.color=s.textColor;
     preview.style.backgroundColor=hexToRgba(s.backgroundColor,s.backgroundOpacity);preview.style.borderRadius=s.radius>=999?'999px':`${s.radius}px`;preview.style.textShadow=s.shadow?'0 1px 10px rgba(0,0,0,.65)':'none';
   }
@@ -277,28 +284,26 @@ function renderSignature(a,file){
  const hasMemory=Boolean(shownDate||place);
  const hasCapture=Boolean(camera||exposure.length);
 
- let mainHtml='';
- if(hasMemory){
-  mainHtml=`<div id="signature-date" class="signature-primary">${shownDate?`<strong>${esc(shownDate)}</strong><small>${esc(timeKind)}</small>`:''}${place?`<span id="signature-place" class="signature-place">${esc(place)}</span>`:''}</div>`;
- }else if(hasCapture){
-  mainHtml=`<div id="signature-camera" class="signature-primary"><strong>${esc(camera||'拍摄信息')}</strong>${exposure.length?`<span class="signature-inline">${exposure.map(esc).join(' · ')}</span>`:''}</div>`;
- }else{
-  mainHtml=`<div class="signature-primary"><strong>${esc(filename||'图片')}</strong><small>基础文件信息</small></div>`;
- }
- const captureBits=[];
- if(hasMemory&&camera)captureBits.push(camera);
- if(hasMemory&&exposure.length)captureBits.push(...exposure);
- if(!hasMemory&&hasCapture&&basics.length)captureBits.push(...basics);
- if(!hasMemory&&!hasCapture)captureBits.push(...basics);
- const fallbackBits=(hasMemory||hasCapture)?basics:[];
- const captureMarkup=captureBits.length?captureBits.map((v,i)=>`<span${hasMemory&&camera&&i===0?' id="signature-camera"':''}>${esc(v)}</span>`).join(''):'';
+ const mainValue=shownDate||place||(hasCapture?(camera||'拍摄信息'):(filename||'图片'));
+ const mainKind=shownDate?timeKind:(!hasMemory&&!hasCapture?'基础文件信息':(!shownDate&&place?'地点':''));
+ const placeMarkup=shownDate&&place?`<span id="signature-place" class="signature-place">${esc(place)}</span>`:'';
+ const inlineMarkup=!hasMemory&&hasCapture&&exposure.length?`<span id="signature-primary-inline" class="signature-inline">${exposure.map(esc).join(' · ')}</span>`:'';
+ const secondaryBits=hasMemory?[camera,...exposure].filter(Boolean):basics;
+ const rightBits=hasMemory?basics:[];
+ const secondaryMarkup=secondaryBits.map(v=>`<span>${esc(v)}</span>`).join('');
+ const rightMarkup=rightBits.join(' · ');
 
  signature.innerHTML=`
   <div class="signature-v2">
    <span class="signature-seal-v2" aria-hidden="true">拾</span>
-   ${mainHtml}
-   <div id="signature-settings" class="signature-secondary">${captureMarkup}</div>
-   ${fallbackBits.length?`<div id="signature-format" class="signature-file">${fallbackBits.map(esc).join(' · ')}</div>`:''}
+   <div id="signature-primary" class="signature-primary">
+    <strong id="signature-primary-value">${esc(mainValue)}</strong>
+    <small id="signature-primary-kind"${mainKind?'':' hidden'}>${esc(mainKind)}</small>
+    ${placeMarkup}
+    ${inlineMarkup}
+   </div>
+   <div id="signature-settings" class="signature-secondary"${secondaryBits.length?'':' hidden'}>${secondaryMarkup}</div>
+   <div id="signature-format" class="signature-file"${rightBits.length?'':' hidden'}>${esc(rightMarkup)}</div>
   </div>`;
  signature.hidden=false;
  signature.title=[shownDate&&`${timeKind}：${rawDate}`,place&&`地点：${place}`,camera&&`设备：${camera}`,exposure.join(' · '),basics.join(' · ')].filter(Boolean).join('\n');
@@ -328,7 +333,7 @@ function faceBox(face){
 }
 function faceLabelText(face, alias){
   if(face.name) return alias&&face.alias?(face.name+' / '+face.alias):face.name;
-  return '命名';
+  return '+';
 }
 function rectsOverlap(a,b,gap=6){
   return a.x<b.x+b.w+gap && a.x+a.w+gap>b.x && a.y<b.y+b.h+gap && a.y+a.h+gap>b.y;
@@ -337,6 +342,32 @@ function clampFaceLabel(rect, layerW, layerH, pad=6){
   rect.x=Math.min(Math.max(pad, rect.x), Math.max(pad, layerW-rect.w-pad));
   rect.y=Math.min(Math.max(pad, rect.y), Math.max(pad, layerH-rect.h-pad));
   return rect;
+}
+function faceLabelFits(rect, layerW, layerH, pad=4){
+  return rect.x>=pad && rect.y>=pad && rect.x+rect.w<=layerW-pad && rect.y+rect.h<=layerH-pad;
+}
+function faceLabelCandidate(item, side, vertical, width, height, offset, gap=6){
+  if(vertical){
+    return {
+      x:side==='left'?item.fx-width-gap:item.fx+item.fw+gap,
+      y:item.fy+item.fh/2-height/2+offset,
+      w:width,h:height,side,btn:item.btn
+    };
+  }
+  const y=side==='top'?item.fy-height-gap:item.fy+item.fh+gap;
+  return {x:item.cx-width/2,y:y+offset,w:width,h:height,side,btn:item.btn};
+}
+function faceLabelSide(items, ox, imgW){
+  const forced=viewer.faceLabelPosition;
+  if(forced==='left'||forced==='right')return forced;
+  const groupMin=Math.min(...items.map(item=>item.fx));
+  const groupMax=Math.max(...items.map(item=>item.fx+item.fw));
+  const leftSpace=Math.max(0,groupMin-ox);
+  const rightSpace=Math.max(0,ox+imgW-groupMax);
+  if(leftSpace!==rightSpace)return leftSpace>rightSpace?'left':'right';
+  const leftMin=Math.min(...items.map(item=>item.fx-ox));
+  const rightMin=Math.min(...items.map(item=>ox+imgW-item.fx-item.fw));
+  return leftMin>=rightMin?'left':'right';
 }
 function layoutFaceNameButtons(layer, faces, alias){
   const img=$('#detail-img');
@@ -356,38 +387,39 @@ function layoutFaceNameButtons(layer, faces, alias){
     const fh=box.height/box.h*imgH;
     items.push({face, named:Boolean(face.name), label:faceLabelText(face,alias), fx, fy, fw, fh, cx:fx+fw/2, cy:fy+fh/2});
   });
-  items.sort((a,b)=>a.cx-b.cx||a.cy-b.cy);
-  layer.innerHTML=items.map(it=>'<button type="button" class="face-name'+(it.named?'':' unnamed')+'" data-face-person="'+it.face.person_id+'">'+esc(it.label)+'</button>').join('');
+  items.sort((a,b)=>a.cy-b.cy||a.cx-b.cx);
+  layer.innerHTML=items.map(it=>`<button type="button" class="face-name${it.named?'':' unnamed'}" data-face-person="${it.face.person_id}"${it.named?'':' title="命名人物" aria-label="命名人物"'}>${esc(it.label)}</button>`).join('');
   const buttons=[...layer.querySelectorAll('.face-name')];
   const vertical=viewer.faceVertical!==false;
   const placed=[];
-  const gap=4;
-  const avgCx=items.reduce((s,it)=>s+it.cx,0)/Math.max(1,items.length);
-  const side = avgCx < (ox + imgW/2) ? 'right' : 'left';
+  const gap=6;
+  const preferredSide=faceLabelSide(items,ox,imgW);
+  const offsets=[0,-12,12,-24,24,-36,36];
+  const faceRects=items.map(item=>({x:item.fx,y:item.fy,w:item.fw,h:item.fh}));
   buttons.forEach((btn,i)=>{
     const it=items[i];
+    it.btn=btn;
     const w=Math.max(18, btn.offsetWidth);
     const h=Math.max(18, btn.offsetHeight);
-    let x,y;
-    if(vertical){
-      const tuck=Math.min(8, Math.round(w*0.28));
-      x = side==='left' ? it.fx - w + tuck : it.fx + it.fw - tuck;
-      y = it.fy + it.fh*0.16;
-    }else{
-      x = it.cx - w/2;
-      y = it.fy + it.fh*0.10;
+    const sides=vertical?[preferredSide,preferredSide==='left'?'right':'left']:['top','bottom'];
+    let chosen=null;
+    for(const side of sides){
+      for(const offset of offsets){
+        const candidate=faceLabelCandidate(it,side,vertical,w,h,offset,gap);
+        const hitsLabel=placed.some(other=>rectsOverlap(candidate,other,3));
+        const hitsFace=faceRects.some((faceRect,faceIndex)=>faceIndex!==i&&rectsOverlap(candidate,faceRect,3));
+        if(faceLabelFits(candidate,layerW,layerH,4)&&!hitsLabel&&!hitsFace){chosen=candidate;break;}
+      }
+      if(chosen)break;
     }
-    const rect=clampFaceLabel({x,y,w,h,side,btn}, layerW, layerH);
-    placed.push(rect);
-    btn.classList.add(side);
+    if(!chosen){
+      chosen=faceLabelCandidate(it,sides[0],vertical,w,h,0,gap);
+      clampFaceLabel(chosen,layerW,layerH,4);
+    }
+    placed.push(chosen);
+    btn.classList.add(chosen.side);
+    if(!it.named)btn.setAttribute('title','命名人物');
   });
-  placed.sort((a,b)=> (a.x-b.x) || (a.y-b.y));
-  for(let i=1;i<placed.length;i++){
-    const prev=placed[i-1], cur=placed[i];
-    if(!rectsOverlap(prev,cur,gap)) continue;
-    cur.y = Math.max(cur.y, prev.y + prev.h + gap);
-    clampFaceLabel(cur, layerW, layerH);
-  }
   placed.forEach(rect=>{
     rect.btn.style.left=Math.round(rect.x)+'px';
     rect.btn.style.top=Math.round(rect.y)+'px';

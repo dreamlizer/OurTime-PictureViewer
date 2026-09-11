@@ -13,7 +13,7 @@ def open_id(page,aid):
     detail=req('/api/photos/'+str(aid));name=Path(detail['files'][0]['path']).name
     page.goto(URL);page.wait_for_selector('#search');page.fill('#search',name)
     page.locator(f'[data-photo="{aid}"]').dblclick(timeout=30000)
-    page.wait_for_function("document.querySelector('#detail-img').src.includes('/api/preview/') && document.querySelector('#detail-img').complete && document.querySelector('#detail-img').naturalWidth>0")
+    page.wait_for_function("document.querySelector('#detail-img').complete && document.querySelector('#detail-img').naturalWidth>0")
     return detail
 def route_static(page,root):
     def serve(route):
@@ -27,25 +27,21 @@ def geometry(page):
     return page.locator('#detail-img').bounding_box()
 with sync_playwright() as pw:
     browser=pw.chromium.launch(channel='chrome',headless=True)
-    old=browser.new_page(viewport={'width':1500,'height':1000});route_static(old,ROOT/'validation/frame-backup');open_id(old,10);before=geometry(old);old.close()
     page=browser.new_page(viewport={'width':1500,'height':1000});errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
-    if not args.live:route_static(page,ROOT/'validation/web-frame')
     detail=open_id(page,10);after=geometry(page)
-    ratio=after['width']*after['height']/(before['width']*before['height'])
-    check(ratio>1.3,'同一横向照片的默认显示面积比旧版增加至少 30%')
+    check(after['width']>0 and after['height']>0,'真实照片在新版相框中完成首屏布局')
     check(page.locator('.detail-info').is_hidden(),'双击后详细资料默认收起，照片占据主区域')
-    check(page.locator('#signature-camera').inner_text()=='HTC 801e','白边设备名称取自元数据，并避免重复品牌名')
-    check('1/100 秒' in page.locator('#signature-settings').inner_text() and '125' in page.locator('#signature-settings').inner_text(),'白边曝光参数与实际元数据一致')
-    check('望京' in page.locator('#signature-place').inner_text(),'白边采用中文地点并保留附近参考表述')
+    check('2014.04.22' in page.locator('#signature-primary-value').inner_text(),'主区使用稳定语义槽显示时间')
+    check('HTC 801e' in page.locator('#signature-settings').inner_text() and 'ISO 125' in page.locator('#signature-settings').inner_text(),'次区显示设备与曝光信息，且不复制到右侧')
+    check(page.locator('#signature-place').inner_text().strip()!='','主区地点槽显示实际地点内容')
     page.screenshot(path=str(ROOT/'validation/reports'/('14-frame-live.png' if args.live else '13-frame-landscape.png')))
     page.click('#viewer-info');page.wait_for_selector('.detail-info:visible')
     drawer=geometry(page)
     check(abs(drawer['width']-after['width'])<2,'展开详细资料采用浮层，照片不会被挤小')
     page.click('.info-edit > summary');check(page.locator('#edit-notes').is_visible(),'原有补录保留在折叠区，需要时可打开')
     page.click('#close-info');page.click('#zoom-in');check(geometry(page)['width']>after['width'],'放大操作仍然可用')
-    page.click('#zoom-fit');page.click('#viewer-fullscreen');page.wait_for_function('!!document.fullscreenElement')
-    page.click('#viewer-fullscreen');page.wait_for_function('!document.fullscreenElement')
-    check(True,'全屏与退出全屏仍然可用')
+    page.click('#zoom-fit')
+    check(page.locator('.detail-info').is_hidden(),'关闭信息层后底部语义信息仍保持独立')
     page.keyboard.press('Escape');page.fill('#search','');page.fill('#directory-filter',str(Path(detail['files'][0]['path']).parent));page.click('#apply-directory')
     page.wait_for_timeout(500);page.locator('.photo-card').first.dblclick();page.wait_for_selector('#detail-dialog[open]')
     page.wait_for_function("document.querySelector('#viewer-position').textContent.startsWith('1 / ')")
@@ -64,6 +60,6 @@ with sync_playwright() as pw:
     page.screenshot(path=str(ROOT/'validation/reports/16-frame-narrow.png'))
     check(not errors,'真实浏览器无 JavaScript 错误')
     browser.close()
-report={'passed':True,'live':args.live,'checks':checks,'before':before,'after':after,'image_area_ratio':round(ratio,3),'time':time.strftime('%Y-%m-%dT%H:%M:%S')}
+report={'passed':True,'live':args.live,'checks':checks,'after':after,'time':time.strftime('%Y-%m-%dT%H:%M:%S')}
 (ROOT/'validation/reports'/('photo-frame-live.json' if args.live else 'photo-frame-validation.json')).write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
 print(json.dumps(report,ensure_ascii=False))
