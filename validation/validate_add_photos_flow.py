@@ -35,6 +35,17 @@ def main() -> int:
         check(page.locator(".breadcrumb").is_hidden() and page.locator("#home-years-link").is_hidden(), "首页无重复面包屑和按年份入口")
         order = page.locator("[data-ot]").evaluate_all("els => els.filter(e => ['search','filters','select','sort'].includes(e.dataset.ot)).map(e => e.dataset.ot)")
         check(order == ["search", "filters", "select", "sort"], "首页工具栏顺序为搜索、筛选、选择、排序")
+        for width in (1440, 1920):
+            page.set_viewport_size({"width": width, "height": 1000})
+            page.wait_for_timeout(150)
+            boxes = {name: page.locator(f'[data-ot="{name}"]').bounding_box() for name in ("search", "filters", "select", "sort")}
+            check(boxes["search"]["x"] < boxes["filters"]["x"] < boxes["select"]["x"] < boxes["sort"]["x"], f"{width}px 工具栏左右顺序正确")
+            check(boxes["select"]["x"] - (boxes["filters"]["x"] + boxes["filters"]["width"]) > 100, f"{width}px 左右工具组之间有伸展空间")
+            check(boxes["sort"]["x"] - (boxes["select"]["x"] + boxes["select"]["width"]) < 20, f"{width}px 选择与排序相邻")
+        page.set_viewport_size({"width": 1440, "height": 1000})
+        page.locator('[data-jump="all"]').click()
+        page.wait_for_function("window.__ourTimeApp?.state.view === 'timeline'")
+        check(page.evaluate("window.__ourTimeApp.state.view") == "timeline", "全部照片入口统一进入 timeline")
         status = page.request.get(URL + "/api/status").json()
         expected_groups = str((status.get("stats") or {}).get("group_photos", "")).replace(",", "")
         page.wait_for_function("expected => document.querySelector('#groups-count')?.textContent.replaceAll(',', '') === expected", arg=expected_groups, timeout=10000)

@@ -103,7 +103,7 @@ function streamPaint(){
  const stats=state.status&&state.status.stats;
  const ready=Boolean(stats);
  const knownEmpty=ready&&Number(stats.assets||0)===0;
- const showEmpty=knownEmpty&&state.view==='all'&&!state.q&&!state.person&&!state.directory&&!loading&&!waterfall.total;
+ const showEmpty=knownEmpty&&state.view==='timeline'&&!state.q&&!state.person&&!state.directory&&!loading&&!waterfall.total;
  $('#empty').hidden=!showEmpty;
  $('#no-results').hidden=true;
  if(!ready||loading)$('#stream-status').textContent='正在加载照片';

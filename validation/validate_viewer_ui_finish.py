@@ -150,6 +150,25 @@ def main():
         page.locator('[data-close="detail-dialog"]').click()
         page.wait_for_function("!document.querySelector('#detail-dialog').open")
         check(True, '加载中状态下关闭查看器仍然有效')
+        page.goto(URL)
+        page.wait_for_selector('#photo-grid [data-photo]', timeout=30000)
+        page.evaluate("window.scrollTo(0, Math.min(1400, document.documentElement.scrollHeight - window.innerHeight))")
+        page.wait_for_timeout(150)
+        return_scroll = page.evaluate('window.scrollY')
+        visible_index = page.evaluate(
+            """() => [...document.querySelectorAll('#photo-grid [data-photo]')].findIndex(card => {
+              const rect = card.getBoundingClientRect();
+              return rect.top >= 0 && rect.bottom <= window.innerHeight;
+            })"""
+        )
+        check(visible_index >= 0, '滚动位置处存在可点击的照片卡片')
+        page.locator('#photo-grid [data-photo]').nth(visible_index).click(timeout=30000)
+        page.wait_for_function("document.querySelector('#detail-dialog').open && document.querySelector('#detail-img').complete")
+        page.locator('[data-close="detail-dialog"]').click()
+        page.wait_for_function("!document.querySelector('#detail-dialog').open")
+        page.wait_for_timeout(100)
+        restored_scroll = page.evaluate('window.scrollY')
+        check(abs(restored_scroll - return_scroll) <= 4, f'关闭查看器后恢复原照片墙位置（{return_scroll} → {restored_scroll}）')
         open_photo(page, ids['single'], original_fails=True)
         check('/api/preview/' in page.locator('#detail-img').get_attribute('src'), '原图失败时 preview fallback 正常显示')
         open_photo(page, ids['group'])

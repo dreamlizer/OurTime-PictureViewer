@@ -29,9 +29,15 @@
   fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round;
 }
 .ot-home-ui .ot-home-query {
-  display: flex; flex-wrap: nowrap; align-items: center; gap: 10px;
+  display: flex; flex-wrap: nowrap; align-items: center; justify-content: space-between; gap: 16px;
   padding: 0; margin: 0; border: 0; background: transparent;
 }
+.ot-home-ui .ot-home-query-left,
+.ot-home-ui .ot-home-query-right {
+  display: flex; align-items: center; gap: 10px; min-width: 0;
+}
+.ot-home-ui .ot-home-query-left { flex: 1 1 auto; }
+.ot-home-ui .ot-home-query-right { flex: 0 0 auto; margin-left: auto; }
 .ot-home-ui .ot-home-search {
   display: flex; align-items: center; gap: 10px;
   flex: 0 1 620px; max-width: 620px; min-width: 170px;
@@ -166,8 +172,9 @@
 .ot-home-filter-dialog .ot-home-primary:hover:not(:disabled) { color: #fff; background: #274c3d; border-color: #274c3d; }
 @media (max-width: 720px) {
   .ot-home-ui .ot-home-query { flex-wrap: wrap; gap: 8px; }
-  .ot-home-ui .ot-home-search { flex-basis: 100%; max-width: none; }
-  .ot-home-ui .ot-home-sort { margin-left: auto; }
+  .ot-home-ui .ot-home-query-left { flex: 1 1 100%; }
+  .ot-home-ui .ot-home-query-right { margin-left: auto; }
+  .ot-home-ui .ot-home-search { flex: 1 1 auto; max-width: none; }
   .ot-home-ui .ot-home-selected-count { flex-basis: 100%; margin-bottom: 2px; }
   .ot-home-ui .ot-home-batch .ot-home-spacer { display: none; }
   .ot-home-ui .ot-home-batch { gap: 6px; }

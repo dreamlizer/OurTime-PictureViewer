@@ -54,19 +54,23 @@
     // Only constant, owned markup is assigned with innerHTML. User data uses textContent.
     root.innerHTML = `
       <form class="ot-home-query" role="search" aria-label="搜索照片">
-        <label class="ot-home-search">
-          <span class="ot-home-icon">${ICONS.search}</span>
-          <span class="ot-home-sr-only">搜索照片</span>
-          <input data-ot="search" type="search" placeholder="搜索照片…" autocomplete="off"
-            title="按现有关键词搜索；精确人物和文件夹条件请使用筛选">
-        </label>
-        <button data-ot="filters" class="ot-home-button" type="button" aria-haspopup="dialog" aria-expanded="false">
-          ${ICONS.filter}<span>筛选</span><span data-ot="badge" class="ot-home-badge" hidden></span>
-        </button>
-        <button data-ot="select" class="ot-home-button" type="button">${ICONS.select}<span>选择</span></button>
-        <label class="ot-home-sort"><span class="ot-home-sr-only">照片排序</span>
-          <select data-ot="sort" aria-label="照片排序"></select>
-        </label>
+        <span class="ot-home-query-left">
+          <label class="ot-home-search">
+            <span class="ot-home-icon">${ICONS.search}</span>
+            <span class="ot-home-sr-only">搜索照片</span>
+            <input data-ot="search" type="search" placeholder="搜索照片…" autocomplete="off"
+              title="按现有关键词搜索；精确人物和文件夹条件请使用筛选">
+          </label>
+          <button data-ot="filters" class="ot-home-button" type="button" aria-haspopup="dialog" aria-expanded="false">
+            ${ICONS.filter}<span>筛选</span><span data-ot="badge" class="ot-home-badge" hidden></span>
+          </button>
+        </span>
+        <span class="ot-home-query-right">
+          <button data-ot="select" class="ot-home-button" type="button">${ICONS.select}<span>选择</span></button>
+          <label class="ot-home-sort"><span class="ot-home-sr-only">照片排序</span>
+            <select data-ot="sort" aria-label="照片排序"></select>
+          </label>
+        </span>
       </form>
       <div data-ot="batch" class="ot-home-batch" role="group" aria-label="批量选择操作" hidden>
         <strong data-ot="selected-count" class="ot-home-selected-count" role="status" aria-live="polite"></strong>

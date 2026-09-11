@@ -79,7 +79,7 @@ try:
         check(thumb(duplicate).exists(),'只排除一个副本目录，另一个目录仍保留时不删共用缓存')
         check(req('/api/status')['stats']['assets']==17,'目录排除不误排其他目录里的保留副本')
         page.screenshot(path=str(REPORT/'07-exclusion-rules.png'),full_page=True,animations='disabled')
-        page.click('[data-view="all"]');page.fill('#directory-filter',str(OTHER));page.click('#apply-directory')
+        page.click('[data-view="timeline"]');page.fill('#directory-filter',str(OTHER));page.click('#apply-directory')
         page.wait_for_function("document.querySelector('#result-count').textContent==='17 张'")
         page.click('#select-mode');page.click(f'[data-photo="{duplicate["id"]}"]');page.click('#batch-exclude');page.click('#confirm-exclusion')
         page.wait_for_function("!document.querySelector('#exclude-dialog').open")

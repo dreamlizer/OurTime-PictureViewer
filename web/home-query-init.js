@@ -26,7 +26,7 @@
   const legacy = [collectionHeading, ...['.filters', '.directory-filter', '#batch-bar', '#timeline-tools', '.browse-options']
     .map(selector => document.querySelector(selector))].filter(Boolean);
   const originalHidden = new Map(legacy.map(element => [element, element.hidden]));
-  const isHomeView = source => source && (source.view === 'timeline' || source.view === 'all');
+  const isHomeView = source => source && source.view === 'timeline';
   function syncLegacyControls() {
     const active = isHomeView(app.state);
     if (homeYearsLink) homeYearsLink.hidden = true;

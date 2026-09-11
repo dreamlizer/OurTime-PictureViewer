@@ -67,7 +67,7 @@ def main():
         # responsive
         for width, name in [(768, '768-library.png'), (390, '390-library.png')]:
             page.set_viewport_size({'width': width, 'height': 800})
-            page.locator('[data-view="all"]').click()
+            page.locator('[data-view="timeline"]').click()
             page.wait_for_timeout(400)
             page.screenshot(path=str(SHOTS / name), full_page=True)
         undefined = page.locator('text=undefined')

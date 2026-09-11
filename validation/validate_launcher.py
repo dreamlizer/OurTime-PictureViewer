@@ -18,7 +18,7 @@ with sync_playwright() as pw:
     assert page.title()=='拾光 · 本地照片资料库'
     page.click('#add-folder');page.wait_for_selector('#start-scan')
     assert 'ExifTool 已就绪' in page.locator('#capabilities').inner_text()
-    page.click('[data-view="all"]');page.wait_for_selector('#empty:not([hidden])')
+    page.click('[data-view="timeline"]');page.wait_for_selector('#home-query-host .ot-home-ui')
     page.screenshot(path=str(root/'validation/reports/06-delivered-entry.png'),full_page=True,animations='disabled')
     assert not errors
     browser.close()
