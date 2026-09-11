@@ -1,0 +1,158 @@
+{
+  "task_id": "PHOTO-REPAIR-20260910",
+  "captured_at": "2026-09-10T14:26:53+08:00",
+  "workspace": "G:\\Trea\\照片浏览器",
+  "purpose": "Source and task-spec baseline for handoff; detect concurrent changes, never automatically restore over current work. No user photo paths or database contents.",
+  "implementation_status": "NOT_STARTED_BY_TASK_AUTHOR",
+  "audit_reproduction": "Previously reproduced with in-memory synthetic SQLite/Node fixtures; current writing turn rechecked source anchors only.",
+  "commands_status": "Existing script files inspected, not executed during task-card authoring; repair_* commands specified in card are to be implemented.",
+  "files": [
+    {
+      "path": "AGENTS.md",
+      "sha256": "ea7e34b597bc6d94e247359e179e52544ee63e4934faa640bfcc4f109279e060",
+      "bytes": 3757,
+      "lines": 40,
+      "modified_at": "2026-09-10T08:53:50+08:00"
+    },
+    {
+      "path": "README.md",
+      "sha256": "7172bb22524779077fbe1e2339d6638adfdd803e552c9829f83fcdb94b282057",
+      "bytes": 16733,
+      "lines": 129,
+      "modified_at": "2026-09-10T00:57:23+08:00"
+    },
+    {
+      "path": "app.py",
+      "sha256": "fd35f5acb9573ea853200241adf937fd95b1755ca39a20eb61882674efb2f776",
+      "bytes": 82675,
+      "lines": 1527,
+      "modified_at": "2026-09-10T01:03:24+08:00"
+    },
+    {
+      "path": "geo_labels.py",
+      "sha256": "24742fd0fa1fd48da6907efe8eebcc86e8b2c24f50c5de2abb0ce0f2c37c60ee",
+      "bytes": 10069,
+      "lines": 198,
+      "modified_at": "2026-09-08T23:02:05+08:00"
+    },
+    {
+      "path": "metadata_reader.py",
+      "sha256": "dcb656176a74db3ddeb2d8b2c34a162411eec9da4ad5ab6b469eee169f43cfcb",
+      "bytes": 4093,
+      "lines": 116,
+      "modified_at": "2026-09-07T17:54:58+08:00"
+    },
+    {
+      "path": "object_labels.py",
+      "sha256": "a2c19f7f81290d24b41aa4decb2302df5b6f718187e984136cb4dd3144b4395f",
+      "bytes": 5293,
+      "lines": 133,
+      "modified_at": "2026-09-10T07:02:31+08:00"
+    },
+    {
+      "path": "requirements.txt",
+      "sha256": "28f481b42711c13f9e5fbead23bbdaef61d7b67f7e8c59a38a103db6f354d5c1",
+      "bytes": 178,
+      "lines": 9,
+      "modified_at": "2026-09-07T15:36:04+08:00"
+    },
+    {
+      "path": "start.ps1",
+      "sha256": "75662b813bd71c8dfcfbd568e21b1d89ec6ee3e2e0a8a8149684496db63401c3",
+      "bytes": 1907,
+      "lines": 40,
+      "modified_at": "2026-09-07T18:10:24+08:00"
+    },
+    {
+      "path": "stop.ps1",
+      "sha256": "3a176824e045c1536e406d34e44ff44441a9d55a9f1ef8295d2e9d7e34b582c2",
+      "bytes": 1693,
+      "lines": 27,
+      "modified_at": "2026-09-07T18:10:24+08:00"
+    },
+    {
+      "path": "web/index.html",
+      "sha256": "29282fb47558b23ca549033851fcd3b94f2429cbe6a6f96631f745aca4efabee",
+      "bytes": 28499,
+      "lines": 97,
+      "modified_at": "2026-09-10T08:53:50+08:00"
+    },
+    {
+      "path": "web/app.js",
+      "sha256": "7816813a6073336b731a2b50aca15bf6cb51b147d255af235b849423eea371b0",
+      "bytes": 55044,
+      "lines": 332,
+      "modified_at": "2026-09-10T08:53:50+08:00"
+    },
+    {
+      "path": "web/viewer.js",
+      "sha256": "82c60aa9c76b32c9005fca85719f10deb0515813bf80570eb94942c5ce2a457a",
+      "bytes": 17552,
+      "lines": 217,
+      "modified_at": "2026-09-09T17:57:19+08:00"
+    },
+    {
+      "path": "web/waterfall.js",
+      "sha256": "dc47f36a7a5efb885719d6dfd91657787764f4d5719f2c00c881a49f92c89365",
+      "bytes": 10652,
+      "lines": 129,
+      "modified_at": "2026-09-09T14:31:42+08:00"
+    },
+    {
+      "path": "web/style.css",
+      "sha256": "93c10bf1ef0625090d52011c7e9600bd68233b9ad73d8bcad940070799bcad7d",
+      "bytes": 37879,
+      "lines": 187,
+      "modified_at": "2026-09-09T23:37:24+08:00"
+    },
+    {
+      "path": "web/appearance.css",
+      "sha256": "fb580f26cffe65b1d58a81bd728c967af7b9ed35f777190cdda2f6f5bb05160e",
+      "bytes": 36117,
+      "lines": 531,
+      "modified_at": "2026-09-10T07:02:59+08:00"
+    },
+    {
+      "path": "validation/smoke.py",
+      "sha256": "a96ae3f5b262f83477e5533ba7f4199651e4217e1c5cb7a5d3f7c27babe5c4fb",
+      "bytes": 10116,
+      "lines": 229,
+      "modified_at": "2026-09-10T01:22:40+08:00"
+    },
+    {
+      "path": "validation/validate.py",
+      "sha256": "0b9609c5fa0521e1b4f584daa2f509b2766349b2d9ffa166ec2b6d4c9925d248",
+      "bytes": 14301,
+      "lines": 154,
+      "modified_at": "2026-09-09T11:58:16+08:00"
+    },
+    {
+      "path": "validation/validate_browse.py",
+      "sha256": "42efcbe878aac7f6312349b85ca559dd199ee6084a55c09036d16ac0d11fedf1",
+      "bytes": 11104,
+      "lines": 121,
+      "modified_at": "2026-09-07T18:38:22+08:00"
+    },
+    {
+      "path": "validation/validate_upgrade.py",
+      "sha256": "bd647c5f9bf642b251c35aba4280ced3556bf13a532fe276536ef96c510a7209",
+      "bytes": 10377,
+      "lines": 137,
+      "modified_at": "2026-09-07T18:38:22+08:00"
+    },
+    {
+      "path": "docs/修复任务卡-20260910.md",
+      "sha256": "b50bb10c652821a21c1806ff69a7fe3e3045f83bb3ae5f319c7dfaa4b8af3832",
+      "bytes": 39903,
+      "lines": 405,
+      "modified_at": "2026-09-10T14:26:52+08:00"
+    },
+    {
+      "path": "docs/修复完成报告-模板.md",
+      "sha256": "572b28064a73926a2e51827204306c096e9fa6d33042b67af1104477d1389c58",
+      "bytes": 6011,
+      "lines": 136,
+      "modified_at": "2026-09-10T14:25:58+08:00"
+    }
+  ]
+}

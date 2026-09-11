@@ -1,0 +1,12 @@
+data/
+runtime/
+.venv/
+__pycache__/
+*.pyc
+validation/work/
+validation/reports/
+validation/*backup*/
+validation/web-*/
+tools/_*
+侧边栏按钮/
+显示人名/
