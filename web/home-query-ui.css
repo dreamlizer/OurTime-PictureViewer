@@ -183,3 +183,16 @@
 @media (prefers-reduced-motion: reduce) {
   .ot-home-ui *, .ot-home-filter-dialog * { scroll-behavior: auto; }
 }
+
+/* Homepage chrome: query controls own the toolbar row; chips add height only when present. */
+body.is-home-view .topbar .breadcrumb { display: none; }
+body.is-home-view .topbar { justify-content: flex-end; }
+body.is-home-view .masthead-title { flex: 1 1 auto; }
+body.is-home-view #home-query-host { flex: 1 1 100%; }
+body.is-home-view .view-chrome .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; }
+body.is-home-view .view-chrome .toolbar > .section-heading { display: none; }
+.ot-home-ui .ot-home-query { width: 100%; }
+.ot-home-ui .ot-home-query .ot-home-search { flex: 0 1 600px; }
+.ot-home-ui .ot-home-query .ot-home-spacer { display: block; }
+.ot-home-ui .ot-home-chips:empty { display: none; }
+.ot-home-ui .ot-home-chips { min-height: 0; }

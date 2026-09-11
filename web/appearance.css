@@ -275,6 +275,41 @@ body:has(#objects-view:not([hidden])) #library-view { display: none; }
 .job-metrics b { font: 600 24px/1.5 var(--sans); font-variant-numeric: tabular-nums; }
 .job-metrics > span, .path-line, .error-row { font-size: 12px; color: var(--muted); }
 #job-details { overflow-wrap: anywhere; }
+
+/* Add photos is intentionally one task-focused card; keep the existing scan job controls below it. */
+.add-photos-card { width: min(900px, 100%); margin: 0 auto 20px; padding: clamp(24px, 5vw, 42px); }
+.add-photos-card h2 { margin: 3px 0 7px; }
+.folder-picker-card { display: flex; align-items: center; gap: 16px; width: 100%; min-height: 128px; margin: 24px 0 14px; padding: 22px 24px; border: 1px dashed #a9bcae; border-radius: 12px; background: #f5f8f4; color: var(--ink); text-align: left; cursor: pointer; }
+.folder-picker-card:hover { border-color: var(--green); background: #edf5ef; }
+.folder-picker-icon { display: grid; place-items: center; flex: 0 0 44px; width: 44px; height: 44px; border: 1px solid #b7cabd; border-radius: 10px; color: var(--green); font-size: 25px; }
+.folder-picker-card b, .folder-picker-card small { display: block; }
+.folder-picker-card small { margin-top: 4px; color: var(--muted); font-size: 12px; }
+.scan-root-list { display: grid; gap: 7px; margin: 12px 0 4px; }
+.scan-root { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; padding: 9px 11px; border: 1px solid var(--line); border-radius: 7px; background: #fff; }
+.scan-root span { min-width: 0; overflow-wrap: anywhere; font-size: 12px; }
+.scan-root .text-button { flex: 0 0 auto; padding: 3px 7px; font-size: 18px; line-height: 1; }
+.scan-add-folder { margin-top: 3px; }
+.add-photos-submit { width: 100%; margin-top: 22px; }
+.add-photos-submit:disabled { opacity: .45; }
+.add-photos-card .footnote { margin-bottom: 0; text-align: center; }
+.scan-progress { width: min(900px, 100%); margin: 0 auto 20px; }
+.scan-progress-summary { display: flex; flex-wrap: wrap; gap: 22px; margin: 18px 0 8px; color: var(--muted); font-size: 13px; }
+.scan-progress-summary b { color: var(--ink); font-size: 19px; font-variant-numeric: tabular-nums; }
+.scan-history { width: min(900px, 100%); margin: 0 auto 20px; padding: 0 20px; }
+.scan-history > summary { padding: 14px 0; }
+.scan-history[open] > summary { border-bottom: 1px solid var(--line); }
+.scan-history #job-details { padding: 14px 0; }
+.scan-history #error-details { margin-bottom: 14px; }
+body.is-add-photos-view .stats, body.is-add-photos-view #add-folder { display: none; }
+body.is-add-photos-view .masthead { min-height: 54px; padding-bottom: 10px; }
+body.is-add-photos-view .masthead-title h1 { font-size: 20px; }
+body.is-add-photos-view .masthead-title .text-button { display: none; }
+body.is-add-photos-view .top-actions .edition { display: none; }
+@media (max-width: 620px) {
+  .add-photos-card { padding: 24px 18px; }
+  .folder-picker-card { min-height: 112px; padding: 18px; }
+  .scan-progress-summary { gap: 13px 18px; }
+}
 .error-row b { color: var(--danger); }
 details { border-color: var(--line); font-size: 13px; }
 summary { padding: 7px 2px; min-height: 36px; color: var(--green); font-size: 13px; }

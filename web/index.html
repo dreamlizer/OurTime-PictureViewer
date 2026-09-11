@@ -12,6 +12,7 @@
   <button data-view="passersby" class="nav" aria-label="路人" title="路人"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true" class="ui-icon"><circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 9-7m3 5h6"/></svg></span><span class="nav-text">路人</span><b id="passersby-count">0</b></button>
   <button data-view="places" class="nav" aria-label="按地点" title="按地点"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true" class="ui-icon"><path d="M19 10c0 5-7 11-7 11S5 15 5 10a7 7 0 1 1 14 0Z"/><circle cx="12" cy="10" r="2.5"/></svg></span><span class="nav-text">按地点</span></button>
   <button data-view="groups" class="nav" aria-label="合影" title="合影"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true" class="ui-icon"><circle cx="9" cy="8" r="3"/><path d="M2 21v-3a7 7 0 0 1 14 0v3M16 5a3 3 0 0 1 0 6m2 3a6 6 0 0 1 4 6"/></svg></span><span class="nav-text">合影</span><b id="groups-count">0</b></button>
+  <button data-view="years" class="nav" aria-label="按年份查看" title="按年份查看"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true" class="ui-icon"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M8 3v4m8-4v4M4 10h16"/></svg></span><span class="nav-text">按年份查看</span></button>
   <button data-view="objects" class="nav" hidden aria-label="物体" title="物体"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true" class="ui-icon"><path d="m12 3 9 5v8l-9 5-9-5V8Zm0 10v8M3 8l9 5 9-5M8 5l9 5"/></svg></span><span class="nav-text">物体</span><b id="objects-count">0</b></button>
   <div class="nav-label nav-section">整理</div>
   <button data-view="uncertain" class="nav" aria-label="待确认时间" title="待确认时间"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true" class="ui-icon"><circle cx="12" cy="12" r="9"/><path d="M10 8a2.5 2.5 0 1 1 4 2c-1 1-2 1-2 3m0 3v.1"/></svg></span><span class="nav-text">待确认时间</span></button>
@@ -22,7 +23,7 @@
  </nav>
  <div class="nav-label lower">管理</div>
  <nav aria-label="资料库管理">
-  <button data-view="scan" class="nav" aria-label="扫描与入库" title="扫描与入库"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true" class="ui-icon"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m8 0h5v-5M7 12h10m-5-5v10"/></svg></span><span class="nav-text">扫描与入库</span><i id="running-dot"></i></button>
+  <button data-view="scan" class="nav" aria-label="添加照片" title="添加照片"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true" class="ui-icon"><path d="M12 5v14M5 12h14"/></svg></span><span class="nav-text">添加照片</span><i id="running-dot"></i></button>
   <button data-view="errors" class="nav" aria-label="读取问题" title="读取问题"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true" class="ui-icon"><path d="m12 3 10 18H2Zm0 6v5m0 3v.1"/></svg></span><span class="nav-text">读取问题</span></button>
   <button data-view="missing" class="nav" aria-label="原文件缺失" title="原文件缺失"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true" class="ui-icon"><path d="M3 8V5h7l2 3h9v12H3V8Zm6 4 6 5m0-5-6 5"/></svg></span><span class="nav-text">原文件缺失</span></button>
   <button id="backup-button" class="nav" aria-label="备份资料库" title="备份资料库"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true" class="ui-icon"><path d="M4 3h13l4 4v14H3V3Zm3 0v7h9V3M7 21v-7h10v7"/></svg></span><span class="nav-text">备份资料库</span></button>
@@ -30,8 +31,8 @@
  <div class="local-note"><span class="dot"></span> 仅在本机运行<p>照片留在原处<br>每一份记忆，都有来处。</p><a href="/api/export" download>导出资料清单 ↗</a></div>
 </aside>
 <main>
- <header class="topbar"><div class="breadcrumb">我的照片 <span>/</span> <span id="breadcrumb">资料库</span></div><div class="top-actions"><span class="edition">本地版 / 03</span><button class="primary small" id="add-folder">＋ 添加照片目录</button></div></header>
- <section class="masthead"><div class="masthead-title"><h1 id="page-title">散落的照片，重新相遇。</h1><button id="home-years-link" class="text-button" type="button" hidden>按年份查看</button></div><div class="stats" id="stats"><button data-jump="all"><span>档案</span><strong id="s-assets">0</strong></button><button data-jump="people"><span>人物</span><strong id="s-people">0</strong></button><button data-jump="uncertain"><span>待确认</span><strong id="s-uncertain">0</strong></button><button data-jump="duplicates"><span>重复</span><strong id="s-duplicates">0</strong></button></div></section>
+ <header class="topbar"><div class="breadcrumb">我的照片 <span>/</span> <span id="breadcrumb">全部照片</span></div><div class="top-actions"><span class="edition">本地版 / 03</span><button class="primary small" id="add-folder">＋ 添加照片</button></div></header>
+ <section class="masthead"><div class="masthead-title"><h1 id="page-title">全部照片</h1><button id="home-years-link" class="text-button" type="button" hidden>按年份查看</button></div><div class="stats" id="stats"><button data-jump="all"><span>档案</span><strong id="s-assets">0</strong></button><button data-jump="people"><span>人物</span><strong id="s-people">0</strong></button><button data-jump="uncertain"><span>待确认</span><strong id="s-uncertain">0</strong></button><button data-jump="duplicates"><span>重复</span><strong id="s-duplicates">0</strong></button></div></section>
  <section id="job-banner" class="job-banner" hidden></section>
   <section id="folders-view" hidden>
   <div class="view-chrome"><div class="toolbar"><div class="section-heading"><h2>文件夹</h2><span id="folders-total"></span></div></div>
@@ -79,10 +80,24 @@
   <div id="places-list" class="facet-list places-side"></div><div id="places-stream-status" class="stream-status">正在加载地点…</div>
  </section>
 <section id="scan-view" hidden>
-  <div class="scan-layout"><div class="panel"><div class="panel-number">扫描设置</div><h2>照片在哪里？</h2><p class="muted">输入本地文件夹路径，每行一个。会包含其子文件夹。</p><label for="scan-roots">照片目录</label><textarea id="scan-roots" rows="4" placeholder="例如：G:\\我的照片&#10;D:\\相机备份"></textarea><div class="inline-actions"><button id="choose-folder" class="secondary">选择文件夹…</button><button id="all-drives" class="text-button">填入除 C 盘外的磁盘</button></div><div class="scan-options"><label for="scan-workers">扫描速度 <select id="scan-workers"><option value="1">1 路 · 省资源</option><option value="2" selected>2 路 · 均衡</option><option value="4">4 路 · 加速</option></select><small id="worker-hint">元数据工具常驻运行；并发数越高，处理器与磁盘负载越高。</small></label><label><input id="with-faces" type="checkbox"> 同时检测人脸并生成候选分组 <small>优先使用本机显卡，已完成的人脸不会重算；也可之后重扫补做</small></label><label><input id="include-system" type="checkbox"> 包含系统、软件及缓存目录 <small>默认略过，避免大量图标和程序素材进入资料库</small></label></div><button id="start-scan" class="primary">开始扫描 →</button><div class="inline-actions" hidden><button id="probe-objects" class="secondary">试扫 24 张物体标签</button><span id="object-probe-status" class="muted">已接入，先小样本试扫。</span></div><p class="footnote">不跟随目录链接，不下载云端占位文件。扫描可暂停，继续时跳过已完成文件。</p></div>
-  <div class="panel tinted"><div class="panel-number">信息来源</div><h2>每条信息，保留来源</h2><div class="principle"><b>拍摄时间</b><p>优先读取原始拍摄信息，缺失时参考文件名和修改时间，并标明来源。</p></div><div class="principle"><b>人物</b><p>生成待核对分组；命名后，新发现的相似人脸先作为候选，等待确认。</p></div><div class="principle"><b>地点</b><p>保留 定位坐标，用离线地名提供附近聚居地参考；支持手工补录。</p></div><div class="principle"><b>重复文件</b><p>完全相同的内容合为一份照片档案，保留每一个文件位置。</p></div><div id="capabilities" class="capabilities"></div></div></div>
-  <div class="panel scan-progress"><div class="section-heading"><h2>最近一次扫描</h2><span id="job-status"></span></div><div id="job-details" class="muted">还没有扫描任务。</div><div id="job-actions" class="inline-actions"></div><details id="error-details"><summary id="error-summary">读取问题</summary><div id="scan-errors"></div></details></div>
- </section>
+  <div class="add-photos-card panel">
+    <div class="panel-number">添加照片</div>
+    <h2>把照片文件夹交给拾光</h2>
+    <p class="muted">选择一个或多个本地文件夹，会包含其中的子文件夹。原照片保持原位。</p>
+    <button type="button" id="scan-folder-picker" class="folder-picker-card"><span class="folder-picker-icon" aria-hidden="true">＋</span><span><b>选择照片文件夹</b><small>打开本机目录选择器，不会立即开始扫描</small></span></button>
+    <div id="scan-root-list" class="scan-root-list" hidden></div>
+    <button type="button" id="scan-add-folder" class="text-button scan-add-folder" hidden>＋ 再添加一个文件夹</button>
+    <button type="button" id="start-scan" class="primary add-photos-submit" disabled>开始扫描</button>
+    <p id="scan-empty-hint" class="footnote">至少选择一个文件夹后才能开始。</p>
+    <div id="scan-legacy-controls" hidden aria-hidden="true"><textarea id="scan-roots"></textarea><select id="scan-workers"><option value="1" selected>1</option></select><input id="with-faces" type="checkbox" checked><input id="include-system" type="checkbox"><button id="choose-folder" type="button"></button><button id="all-drives" type="button"></button><button id="probe-objects" type="button"></button><span id="worker-hint"></span><span id="object-probe-status"></span></div>
+  </div>
+  <section id="scan-progress" class="panel scan-progress" hidden>
+    <div class="section-heading"><h2 id="scan-progress-title">正在扫描照片</h2><span id="job-status"></span></div>
+    <div class="scan-progress-summary"><span>已检查 <b id="scan-checked">0</b></span><span>新增 <b id="scan-added">0</b></span><span>读取问题 <b id="scan-errors-count">0</b></span></div>
+    <p id="scan-current" class="muted"></p><div id="job-actions" class="inline-actions"></div><button type="button" id="scan-view-all" class="primary small" hidden>查看全部照片</button>
+  </section>
+  <details id="last-scan-details" class="panel scan-history"><summary>最近一次扫描</summary><div id="job-details" class="muted">还没有扫描任务。</div><details id="error-details"><summary id="error-summary">读取问题</summary><div id="scan-errors"></div></details><div id="capabilities" class="capabilities" hidden></div></details>
+</section>
  <footer>拾光 <span>·</span> 一张照片，一份可以慢慢补全的记忆。<span class="footer-right">照片与人物信息保存在本机</span></footer>
 </main>
 <dialog aria-label="照片详情" id="detail-dialog" class="hide-info"><div class="dialog-shell"><button class="dialog-close" data-close="detail-dialog" aria-label="关闭">×</button><div class="detail-image">

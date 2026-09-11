@@ -222,7 +222,7 @@ def browser_checks() -> dict:
         page.locator('[data-ot="cancel-selection"]').click()
         page.wait_for_timeout(200)
 
-        page.locator("#home-years-link").click()
+        page.locator('[data-view="years"]').click()
         page.wait_for_selector("#timeline-view:not([hidden])", timeout=10000)
         years_visible = page.locator("#timeline-view .section-heading").is_visible()
         page.locator('[data-view="people"]').click()

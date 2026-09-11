@@ -29,7 +29,9 @@
   const isHomeView = source => source && (source.view === 'timeline' || source.view === 'all');
   function syncLegacyControls() {
     const active = isHomeView(app.state);
-    if (homeYearsLink) homeYearsLink.hidden = !active;
+    if (homeYearsLink) homeYearsLink.hidden = true;
+    document.body.classList.toggle('is-home-view', active && app.state.view === 'timeline');
+    document.body.classList.toggle('is-add-photos-view', app.state.view === 'scan');
     for (const element of legacy) {
       element.hidden = active ? true : originalHidden.get(element);
     }
