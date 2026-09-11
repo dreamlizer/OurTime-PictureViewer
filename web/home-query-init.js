@@ -21,19 +21,18 @@
     if (app.state.folderTarget === 'home-query' && folderResolve) global.__ourTimeHomeFolderResolve(null);
   });
 
-  const legacy = ['.filters', '.directory-filter', '#batch-bar', '#timeline-tools', '.browse-options']
-    .map(selector => document.querySelector(selector)).filter(Boolean);
+  const collectionHeading = host.closest('.toolbar')?.querySelector('#collection-title')?.closest('.section-heading');
+  const homeYearsLink = document.querySelector('#home-years-link');
+  const legacy = [collectionHeading, ...['.filters', '.directory-filter', '#batch-bar', '#timeline-tools', '.browse-options']
+    .map(selector => document.querySelector(selector))].filter(Boolean);
   const originalHidden = new Map(legacy.map(element => [element, element.hidden]));
-  const timelineSortButtons = [...document.querySelectorAll('#timeline-tools [data-time-sort]')];
-  const originalTimelineSortHidden = new Map(timelineSortButtons.map(element => [element, element.hidden]));
   const isHomeView = source => source && (source.view === 'timeline' || source.view === 'all');
   function syncLegacyControls() {
     const active = isHomeView(app.state);
+    if (homeYearsLink) homeYearsLink.hidden = !active;
     for (const element of legacy) {
-      if (element.id === 'timeline-tools') element.hidden = active ? false : originalHidden.get(element);
-      else element.hidden = active ? true : originalHidden.get(element);
+      element.hidden = active ? true : originalHidden.get(element);
     }
-    for (const element of timelineSortButtons) element.hidden = active ? true : originalTimelineSortHidden.get(element);
   }
 
   const adapter = global.OurTimeHomeBridge.create({

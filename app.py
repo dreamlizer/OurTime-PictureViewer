@@ -800,6 +800,12 @@ def status():
         stats['duplicates']=c.execute('SELECT coalesce(sum(n-1),0) FROM (SELECT count(*) n FROM files f JOIN assets a ON a.id=f.asset_id WHERE f.exists_now=1 AND f.excluded=0 AND a.excluded=0 GROUP BY asset_id HAVING n>1)').fetchone()[0]
         stats['people']=c.execute('SELECT count(*) FROM people p WHERE coalesce(p.ignored,0)=0 AND EXISTS(SELECT 1 FROM faces WHERE person_id=p.id)').fetchone()[0]
         stats['named_people']=c.execute('SELECT count(*) FROM people p WHERE confirmed=1 AND EXISTS(SELECT 1 FROM faces WHERE person_id=p.id)').fetchone()[0]
+        stats['group_photos']=c.execute('''SELECT count(*) FROM (
+            SELECT f.asset_id
+            FROM faces f JOIN assets a ON a.id=f.asset_id
+            WHERE '''+ACTIVE_ASSET+'''
+            GROUP BY f.asset_id HAVING count(*)>=2
+        )''').fetchone()[0]
         row=c.execute('SELECT * FROM jobs ORDER BY rowid DESC LIMIT 1').fetchone()
         job=dict(row) if row else None
         errors=[dict(r) for r in c.execute('SELECT path,stage,message FROM job_errors WHERE job_id=? ORDER BY id DESC LIMIT 30',(job['id'],))] if job else []
