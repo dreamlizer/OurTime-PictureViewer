@@ -47,20 +47,29 @@ def sample_ids():
     return {'group': group, 'single': 10, 'partial': partial, 'screenshot': screenshot}
 
 
-def open_photo(page, asset_id):
+def open_photo(page, asset_id, original_fails=False):
     detail = req('/api/photos/' + str(asset_id))
     name = Path(detail['files'][0]['path']).name
-    page.goto(URL)
-    search = page.locator('[data-ot="search"]')
-    if not search.is_visible():
-        search = page.locator('#search')
-    search.fill(name)
-    search.press('Enter')
-    page.wait_for_selector(f'[data-photo="{asset_id}"]', timeout=30000)
-    page.locator(f'[data-photo="{asset_id}"]').dblclick(timeout=30000)
-    page.wait_for_function(
-        "document.querySelector('#detail-img').complete && document.querySelector('#detail-img').naturalWidth>0"
-    )
+    def fail_original(route):
+        route.fulfill(status=404, content_type='text/plain', body='forced preview fallback')
+    if original_fails:
+        page.route('**/api/original/**', fail_original)
+    try:
+        page.goto(URL)
+        search = page.locator('[data-ot="search"]')
+        if not search.is_visible():
+            search = page.locator('#search')
+        search.fill(name)
+        search.press('Enter')
+        page.wait_for_selector(f'[data-photo="{asset_id}"]', timeout=30000)
+        page.locator(f'[data-photo="{asset_id}"]').dblclick(timeout=30000)
+        page.wait_for_function(
+            "document.querySelector('#detail-img').complete && document.querySelector('#detail-img').naturalWidth>0"
+        )
+        page.wait_for_timeout(100)
+    finally:
+        if original_fails:
+            page.unroute('**/api/original/**', fail_original)
     return detail
 
 
@@ -141,6 +150,8 @@ def main():
         page.locator('[data-close="detail-dialog"]').click()
         page.wait_for_function("!document.querySelector('#detail-dialog').open")
         check(True, '加载中状态下关闭查看器仍然有效')
+        open_photo(page, ids['single'], original_fails=True)
+        check('/api/preview/' in page.locator('#detail-img').get_attribute('src'), '原图失败时 preview fallback 正常显示')
         open_photo(page, ids['group'])
 
         open_style(page)

@@ -511,6 +511,9 @@ async function displayPhoto(id){
   if(!$('#detail-dialog').open||state.detail?.id!==id||ticket!==renderPhoto.ticket)return false;
   viewer.fit=true;
   $('#detail-img').src=url;
+  $('#detail-img').hidden=false;
+  $('#photo-signature').hidden=false;
+  $('#face-name-layer').hidden=false;
   renderSignature(state.detail,scoped||files[0]);
   updateZoom(true);
   renderFaceNames(state.detail);

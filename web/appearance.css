@@ -193,6 +193,7 @@ input:disabled, select:disabled, textarea:disabled { background-color: #e9eeea; 
 .person-card b { font-size: 14px; font-weight: 600; white-space: normal; overflow-wrap: anywhere; line-height: 1.5; }
 .person-card p { font-size: 12px; color: var(--muted); margin: 6px 0 12px; }
 .person-card small { color: var(--ochre); font-size: 11px; }
+.person-card .person-connection { display:block; margin-top:3px; color:#9aa39b; font-size:10px; font-weight:400; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .person-check { left: 8px; top: 7px; width: 32px; height: 32px; display: grid; place-items: center; cursor: pointer; }
 .person-card > .person-quick-name { position: static; width: 100%; margin: auto 0 0; min-height: 32px; padding: 5px 8px; background: var(--pale); color: var(--green); border: 1px solid #c7d8cc; border-radius: 6px; font-size: 12px; }
 .person-card > .person-quick-name:hover { background: #d8e8dd; }
