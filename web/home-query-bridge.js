@@ -5,7 +5,7 @@
 (function (global) {
   'use strict';
   const value = input => input == null ? '' : String(input);
-  const fields = ['q', 'person', 'directory'];
+  const fields = ['q', 'person', 'directory', 'place', 'dateFrom', 'dateTo'];
   const allowedSort = new Set(['date_desc', 'date_asc', 'name_asc', 'name_desc']);
   const same = (a, b) => fields.every(key => value(a[key]) === value(b[key]));
 
@@ -93,8 +93,14 @@
         };
       },
       applyQuery(next, context) {
-        // Only these three query fields are written; sorting and other view state stay separate.
-        const cleaned = { q: value(next.q), person: value(next.person).trim(), directory: value(next.directory).trim() };
+        const cleaned = {
+          q: value(next.q),
+          person: value(next.person).trim(),
+          directory: value(next.directory).trim(),
+          place: value(next.place).trim(),
+          dateFrom: value(next.dateFrom).trim(),
+          dateTo: value(next.dateTo).trim()
+        };
         return update(cleaned, context, 'query');
       },
       applySort(sort, context) {
@@ -102,6 +108,8 @@
         return update({ sort }, context, 'sort');
       },
       getPeople: context => bindings.getPeople(context),
+      getPlaces: context => typeof bindings.getPlaces === 'function' ? bindings.getPlaces(context) : Promise.resolve([]),
+      getTimeline: context => typeof bindings.getTimeline === 'function' ? bindings.getTimeline(context) : Promise.resolve({years:[], months:[]}),
       async setSelecting(on, context) {
         guard(context);
         try { return await bindings.setSelecting(Boolean(on), context); }

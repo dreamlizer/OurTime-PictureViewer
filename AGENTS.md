@@ -22,6 +22,8 @@ FastAPI + uvicorn + SQLite WAL；前端是 `web/` 静态 HTML/CSS/JS，无构建
 - `app.js` 先于 `viewer.js` 加载。`esc` / `prettyPlace` / `personLabel` 等公共函数必须放在 `app.js` 前部，禁止只写在 `viewer.js`。
 - 用户合同看 [README.md](README.md)。不要把用户照片路径写入文档或记忆。
 
+首页和合影详情用结构化筛选：人物、时间、地点、文件夹，条件之间为 AND。/api/photos 支持 person、date_from、date_to、place、directory，可与 filter=group:N 组合。人物筛选默认只取已命名人物，不要一次把全部人物下载到浏览器。
+
 ## 改完怎么查错（两档，不要每次全量）
 
 日常改 `web/`、文案、布局、分页加载：只跑 `python validation/smoke.py`。它做静态防呆，并在现役 8765 空闲时冒烟接口；不启新服务、不停正式扫描、不跑 Playwright。目标几秒结束。人物接口被扫描拖慢时允许 SKIP，不算失败。

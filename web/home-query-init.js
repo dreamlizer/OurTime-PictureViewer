@@ -26,11 +26,12 @@
   const legacy = [collectionHeading, ...['.filters', '.directory-filter', '#batch-bar', '#timeline-tools', '.browse-options']
     .map(selector => document.querySelector(selector))].filter(Boolean);
   const originalHidden = new Map(legacy.map(element => [element, element.hidden]));
-  const isHomeView = source => source && source.view === 'timeline';
+  const isHomeView = source => source && (source.view === 'timeline' || String(source.view || '').startsWith('group:'));
   function syncLegacyControls() {
     const active = isHomeView(app.state);
     if (homeYearsLink) homeYearsLink.hidden = true;
-    document.body.classList.toggle('is-home-view', active && app.state.view === 'timeline');
+    document.body.classList.toggle('is-home-view', Boolean(active));
+    document.body.classList.toggle('is-group-query', Boolean(active && String(app.state.view || '').startsWith('group:')));
     document.body.classList.toggle('is-add-photos-view', app.state.view === 'scan');
     for (const element of legacy) {
       element.hidden = active ? true : originalHidden.get(element);
@@ -46,28 +47,34 @@
       sort: document.querySelector('#sort-order')
     },
     isActive: isHomeView,
-    scopeKey: source => isHomeView(source) ? 'home' : '',
+    scopeKey: source => {
+      if (!source) return '';
+      if (source.view === 'timeline') return 'home';
+      if (String(source.view || '').startsWith('group:')) return source.view;
+      return '';
+    },
     reloadPhotos: ({ signal } = {}) => {
       if (signal && signal.aborted) return Promise.reject(new DOMException('Aborted', 'AbortError'));
       return global.loadPhotos();
     },
-    getPeople: async ({ signal } = {}) => {
-      const result = [];
-      let offset = 0;
-      let total = Infinity;
-      while (offset < total) {
-        if (signal && signal.aborted) throw new DOMException('Aborted', 'AbortError');
-        const page = await app.api(app.peopleQuery({ offset, limit: 48 }), { signal });
-        total = Number(page.total || 0);
-        for (const person of page.items || []) {
-          result.push({ id: String(person.id), label: app.personLabel(person) });
-        }
-        const next = (page.items || []).length;
-        if (!next) break;
-        offset += next;
-      }
-      return result;
+    getPeople: async ({ signal, q } = {}) => {
+      const ids = String(app.state.person || '').split(',').filter(Boolean).join(',');
+      const page = await app.api(app.peopleQuery({ offset: 0, limit: 40, named: 1, q: q || '', ids }), { signal });
+      return (page.items || []).map(person => ({
+        id: String(person.id),
+        label: app.personLabel(person),
+        photoCount: Number(person.photo_count || 0)
+      }));
     },
+    getPlaces: async ({ signal, q } = {}) => {
+      const page = await app.api('/api/places?limit=40' + (q ? '&q=' + encodeURIComponent(q) : ''), { signal });
+      return (page.places || []).map(item => ({
+        place: item.place,
+        label: app.prettyPlace ? app.prettyPlace(item.place) : item.place,
+        count: Number(item.count || 0)
+      }));
+    },
+    getTimeline: async ({ signal } = {}) => app.api('/api/timeline', { signal }),
     setSelecting: async on => {
       app.state.selecting = Boolean(on);
       app.state.selected.clear();

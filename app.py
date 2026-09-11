@@ -942,12 +942,13 @@ def asset_dict(row):
     return d
 
 @app.get('/api/photos')
-def photos(q:str='',filter:str='all',person:str='',offset:int=0,limit:int=60,directory:str='',sort:str='date_desc',sequence:bool=False,max_id:int=0,around:int=0,tail:bool=False):
+def photos(q:str='',filter:str='all',person:str='',offset:int=0,limit:int=60,directory:str='',sort:str='date_desc',sequence:bool=False,max_id:int=0,around:int=0,tail:bool=False,date_from:str='',date_to:str='',place:str=''):
     try:
         with db() as c:
             result=fetch_photos(
                 c, q=q, filter=filter, person=person, offset=offset, limit=limit,
                 directory=directory, sort=sort, sequence=sequence, max_id=max_id, around=around, tail=tail,
+                date_from=date_from, date_to=date_to, place=place,
             )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
@@ -1092,8 +1093,13 @@ def timeline():
         rows=c.execute('''SELECT substr(coalesce(a.manual_date,a.captured_at),1,4) year, count(*) n
             FROM assets a WHERE '''+ACTIVE_ASSET+'''
             GROUP BY year ORDER BY year DESC''').fetchall()
+        month_rows=c.execute('''SELECT substr(coalesce(a.manual_date,a.captured_at),1,7) month, count(*) n
+            FROM assets a WHERE '''+ACTIVE_ASSET+'''
+            AND substr(coalesce(a.manual_date,a.captured_at),1,7) GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'
+            GROUP BY month ORDER BY month DESC''').fetchall()
     years=[{'year':r['year'] or 'unknown','count':r['n']} for r in rows]
-    return {'years':years,'dated':sum(x['count'] for x in years if x['year']!='unknown')}
+    months=[{'month':r['month'],'count':r['n']} for r in month_rows]
+    return {'years':years,'months':months,'dated':sum(x['count'] for x in years if x['year']!='unknown')}
 
 @app.get('/api/groups')
 def groups():
@@ -1220,10 +1226,10 @@ def edit_photos(body:EditRequest):
     return {'updated':len(ids)}
 
 @app.get('/api/people')
-def people(ignored:int=0, q:str='', offset:int=0, limit:int=48, ids:str=''):
+def people(ignored:int=0, q:str='', offset:int=0, limit:int=48, ids:str='', named:int=0):
     try:
         with db() as c:
-            result=fetch_people(c, ignored=ignored, q=q, offset=offset, limit=limit, ids=ids)
+            result=fetch_people(c, ignored=ignored, q=q, offset=offset, limit=limit, ids=ids, named=named)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     return {'total':result['total'],'items':result['items'],'offset':result['offset'],'limit':result['limit']}

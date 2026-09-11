@@ -1,8 +1,10 @@
 """Photo and people listing SQL. Pure helpers; pass a live sqlite connection."""
 from __future__ import annotations
 
+import calendar
 import os
 import re
+from datetime import datetime
 from pathlib import Path
 
 from library_db import ACTIVE_ASSET, ASSET_LIST_COLUMNS, EFFECTIVE_PLACE
@@ -37,6 +39,40 @@ def parse_id_list(raw, limit=100, label='编号'):
     return values
 
 
+def parse_date_bound(raw, *, end=False):
+    text = str(raw or '').strip()
+    if not text:
+        return ''
+    try:
+        if re.fullmatch(r'\d{4}', text):
+            return f'{text}-12-31' if end else f'{text}-01-01'
+        if re.fullmatch(r'\d{4}-\d{2}', text):
+            year, month = int(text[:4]), int(text[5:7])
+            last = calendar.monthrange(year, month)[1]
+            return f'{text}-{last:02d}' if end else f'{text}-01'
+        if re.fullmatch(r'\d{4}-\d{2}-\d{2}', text):
+            datetime.strptime(text, '%Y-%m-%d')
+            return text
+    except ValueError as exc:
+        raise ValueError('日期无效') from exc
+    raise ValueError('日期格式应为年、年-月或年-月-日')
+
+
+EFFECTIVE_DATE_SQL = "coalesce(a.manual_date, a.captured_at, '')"
+PHOTO_DATE_START_SQL = (
+    "CASE WHEN " + EFFECTIVE_DATE_SQL + " GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]*' THEN substr(" + EFFECTIVE_DATE_SQL + ",1,10)"
+    " WHEN length(" + EFFECTIVE_DATE_SQL + ")=7 AND " + EFFECTIVE_DATE_SQL + " GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]' THEN " + EFFECTIVE_DATE_SQL + " || '-01'"
+    " WHEN length(" + EFFECTIVE_DATE_SQL + ")=4 AND " + EFFECTIVE_DATE_SQL + " GLOB '[0-9][0-9][0-9][0-9]' THEN " + EFFECTIVE_DATE_SQL + " || '-01-01'"
+    " ELSE NULL END"
+)
+PHOTO_DATE_END_SQL = (
+    "CASE WHEN " + EFFECTIVE_DATE_SQL + " GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]*' THEN substr(" + EFFECTIVE_DATE_SQL + ",1,10)"
+    " WHEN length(" + EFFECTIVE_DATE_SQL + ")=7 AND " + EFFECTIVE_DATE_SQL + " GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]' THEN date(" + EFFECTIVE_DATE_SQL + " || '-01','+1 month','-1 day')"
+    " WHEN length(" + EFFECTIVE_DATE_SQL + ")=4 AND " + EFFECTIVE_DATE_SQL + " GLOB '[0-9][0-9][0-9][0-9]' THEN " + EFFECTIVE_DATE_SQL + " || '-12-31'"
+    " ELSE NULL END"
+)
+
+
 def people_select_sql():
     return (
         "SELECT p.id,p.name,p.alias,p.confirmed,p.ignored,p.suggested_person_id,s.name suggested_name, "
@@ -50,9 +86,11 @@ def people_order_sql():
     return "p.confirmed DESC, photo_count DESC, p.id"
 
 
-def people_base_where(ignored, needle=None):
+def people_base_where(ignored, needle=None, named=0):
     conditions = ["coalesce(p.ignored,0)=?", "EXISTS(SELECT 1 FROM faces f WHERE f.person_id=p.id)"]
     values = [int(bool(ignored))]
+    if named:
+        conditions.append('p.confirmed=1')
     if needle:
         conditions.append("(coalesce(p.name,'') LIKE ? OR coalesce(p.alias,'') LIKE ? OR CAST(p.id AS TEXT) LIKE ?)")
         like = '%' + needle + '%'
@@ -60,14 +98,15 @@ def people_base_where(ignored, needle=None):
     return conditions, values
 
 
-def people_query(ignored=0, q='', offset=0, limit=48, ids=''):
+def people_query(ignored=0, q='', offset=0, limit=48, ids='', named=0):
     ignored = int(bool(ignored))
     needle = (q or '').strip()
     selected = parse_id_list(ids, limit=100, label='人物编号')
     page_limit = min(max(int(limit), 1), 100)
     page_offset = max(int(offset), 0)
-    page_where, page_values = people_base_where(ignored, needle)
-    extra_where, extra_values = people_base_where(ignored, None)
+    named = int(bool(named))
+    page_where, page_values = people_base_where(ignored, needle, named=named)
+    extra_where, extra_values = people_base_where(ignored, None, named=named)
     select = people_select_sql()
     order_sql = people_order_sql()
     grouped_page = select + f" WHERE {' AND '.join(page_where)} GROUP BY p.id"
@@ -94,19 +133,19 @@ def people_query(ignored=0, q='', offset=0, limit=48, ids=''):
     }
 
 
-def photo_conditions(q='', filter='all', person='', directory='', max_id=0):
+def photo_conditions(q='', filter='all', person='', directory='', max_id=0, date_from='', date_to='', place=''):
     conditions = ['NOT (' + ACTIVE_ASSET + ')' if filter == 'excluded' else ACTIVE_ASSET]
     conditions.append('EXISTS(SELECT 1 FROM files f WHERE f.asset_id=a.id)')
     values = []
     year = ''
-    place = ''
+    filter_place = ''
     group = 0
     current = filter
     if current.startswith('year:'):
         year = current.split(':', 1)[1]
         current = 'all'
     elif current.startswith('place:'):
-        place = current.split(':', 1)[1]
+        filter_place = current.split(':', 1)[1]
         current = 'all'
     elif current.startswith('group:'):
         raw = current.split(':', 1)[1]
@@ -160,12 +199,23 @@ def photo_conditions(q='', filter='all', person='', directory='', max_id=0):
         else:
             conditions.append("substr(coalesce(a.manual_date,a.captured_at),1,4)=?")
             values.append(year)
-    if place:
-        if place == 'unknown':
+    start = parse_date_bound(date_from, end=False)
+    stop = parse_date_bound(date_to, end=True)
+    if start and stop and start > stop:
+        raise ValueError('开始日期不能晚于结束日期')
+    if start:
+        conditions.append(PHOTO_DATE_START_SQL + ' IS NOT NULL AND ' + PHOTO_DATE_START_SQL + '>=?')
+        values.append(start)
+    if stop:
+        conditions.append(PHOTO_DATE_END_SQL + '<=?')
+        values.append(stop)
+    place_value = str(place or '').strip() or filter_place
+    if place_value:
+        if place_value == 'unknown':
             conditions.append("coalesce(nullif(a.manual_place,''), a.place,'')=''")
         else:
             conditions.append("coalesce(nullif(a.manual_place,''), a.place)=?")
-            values.append(place)
+            values.append(place_value)
     if group:
         if group >= 10:
             conditions.append('a.id IN (SELECT asset_id FROM faces GROUP BY asset_id HAVING count(*)>=10)')
@@ -197,8 +247,8 @@ def ranked_from_sql(path_sql, where, order_sql):
 
 
 
-def fetch_people(conn, ignored=0, q='', offset=0, limit=48, ids=''):
-    spec = people_query(ignored=ignored, q=q, offset=offset, limit=limit, ids=ids)
+def fetch_people(conn, ignored=0, q='', offset=0, limit=48, ids='', named=0):
+    spec = people_query(ignored=ignored, q=q, offset=offset, limit=limit, ids=ids, named=named)
     total = conn.execute(spec['total_sql'], spec['total_params']).fetchone()[0]
     rows = [dict(r) for r in conn.execute(spec['page_sql'], spec['page_params']).fetchall()]
     seen = {row['id'] for row in rows}
@@ -226,10 +276,13 @@ def photo_from_sql(path_sql, where, order_sql):
 
 
 def fetch_photos(conn, *, q='', filter='all', person='', offset=0, limit=60, directory='', sort='date_desc',
-                 sequence=False, max_id=0, around=0, tail=False):
+                 sequence=False, max_id=0, around=0, tail=False, date_from='', date_to='', place=''):
     if sort not in PHOTO_ORDERS:
         raise ValueError('未知的照片排序方式')
-    spec = photo_conditions(q=q, filter=filter, person=person, directory=directory, max_id=max_id)
+    spec = photo_conditions(
+        q=q, filter=filter, person=person, directory=directory, max_id=max_id,
+        date_from=date_from, date_to=date_to, place=place,
+    )
     conn.create_function('file_order', 1, file_order_key)
     conn.execute('BEGIN')
     upper = max_id or conn.execute('SELECT coalesce(max(id),0) FROM assets').fetchone()[0]

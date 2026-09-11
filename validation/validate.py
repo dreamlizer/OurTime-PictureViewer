@@ -6,6 +6,7 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'runtime'))
 import json,time,subprocess,urllib.request,urllib.error,shutil,hashlib,sqlite3
+import urllib.parse
 from PIL import Image
 from playwright.sync_api import sync_playwright
 
@@ -99,8 +100,13 @@ try:
         page.fill('#edit-date','2012 年夏季');page.select_option('#edit-precision','范围 / 描述');page.fill('#edit-place','北京 · 家庭旅行');page.fill('#edit-notes','仅供验收的测试标注');page.click('#detail-form button[type="submit"]');page.wait_for_function("document.querySelector('#detail-facts').textContent.includes('人工确认')")
         edited=req('/api/photos/'+str(filename['id']));check(edited['manual_date']=='2012 年夏季' and edited['captured_at']=='2012-07-21T12:34:56','真实页面保存大致时间地点，原始时间保持不变')
         page.screenshot(path=str(REPORTS/'03-photo-detail.png'),full_page=True)
-        page.click('[data-close="detail-dialog"]');page.fill('[data-ot="search"]','家庭旅行');page.wait_for_function("document.querySelector('#result-count').textContent==='1 张'");check(page.locator('.photo-card').count()==1,'真实页面按补录地点搜索定位照片')
-        page.fill('[data-ot="search"]','');page.wait_for_function("document.querySelector('#result-count').textContent==='8 张'")
+        page.click('[data-close="detail-dialog"]')
+        found=req('/api/photos?place=' + urllib.parse.quote('北京 · 家庭旅行') + '&limit=20')
+        check(found.get('total')==1 and found['items'][0]['id']==filename['id'],'补录地点可通过独立 place 参数精确筛出')
+        page.locator('[data-ot="place"]').click();page.wait_for_selector('.ot-home-popover:not([hidden])')
+        page.locator('.ot-home-option', has_text='北京 · 家庭旅行').first.click()
+        page.wait_for_function("document.querySelector('#result-count').textContent==='1 张'");check(page.locator('.photo-card').count()==1,'真实页面按地点筛选定位照片')
+        page.locator('[data-condition="place"]').click();page.wait_for_function("document.querySelector('#result-count').textContent==='8 张'")
         page.click('[data-ot="select"]');page.click(f'[data-photo="{by_name["老照片.png"]["id"]}"]');page.click('[data-ot="edit"]');page.check('#batch-place-enabled');page.fill('#batch-place','测试批量地点');page.click('#batch-form button[type="submit"]');page.wait_for_function("!document.querySelector('#batch-dialog').open")
         check(req('/api/photos/'+str(by_name['老照片.png']['id']))['manual_place']=='测试批量地点','真实页面批量补录仅更新勾选字段')
         page.click('[data-view="people"]');page.wait_for_selector('.person-card');pid=people[0]['id'];page.click(f'[data-person="{pid}"]');page.wait_for_selector('[data-face-photo]');page.locator('[data-face-photo]').first.click();page.wait_for_selector('#detail-dialog[open]');check(not page.evaluate("document.body.innerText.includes('undefined')"),'人物页点人脸打开原图时，页面可见文本不含 undefined');page.click('[data-close="detail-dialog"]');page.click(f'[data-person="{pid}"]');page.fill('#person-name','测试人物甲');page.click('#person-form button');page.wait_for_function("document.querySelector('#person-title').textContent==='测试人物甲'")

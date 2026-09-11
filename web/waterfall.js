@@ -87,6 +87,8 @@ async function streamPage(index){
    const page=streamLayout(data.items);waterfall.cache.set(index,page);waterfall.heights[index]=page.height;
    waterfall.error=false;$('#stream-retry').hidden=true;
    $('#result-count').textContent=fmt(data.total)+' 张';
+   const pageTitle=$('#page-title');
+   if(pageTitle && String(state.view||'').startsWith('group:')) { const title=typeof groupTitle==='function'?groupTitle(state.view):['合影','']; pageTitle.textContent=title[1]; }
    return page;
   }catch(e){if(e.name!=='AbortError'&&generation===waterfall.generation){waterfall.error=true;$('#stream-status').textContent='加载暂时失败，已显示的照片仍可查看';$('#stream-retry').hidden=false;toast(e.message,true);}return null;}
   finally{if(generation===waterfall.generation){waterfall.pending.delete(index);streamSchedule();}}
@@ -135,7 +137,7 @@ function streamPaint(){
  const stats=state.status&&state.status.stats;
  const ready=Boolean(stats);
  const knownEmpty=ready&&Number(stats.assets||0)===0;
- const showEmpty=knownEmpty&&state.view==='timeline'&&!state.q&&!state.person&&!state.directory&&!loading&&!waterfall.total;
+ const showEmpty=knownEmpty&&state.view==='timeline'&&!state.q&&!state.person&&!state.directory&&!state.place&&!state.dateFrom&&!state.dateTo&&!loading&&!waterfall.total;
  $('#empty').hidden=!showEmpty;
  $('#no-results').hidden=true;
  if(!ready||loading)$('#stream-status').textContent='正在加载照片';
@@ -149,7 +151,7 @@ async function loadPhotos(){
  const oldTop=$('#photo-grid').getBoundingClientRect().top;
  waterfall.abort?.abort();waterfall.abort=new AbortController();waterfall.generation++;
  waterfall.pending.clear();waterfall.cache.clear();waterfall.heights=[];waterfall.total=0;waterfall.maxId=0;waterfall.error=false;
- waterfall.query={q:state.q,filter:state.view,person:state.person,directory:state.directory,sort:state.sort};
+ waterfall.query={q:state.q,filter:state.view,person:state.person,directory:state.directory,sort:state.sort,date_from:state.dateFrom||'',date_to:state.dateTo||'',place:state.place||''};
  waterfall.width=streamMetrics().width;waterfall.columns=streamMetrics().columns;state.offset=0;
  streamEntrance.disconnect();$('#photo-grid').replaceChildren();$('#photo-grid').style.height='0px';$('#stream-status').textContent='正在加载照片…';$('#stream-retry').hidden=true;$('#no-results').hidden=true;$('#empty').hidden=true;$('#result-count').textContent='加载中';
  if(oldTop<0&&!$('#detail-dialog').open)scrollTo({top:scrollY+oldTop-24,behavior:'instant'});

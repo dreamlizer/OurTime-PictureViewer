@@ -134,8 +134,8 @@ def browser_checks() -> dict:
         old_heading_hidden = page.locator("#collection-title").evaluate("e => e.closest('.section-heading').hidden")
         timeline_hidden = page.locator("#timeline-tools").evaluate("e => e.hidden")
         controls = [
-            rect('[data-ot="search"]'),
-            rect('[data-ot="filters"]'),
+            rect('[data-ot="person"]'),
+            rect('[data-ot="place"]'),
             rect('[data-ot="sort"]'),
         ]
         tops = [round(item.get("y", -1)) for item in controls]
@@ -166,25 +166,19 @@ def browser_checks() -> dict:
 
         people_requests = []
         page.on("request", lambda request: people_requests.append(request.url) if request.method == "GET" and "/api/people?" in request.url else None)
-        page.locator('[data-ot="filters"]').click()
-        page.wait_for_selector(".ot-home-filter-dialog[open]", timeout=5000)
+        page.locator('[data-ot="person"]').click()
+        page.wait_for_selector(".ot-home-popover:not([hidden])", timeout=5000)
         page.screenshot(path=str(SCREENSHOTS / "filter-open-1920.png"), full_page=True)
         page.wait_for_timeout(1200)
         results.append({
-            "name": "filter_drawer_default_closed_then_opens",
-            "status": "PASS" if visible(".ot-home-filter-dialog[open]") else "FAIL",
+            "name": "person_popover_opens_without_loading_all_people",
+            "status": "PASS" if visible(".ot-home-popover:not([hidden])") and len(people_requests) <= 2 else "FAIL",
             "actual": {"people_request_count": len(people_requests)},
         })
-        person_select = page.locator('[data-ot="person"]')
-        try:
-            page.wait_for_function("document.querySelector('[data-ot=person]')?.options.length > 1", timeout=15000)
-        except Exception:
-            pass
-        if person_select.locator("option").count() > 1:
+        person_boxes = page.locator('.ot-home-popover input[type="checkbox"]')
+        if person_boxes.count() > 0:
             sort_before = page.locator('[data-ot="sort"]').input_value()
-            person_select.select_option(index=1)
-            page.locator('[data-ot="apply"]').click()
-            page.wait_for_function("!document.querySelector('.ot-home-filter-dialog')?.open", timeout=10000)
+            person_boxes.first.check()
             page.wait_for_timeout(250)
             sort_after = page.locator('[data-ot="sort"]').input_value()
             chip_visible = visible('[data-ot="chips"]')
@@ -196,28 +190,11 @@ def browser_checks() -> dict:
             })
         else:
             results.append({"name": "person_filter_applies_once_and_preserves_sort", "status": "SKIP", "actual": {"reason": "当前库没有可用人物选项"}})
-            page.locator('[data-ot="cancel"]').click()
-
-        page.locator('[data-ot="filters"]').click()
-        page.wait_for_selector(".ot-home-filter-dialog[open]", timeout=5000)
-        directory = "X:\\phase1-1-validation"
-        sort_before = page.locator('[data-ot="sort"]').input_value()
-        page.locator('[data-ot="directory"]').fill(directory)
-        page.locator('[data-ot="apply"]').click()
-        page.wait_for_function("!document.querySelector('.ot-home-filter-dialog')?.open", timeout=10000)
-        page.wait_for_timeout(250)
-        sort_after = page.locator('[data-ot="sort"]').input_value()
+            page.keyboard.press("Escape")
         results.append({
-            "name": "folder_filter_is_draft_then_applied_without_sort_change",
-            "status": "PASS" if sort_before == sort_after and page.locator('[data-condition="directory"]').count() == 1 else "FAIL",
-            "actual": {"sort_before": sort_before, "sort_after": sort_after, "directory_chip_count": page.locator('[data-condition="directory"]').count()},
-        })
-        page.locator('[data-condition="all"]').click()
-        page.wait_for_timeout(250)
-        results.append({
-            "name": "clear_all_removes_conditions_without_sort_change",
-            "status": "PASS" if not visible('[data-ot="chips"]') and page.locator('[data-ot="sort"]').input_value() == sort_after else "FAIL",
-            "actual": {"chips_visible": visible('[data-ot="chips"]'), "sort": page.locator('[data-ot="sort"]').input_value()},
+            "name": "structured_toolbar_has_no_free_search",
+            "status": "PASS" if page.locator('[data-ot="search"]').count() == 0 and page.locator('[data-ot="person"]').count() == 1 else "FAIL",
+            "actual": {"search": page.locator('[data-ot="search"]').count(), "person": page.locator('[data-ot="person"]').count()},
         })
         page.locator('[data-ot="select"]').click()
         page.wait_for_timeout(300)
@@ -239,8 +216,8 @@ def browser_checks() -> dict:
         page.wait_for_selector("#home-query-host .ot-home-ui", timeout=10000)
         results.append({
             "name": "years_entry_and_non_home_views_keep_existing_layouts",
-            "status": "PASS" if years_visible and people_heading_visible and visible('[data-ot="search"]') else "FAIL",
-            "actual": {"years_visible": years_visible, "people_heading_visible": people_heading_visible, "home_ui_restored": visible('[data-ot="search"]')},
+            "status": "PASS" if years_visible and people_heading_visible and visible('[data-ot="person"]') else "FAIL",
+            "actual": {"years_visible": years_visible, "people_heading_visible": people_heading_visible, "home_ui_restored": visible('[data-ot="person"]')},
         })
 
         page.set_viewport_size({"width": 390, "height": 844})
