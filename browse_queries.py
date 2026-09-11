@@ -37,88 +37,17 @@ def parse_id_list(raw, limit=100, label='编号'):
     return values
 
 
-def people_connection_cte():
-    return """
-        WITH known_people AS MATERIALIZED (
-            SELECT id, name, alias
-            FROM people
-            WHERE confirmed=1 AND coalesce(ignored,0)=0
-        ), candidate_people AS MATERIALIZED (
-            SELECT id
-            FROM people
-            WHERE confirmed=0 AND coalesce(ignored,0)=0
-        ), known_person_assets AS MATERIALIZED (
-            SELECT DISTINCT f.person_id, f.asset_id
-            FROM faces f JOIN known_people p ON p.id=f.person_id
-            WHERE coalesce(f.ignored,0)=0
-        ), candidate_person_assets AS MATERIALIZED (
-            SELECT DISTINCT f.person_id, f.asset_id
-            FROM faces f JOIN candidate_people p ON p.id=f.person_id
-            WHERE coalesce(f.ignored,0)=0
-        ), known_photo_counts AS (
-            SELECT a.person_id AS known_id,
-                   CASE WHEN coalesce(k.alias,'')<>'' THEN k.name || ' / ' || k.alias ELSE k.name END AS known_name,
-                   count(*) AS known_photo_count
-            FROM known_person_assets a JOIN known_people k ON k.id=a.person_id
-            GROUP BY a.person_id
-        ), known_cooccurrence AS (
-            SELECT c.person_id AS candidate_id, k.person_id AS known_id,
-                   count(*) AS shared_count
-            FROM known_person_assets k
-            JOIN candidate_person_assets c ON c.asset_id=k.asset_id
-            WHERE c.person_id<>k.person_id
-            GROUP BY c.person_id, k.person_id
-        ), ranked_connections AS (
-            SELECT c.candidate_id, c.known_id AS best_known_person_id,
-                   p.known_name AS best_known_person_name,
-                   p.known_photo_count AS best_known_photo_count,
-                   c.shared_count AS best_known_shared_count,
-                   count(*) OVER (PARTITION BY c.candidate_id) AS known_connection_count,
-                   row_number() OVER (
-                       PARTITION BY c.candidate_id
-                       ORDER BY p.known_photo_count DESC, c.shared_count DESC, c.known_id
-                   ) AS connection_rank
-            FROM known_cooccurrence c JOIN known_photo_counts p ON p.known_id=c.known_id
-        )
-    """
-
-
-def people_select_sql(with_connections=False):
-    if with_connections:
-        connection_fields = (
-            "coalesce(rc.known_connection_count,0) known_connection_count, "
-            "CASE WHEN coalesce(rc.known_connection_count,0)>0 THEN 1 ELSE 0 END has_known_connection, "
-            "coalesce(rc.best_known_person_id,0) best_known_person_id, "
-            "coalesce(rc.best_known_person_name,'') best_known_person_name, "
-            "coalesce(rc.best_known_photo_count,0) best_known_photo_count, "
-            "coalesce(rc.best_known_shared_count,0) best_known_shared_count "
-        )
-        connection_join = " LEFT JOIN ranked_connections rc ON rc.candidate_id=p.id AND rc.connection_rank=1"
-    else:
-        connection_fields = (
-            "0 known_connection_count, 0 has_known_connection, 0 best_known_person_id, "
-            "'' best_known_person_name, 0 best_known_photo_count, 0 best_known_shared_count "
-        )
-        connection_join = ""
+def people_select_sql():
     return (
         "SELECT p.id,p.name,p.alias,p.confirmed,p.ignored,p.suggested_person_id,s.name suggested_name, "
-        "count(f.id) face_count, count(DISTINCT f.asset_id) photo_count, min(f.id) cover, "
-        + connection_fields
+        "count(f.id) face_count, count(DISTINCT f.asset_id) photo_count, min(f.id) cover "
         + "FROM people p JOIN faces f ON f.person_id=p.id "
         + "LEFT JOIN people s ON s.id=p.suggested_person_id"
-        + connection_join
     )
 
 
 def people_order_sql():
-    return (
-        "p.confirmed DESC, "
-        "CASE WHEN coalesce(p.confirmed,0)=0 AND coalesce(p.ignored,0)=0 THEN has_known_connection ELSE 0 END DESC, "
-        "CASE WHEN coalesce(p.confirmed,0)=0 AND coalesce(p.ignored,0)=0 THEN best_known_photo_count ELSE 0 END DESC, "
-        "CASE WHEN coalesce(p.confirmed,0)=0 AND coalesce(p.ignored,0)=0 THEN best_known_shared_count ELSE 0 END DESC, "
-        "CASE WHEN coalesce(p.confirmed,0)=0 AND coalesce(p.ignored,0)=0 THEN known_connection_count ELSE 0 END DESC, "
-        "photo_count DESC, p.id"
-    )
+    return "p.confirmed DESC, photo_count DESC, p.id"
 
 
 def people_base_where(ignored, needle=None):
@@ -139,12 +68,10 @@ def people_query(ignored=0, q='', offset=0, limit=48, ids=''):
     page_offset = max(int(offset), 0)
     page_where, page_values = people_base_where(ignored, needle)
     extra_where, extra_values = people_base_where(ignored, None)
-    with_connections = ignored == 0
-    prefix = people_connection_cte() if with_connections else ''
-    select = people_select_sql(with_connections=with_connections)
+    select = people_select_sql()
     order_sql = people_order_sql()
-    grouped_page = prefix + select + f" WHERE {' AND '.join(page_where)} GROUP BY p.id"
-    grouped_extra = prefix + select + f" WHERE {' AND '.join(extra_where)} GROUP BY p.id"
+    grouped_page = select + f" WHERE {' AND '.join(page_where)} GROUP BY p.id"
+    grouped_extra = select + f" WHERE {' AND '.join(extra_where)} GROUP BY p.id"
     extra_sql = None
     extra_params = None
     if selected:

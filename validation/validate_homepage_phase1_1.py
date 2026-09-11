@@ -149,6 +149,11 @@ def browser_checks() -> dict:
             "actual": {"title_count": title_count, "old_heading_hidden": old_heading_hidden, "timeline_hidden": timeline_hidden, "overflow": overflow},
         })
         results.append({
+            "name": "sidebar_year_entry_removed_but_internal_year_view_kept",
+            "status": "PASS" if page.locator('[data-view="years"]').count() == 0 and page.locator("#home-years-link").is_hidden() else "FAIL",
+            "actual": {"sidebar_year_count": page.locator('[data-view="years"]').count(), "home_years_hidden": page.locator("#home-years-link").is_hidden()},
+        })
+        results.append({
             "name": "desktop_query_row_and_visible_sort",
             "status": "PASS" if max(tops) - min(tops) <= 2 and sort_style["border"] != "none" and sort_style["background"] not in ("rgba(0, 0, 0, 0)", "transparent") else "FAIL",
             "actual": {"tops": tops, "sort_style": sort_style, "host_rect": rect("#home-query-host"), "grid_rect": rect("#photo-grid")},
@@ -222,7 +227,7 @@ def browser_checks() -> dict:
         page.locator('[data-ot="cancel-selection"]').click()
         page.wait_for_timeout(200)
 
-        page.locator('[data-view="years"]').click()
+        page.evaluate("window.__ourTimeApp.setView('years')")
         page.wait_for_selector("#timeline-view:not([hidden])", timeout=10000)
         years_visible = page.locator("#timeline-view .section-heading").is_visible()
         page.locator('[data-view="people"]').click()

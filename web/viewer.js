@@ -24,6 +24,7 @@ const storedViewerPrefs=readViewerPrefs();
 const viewer={
   ids:[],index:0,target:0,offset:0,total:0,context:null,generation:0,busy:false,
   timer:null,playing:false,scale:1,fit:true,loader:null,drafts:new Map(),window:200,
+  returnScroll:undefined,openedPhotoId:null,openedAbsolute:null,openedContext:null,openedWaterfallGeneration:null,exit:null,
   faceNames:storedViewerPrefs.faceNames!==false,
   faceAlias:storedViewerPrefs.faceAlias===true,
   faceVertical:storedViewerPrefs.faceVertical!==false,
@@ -215,6 +216,11 @@ function updateToolVisuals(){
 }
 
 function currentBrowseContext(){return {q:state.q,filter:state.view,person:state.person,directory:state.directory,sort:state.sort,max_id:state.maxId};}
+function browseContextKey(context={}){
+ const filter=String(context.filter||'all');
+ return JSON.stringify({q:String(context.q||''),filter:filter==='all'?'timeline':filter,person:String(context.person||''),directory:String(context.directory||''),sort:String(context.sort||'date_desc'),max_id:Number(context.max_id||0)});
+}
+function sameBrowseContext(a,b){return browseContextKey(a)===browseContextKey(b);}
 function contextLabel(c){const person=state.people.find(p=>String(p.id)===c.person);const filter=c.filter||'';const heading=c.person?(person?.name||'人物 '+c.person):filter.startsWith('year:')?(filter.slice(5)==='unknown'?'时间未记录':filter.slice(5)+' 年'):filter.startsWith('group:')?(filter.slice(6)==='10plus'?'10人及以上':Number(filter.slice(6))+'人合影'):filter.startsWith('place:')?(filter.slice(6)==='unknown'?'地点未记录':filter.slice(6)):titles[filter]?.[0]||'照片';return [heading,c.directory?basename(c.directory):'',c.q?'搜索：'+c.q:''].filter(Boolean).join(' · ');}
 function viewerMessage(text){$('#viewer-message').textContent=text;}
 function setViewerLoading(loading){
@@ -542,9 +548,10 @@ async function displayPhoto(id){
  return ticket===renderPhoto.ticket;
 }
 async function openPhoto(id,context=null){
- if(!$('#detail-dialog').open)viewer.returnScroll=scrollY;
+ const wasOpen=$('#detail-dialog').open;
+ if(!wasOpen){viewer.returnScroll=scrollY;viewer.openedPhotoId=null;viewer.openedAbsolute=null;viewer.openedContext=null;viewer.openedWaterfallGeneration=null;viewer.exit=null;}
  stopSlides();
- const alreadyOpen=$('#detail-dialog').open;
+ const alreadyOpen=wasOpen;
  const generation=++viewer.generation;
  viewer.goal=null; viewer.queued=null;
  if(!alreadyOpen){$('#detail-dialog').classList.add('hide-info');syncViewerTools();}
@@ -559,9 +566,15 @@ async function openPhoto(id,context=null){
   viewer.ids=result.ids||[]; viewer.offset=result.offset||0; viewer.total=result.total||viewer.ids.length; viewer.maxId=result.max_id||viewer.context.max_id;
  }
  if(!viewer.ids.includes(id)){viewerMessage('当前范围已变化，请刷新照片列表后再打开。');return;}
- viewer.index=viewer.target=viewer.ids.indexOf(id);
- viewer.absolute=(viewer.offset||0)+viewer.index;
- viewer.goal=viewer.absolute;
+  viewer.index=viewer.target=viewer.ids.indexOf(id);
+  viewer.absolute=(viewer.offset||0)+viewer.index;
+  if(!alreadyOpen){
+   viewer.openedPhotoId=Number(id);
+   viewer.openedAbsolute=viewer.absolute;
+   viewer.openedContext={...viewer.context};
+   viewer.openedWaterfallGeneration=typeof waterfall==='object'?waterfall.generation:null;
+  }
+  viewer.goal=viewer.absolute;
  await displayPhoto(id);
  if(generation===viewer.generation)$('#image-viewport').focus({preventScroll:true});
 }
@@ -659,7 +672,7 @@ $('#viewer-info').addEventListener('click',toggleInfo);
 $('#close-info').addEventListener('click',toggleInfo);
 $('#viewer-play').addEventListener('click',()=>{if(viewer.playing){stopSlides();syncViewerTools();return;}const current=Number.isFinite(viewer.absolute)?viewer.absolute:(viewer.offset||0)+(viewer.target||0);if(current>=(viewer.total||viewer.ids.length)-1){viewerMessage('已经是最后一张，请先返回前面的照片。');return;}viewer.playing=true;syncViewerTools();scheduleSlide();});
 $('#slide-delay').addEventListener('change',()=>{saveViewerPrefs();if(viewer.timer)scheduleSlide();});
-$('#detail-dialog').addEventListener('close',()=>{stopSlides();toggleFaceStylePopover(false);viewer.generation++;viewer.queued=null;viewer.goal=null;renderPhoto.ticket++;if(viewer.loader){viewer.loader.onload=null;viewer.loader.onerror=null;viewer.loader.src='';}if(document.fullscreenElement)document.exitFullscreen().catch(()=>{});});
+$('#detail-dialog').addEventListener('close',()=>{viewer.exit={photoId:Number(state.detail?.id)||0,absolute:Number(viewer.absolute),context:viewer.context?{...viewer.context}:null,fallbackScroll:viewer.returnScroll,openedPhotoId:Number(viewer.openedPhotoId)||0,openedAbsolute:Number(viewer.openedAbsolute),openedContext:viewer.openedContext?{...viewer.openedContext}:null,waterfallGeneration:viewer.openedWaterfallGeneration};stopSlides();toggleFaceStylePopover(false);viewer.generation++;viewer.queued=null;viewer.goal=null;renderPhoto.ticket++;if(viewer.loader){viewer.loader.onload=null;viewer.loader.onerror=null;viewer.loader.src='';}if(document.fullscreenElement)document.exitFullscreen().catch(()=>{});});
 $('#detail-dialog').addEventListener('cancel',()=>{viewer.generation++;renderPhoto.ticket++;});
 document.addEventListener('visibilitychange',()=>{if(document.hidden)stopSlides();});
 document.addEventListener('keydown',action(async e=>{

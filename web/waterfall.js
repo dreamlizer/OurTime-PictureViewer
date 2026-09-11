@@ -42,6 +42,38 @@ function streamSelection(){
  updateBatch();
 }
 function streamVisibleIds(){return $$('#photo-grid [data-photo]').filter(c=>{const b=c.getBoundingClientRect();return b.bottom>0&&b.top<innerHeight;}).map(c=>Number(c.dataset.photo));}
+function restoreScrollInstant(top){scrollTo({top:Math.max(0,Number(top)||0),behavior:'instant'});}
+function waitWaterfallFrames(count=2){return new Promise(resolve=>{const next=()=>count--<=0?resolve():requestAnimationFrame(next);next();});}
+function waterfallPageTop(index){const estimated=waterfall.heights[0]||1800;let top=0;for(let i=0;i<index;i++)top+=Number(waterfall.heights[i])||estimated;return top;}
+async function restoreViewerPhotoPosition(exit){
+ const fallback=()=>{if(exit&&Number.isFinite(exit.fallbackScroll))restoreScrollInstant(exit.fallbackScroll);streamSchedule();};
+ try{
+  if(!exit||!Number.isInteger(exit.photoId)||exit.photoId<1||!Number.isInteger(exit.absolute)||exit.absolute<0){fallback();return;}
+  const changed=exit.photoId!==exit.openedPhotoId||exit.absolute!==exit.openedAbsolute;
+  if(!changed){fallback();return;}
+  const currentContext=typeof currentBrowseContext==='function'?currentBrowseContext():null;
+  const wallContext=waterfall.query?{...waterfall.query,max_id:waterfall.maxId}:null;
+  if(!sameBrowseContext(exit.context,exit.openedContext)||!sameBrowseContext(exit.context,currentContext)||!sameBrowseContext(exit.context,wallContext)||exit.waterfallGeneration!==waterfall.generation){fallback();return;}
+  const pageIndex=Math.floor(exit.absolute/waterfall.pageSize),indexInPage=exit.absolute%waterfall.pageSize;
+  const page=await streamPage(pageIndex);
+  if(!page||!page.layout[indexInPage]||page.layout[indexInPage].a.id!==exit.photoId){fallback();return;}
+  const grid=$('#photo-grid');if(!grid){fallback();return;}
+  const gridDocumentTop=scrollY+grid.getBoundingClientRect().top;
+  const roughTop=gridDocumentTop+waterfallPageTop(pageIndex)+page.layout[indexInPage].y;
+  restoreScrollInstant(roughTop-innerHeight*.45);
+  streamPaint();
+  await waitWaterfallFrames(2);
+  streamPaint();
+  await waitWaterfallFrames(2);
+  const card=grid.querySelector(`[data-photo="${exit.photoId}"]`);
+  if(!card){fallback();return;}
+  let rect=card.getBoundingClientRect();
+  if(rect.bottom<=0||rect.top>=innerHeight){fallback();return;}
+  const targetCenter=innerHeight*.45,center=rect.top+rect.height/2;
+  if(Math.abs(center-targetCenter)>innerHeight*.2){restoreScrollInstant(scrollY+center-targetCenter);await waitWaterfallFrames(1);rect=card.getBoundingClientRect();}
+  if(rect.bottom<=0||rect.top>=innerHeight)fallback();else streamSchedule();
+ }catch(e){fallback();}
+}
 async function streamPage(index){
  if(waterfall.cache.has(index))return waterfall.cache.get(index);
  if(waterfall.pending.has(index))return waterfall.pending.get(index);
@@ -127,8 +159,5 @@ window.addEventListener('scroll',streamScroll,{passive:true});
 new ResizeObserver(()=>streamSchedule()).observe($('#photo-grid'));
 $('#stream-retry').addEventListener('click',()=>{waterfall.error=false;$('#stream-retry').hidden=true;streamSchedule();if(!waterfall.heights.length)streamPage(0);});
 $('#stream-top').addEventListener('click',()=>scrollTo({top:0,behavior:'smooth'}));
-$('#detail-dialog').addEventListener('close',()=>requestAnimationFrame(()=>{
- if(viewer.returnScroll!==undefined)scrollTo({top:viewer.returnScroll,behavior:'instant'});
- streamSchedule();
-}));
+$('#detail-dialog').addEventListener('close',()=>{void restoreViewerPhotoPosition(viewer.exit);});
 action(async()=>{await refreshStatus();loadPeopleOptions();await setView(state.view||'timeline');})();
