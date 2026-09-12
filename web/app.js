@@ -148,6 +148,7 @@ function updateChrome(){
   const stats=$('#stats'); if(stats) stats.hidden=!showStats;
   document.body.classList.toggle('is-subpage',!showStats);
   document.body.classList.toggle('is-people-view',view==='people');
+  const namedCount=$('#people-named-count'); if(namedCount) namedCount.hidden=view!=='people';
   document.body.classList.toggle('is-group-query',String(view).startsWith('group:'));
   const organizeNav=$('#organize-nav');
   if(organizeNav) organizeNav.open=organize;
@@ -284,6 +285,10 @@ function patchPersonInStream(id, patch){id=Number(id);const stream=state.peopleS
  function personStreamKind(kind='people'){return kind==='passersby'?'passersby':'people';}
  function personGridSelector(kind='people'){return personStreamKind(kind)==='passersby'?'#passersby-grid':'#people-grid';}
  function personTotalSelector(kind='people'){return personStreamKind(kind)==='passersby'?'#passersby-total':'#people-total';}
+ let namedPeopleCountTimer=null;
+ function setNamedPeopleCount(total){const el=$('#people-named-count');if(el)el.textContent='已命名 '+fmt(total)+' 人';}
+ async function refreshNamedPeopleCount(){const data=await api(peopleQuery({limit:1,named:1}));setNamedPeopleCount(data.total);}
+ function queueNamedPeopleCountRefresh(){clearTimeout(namedPeopleCountTimer);namedPeopleCountTimer=setTimeout(()=>refreshNamedPeopleCount().catch(()=>{}),120);}
  function personCardById(id,kind='people'){const numeric=Number(id);if(!Number.isInteger(numeric)||numeric<1)return null;return document.querySelector(`${personGridSelector(kind)} [data-person="${numeric}"]`);}
  function renderPersonCard(person,kind='people'){kind=personStreamKind(kind);const card=personCardById(person.id,kind);if(!card)return;const wrap=document.createElement('div');wrap.innerHTML=personCard(person,kind);const fresh=wrap.firstElementChild;if(!fresh)return;card.replaceWith(fresh);}
  function bumpPersonCard(id){const card=personCardById(id);if(card)card.classList.add('named');}
@@ -298,6 +303,7 @@ function patchPersonInStream(id, patch){id=Number(id);const stream=state.peopleS
    state[kind]=stream.items;
   }
   const total=$(personTotalSelector(kind));if(total)total.textContent=kind==='people'?(fmt(stream.total)+' 个分组'):(fmt(stream.total)+' 组路人');
+  queueNamedPeopleCountRefresh();
   return Boolean(card)||stream.items.length!==before;
  }
  function appendPersonToLocalState(person,kind='people'){
@@ -415,6 +421,7 @@ async function rememberPersonName(id,name,alias){
   state.personDetail=Object.assign({},state.personDetail,{name,alias,confirmed:1,ignored:0});
   const title=$('#person-title'); if(title) title.textContent=personLabel(state.personDetail);
  }
+ queueNamedPeopleCountRefresh();
 }
 function personCard(p,mode='people'){
   if(mode==='passersby')return `<button class="person-card" data-person="${p.id}"><img src="/api/face/${p.cover}" alt="路人缩略图" loading="lazy"><b>${esc(p.name||'路人')}</b><p>${p.photo_count} 张照片 · ${p.face_count} 张人脸</p><small>暂不识别，点开可恢复</small></button>`;
@@ -457,14 +464,16 @@ async function fetchPeoplePage(kind, reset=false, viewToken=null){
 }
 async function loadPeopleOptions(){
   const current=state.person?await api(peopleQuery({limit:8,ids:state.person})): {items:[]};
-  const named=await api(peopleQuery({limit:40}));
+  const named=await api(peopleQuery({limit:40,named:1}));
   const ignored=await api(peopleQuery({ignored:1,limit:1}));
   const options=new Map();
   options.set('','全部人物');
   for(const p of [...current.items,...named.items]) options.set(String(p.id), `${personLabel(p)} (${p.photo_count})`);
   $('#person-filter').innerHTML=[...options.entries()].map(([id,label])=>`<option value="${esc(id)}">${esc(label)}</option>`).join('');
   $('#person-filter').value=state.person;
-  $('#people-count').textContent=fmt(named.total);
+  const peopleTotal=state.status?.stats?.people??state.peopleStream?.people?.total??0;
+  $('#people-count').textContent=fmt(peopleTotal);
+  setNamedPeopleCount(named.total);
   const pc=$('#passersby-count'); if(pc)pc.textContent=fmt(ignored.total);
 }
 async function loadPeople(viewToken=null){state.peopleStream.people.q=($('#people-search')?.value||'').trim(); await fetchPeoplePage('people',true,viewToken); loadPeopleOptions();}

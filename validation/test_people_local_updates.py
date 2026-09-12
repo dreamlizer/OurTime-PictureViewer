@@ -26,6 +26,8 @@ def check(condition: bool, message: str) -> None:
 def main() -> int:
     with urlopen(URL + "/api/status", timeout=20) as response:
         status = json.load(response)
+    with urlopen(URL + "/api/people?named=1&limit=1", timeout=20) as response:
+        named_total = int(json.load(response).get("total") or 0)
     data_dir = str((status.get("capabilities") or {}).get("data_dir") or "")
     check(data_dir.replace("/", "\\").lower().endswith("\\data"), "8765 指向正式 data；写请求将由浏览器拦截")
 
@@ -78,7 +80,7 @@ def main() -> int:
             if parsed.path != "/api/people":
                 return
             query = parse_qs(parsed.query)
-            if "ids" not in query:
+            if "ids" not in query and query.get("named") != ["1"]:
                 list_requests.append(request.url)
 
         page.on("request", record_request)
@@ -94,6 +96,52 @@ def main() -> int:
             "cards => cards.map(card => Number(card.dataset.person))"
         )
         check(len(initial_ids) >= 3, "人物页有足够卡片执行局部更新检查")
+        page.wait_for_function(
+            "() => /^已命名 [\\d,]+ 人$/.test((document.querySelector('#people-named-count')?.textContent || '').trim())"
+        )
+        check(
+            page.locator("#people-named-count").inner_text() == f"已命名 {named_total:,} 人",
+            "标题右侧显示准确的已命名人数",
+        )
+        header_geometry = page.evaluate(
+            """() => {
+                const title = document.querySelector('#page-title').getBoundingClientRect();
+                const count = document.querySelector('#people-named-count').getBoundingClientRect();
+                const search = document.querySelector('#people-search').closest('.people-search').getBoundingClientRect();
+                return {title, count, search};
+            }"""
+        )
+        check(
+            abs(header_geometry["search"]["left"] - header_geometry["title"]["left"]) <= 2,
+            "人物搜索框在标题下方左对齐",
+        )
+        check(
+            0 < header_geometry["count"]["left"] - header_geometry["title"]["right"] < 28,
+            "已命名人数紧跟在人物档案标题右侧",
+        )
+        check(
+            header_geometry["search"]["top"] - header_geometry["title"]["bottom"] < 32,
+            "标题和搜索工具区之间没有大块空白",
+        )
+        page.screenshot(path=str(REPORT / "people-header-top.png"))
+        page.evaluate("window.scrollTo(0, 1200)")
+        page.wait_for_timeout(200)
+        sticky_geometry = page.evaluate(
+            """() => {
+                const title = document.querySelector('#page-title').getBoundingClientRect();
+                const search = document.querySelector('#people-search').closest('.people-search').getBoundingClientRect();
+                return {title, search, viewport: innerHeight};
+            }"""
+        )
+        check(
+            sticky_geometry["title"]["top"] >= 0
+            and sticky_geometry["search"]["top"] >= sticky_geometry["title"]["bottom"]
+            and sticky_geometry["search"]["bottom"] < sticky_geometry["viewport"],
+            "向下滚动后标题、搜索框和合并按钮仍固定可见",
+        )
+        page.screenshot(path=str(REPORT / "people-header-sticky.png"))
+        page.evaluate("window.scrollTo(0, 0)")
+        page.wait_for_timeout(100)
         page.evaluate(
             """() => {
                 window.__peopleNodeMap = new Map(
@@ -202,6 +250,20 @@ def main() -> int:
         check(page.locator("#page-title").inner_text() == "人物档案", "标为路人后仍停留在人物档案")
         check(len(list_requests) == before_requests, "标为路人后不重新请求整个人物列表")
         page.screenshot(path=str(REPORT / "ignore-local.png"), full_page=True)
+
+        page.set_viewport_size({"width": 390, "height": 844})
+        open_people()
+        overflow = page.evaluate("document.documentElement.scrollWidth > document.documentElement.clientWidth")
+        check(not overflow, "390px 人物页没有横向溢出")
+        page.evaluate("window.scrollTo(0, 900)")
+        page.wait_for_timeout(150)
+        check(
+            page.locator("#page-title").is_visible()
+            and page.locator("#people-search").is_visible()
+            and page.locator("#people-merge-toggle").is_visible(),
+            "390px 滚动后人物标题和工具仍可见",
+        )
+        page.screenshot(path=str(REPORT / "people-header-390.png"))
 
         check(not errors, "浏览器没有 JavaScript 错误")
         browser.close()
