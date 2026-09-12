@@ -30,6 +30,27 @@
   font-weight:400;
   font-display:swap;
 }
+@font-face{
+  font-family:"ZCOOL XiaoWei";
+  src:url("/vendor/fonts/zcool-xiaowei/ZCOOLXiaoWei-Regular.ttf") format("truetype");
+  font-style:normal;
+  font-weight:400;
+  font-display:swap;
+}
+@font-face{
+  font-family:"Noto Serif SC";
+  src:url("/vendor/fonts/noto-serif-sc/NotoSerifSC-wght.ttf") format("truetype");
+  font-style:normal;
+  font-weight:200 900;
+  font-display:swap;
+}
+@font-face{
+  font-family:"Zhi Mang Xing";
+  src:url("/vendor/fonts/zhi-mang-xing/ZhiMangXing-Regular.ttf") format("truetype");
+  font-style:normal;
+  font-weight:400;
+  font-display:swap;
+}
 :root{
   --viewer-signature-h:68px;
   --face-font-size:13px;
@@ -107,6 +128,7 @@
   display:grid;
   align-content:center;
   gap:2px;
+  text-align:left;
 }
 #detail-dialog .signature-memory-main{
   min-width:0;
@@ -147,9 +169,11 @@
 #detail-dialog .signature-capture{
   min-width:0;
   display:flex;
+  position:relative;
   align-items:center;
   flex-wrap:wrap;
   gap:3px 10px;
+  padding-left:16px;
   color:#4d544e;
   font-size:10px;
   line-height:1.25;
@@ -157,9 +181,11 @@
 }
 #detail-dialog .signature-capture::before{
   content:"";
-  align-self:stretch;
+  position:absolute;
+  left:0;
+  top:0;
+  bottom:0;
   border-left:1px solid #dfded8;
-  margin-right:5px;
 }
 #detail-dialog .signature-camera{
   min-width:0;
@@ -445,23 +471,31 @@
   letter-spacing:.03em;
 }
 
-/* Accent: one restrained line gives the dark surface recognition. */
+/* Accent: dark vermilion title slip with restrained gold edging and paper grain. */
 #detail-dialog[data-face-theme="accent"] .face-name:not(.unnamed){
-  background:var(--face-bg-rgba);
+  background:
+    repeating-linear-gradient(105deg,rgba(255,244,219,.04) 0 1px,transparent 1px 6px),
+    linear-gradient(180deg,rgba(255,238,207,.035),rgba(40,9,7,.055)),
+    var(--face-bg-rgba);
   color:var(--face-text-color);
-  border-color:rgba(244,217,195,.18);
+  border-color:rgba(237,203,158,.38);
+  line-height:1.15;
+  letter-spacing:.18em;
   box-shadow:
-    inset 2px 0 0 rgba(238,198,163,.62),
-    0 2px 7px rgba(37,22,18,.11);
+    inset 2px 0 0 rgba(238,200,151,.68),
+    inset -1px 0 0 rgba(238,200,151,.24),
+    0 3px 9px rgba(36,15,12,.2);
   text-shadow:none;
-  backdrop-filter:blur(3px);
-  -webkit-backdrop-filter:blur(3px);
+  backdrop-filter:blur(2px) saturate(.92);
+  -webkit-backdrop-filter:blur(2px) saturate(.92);
 }
 
 #detail-dialog[data-face-theme="accent"] .face-name-layer.horizontal .face-name:not(.unnamed){
+  letter-spacing:.05em;
   box-shadow:
-    inset 0 -2px 0 rgba(238,198,163,.62),
-    0 2px 7px rgba(37,22,18,.11);
+    inset 0 -2px 0 rgba(238,200,151,.68),
+    inset 0 1px 0 rgba(238,200,151,.2),
+    0 3px 9px rgba(36,15,12,.2);
 }
 
 /* Unnamed-person markers stay theme-independent and keep a 24px click target. */
@@ -915,10 +949,16 @@
   letter-spacing:.03em;
 }
 #detail-dialog .face-style-popover[data-face-theme="accent"] #face-style-preview-label{
-  border-color:rgba(244,217,195,.18);
+  background-image:
+    repeating-linear-gradient(105deg,rgba(255,244,219,.04) 0 1px,transparent 1px 6px),
+    linear-gradient(180deg,rgba(255,238,207,.035),rgba(40,9,7,.055));
+  border-color:rgba(237,203,158,.38);
+  line-height:1.15;
+  letter-spacing:.18em;
   box-shadow:
-    inset 2px 0 0 rgba(238,198,163,.62),
-    0 2px 7px rgba(37,22,18,.11);
+    inset 2px 0 0 rgba(238,200,151,.68),
+    inset -1px 0 0 rgba(238,200,151,.24),
+    0 3px 9px rgba(36,15,12,.2);
 }
 #detail-dialog .face-style-group{
   margin-top:10px;
@@ -1273,11 +1313,11 @@
   }
   #detail-dialog[data-signature-mode="medium"] .signature-capture::before,
   #detail-dialog[data-signature-mode="narrow"] .signature-capture::before{
-    align-self:center;
+    top:50%;
+    bottom:auto;
     width:12px;
     border-left:0;
     border-top:1px solid rgba(223,222,216,.55);
-    margin:0 2px 0 0;
   }
   #detail-dialog[data-signature-mode="medium"] .signature-v3:not(.has-memory) .signature-capture,
   #detail-dialog[data-signature-mode="narrow"] .signature-v3:not(.has-memory) .signature-capture{grid-column:2 / -1;grid-row:1}
