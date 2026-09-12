@@ -351,6 +351,9 @@ dialog::backdrop { background: #162b2466; backdrop-filter: blur(4px); }
 .person-name-form { display:flex; flex-wrap:nowrap; align-items:center; gap: 8px; background: #f0f5f1; padding: 6px 8px; border-radius: 8px; margin: 0 0 8px; }
 .person-name-form input { min-width: 0; width: 120px; max-width: 140px; }
 .person-name-form .primary { min-width: 72px; width: auto; padding: 0 14px; }
+.person-save-state { flex: 0 1 auto; min-width: 0; color: #6f8176; font-size: 11px; line-height: 1.35; opacity: .82; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.person-save-state[data-state="saving"] { color: var(--muted); }
+.person-save-state[data-state="error"] { color: #98685b; }
 .merge-row { display:flex; flex-wrap:nowrap; align-items:center; gap: 8px; padding-bottom: 8px; border-bottom: 1px solid var(--line); margin: 0 0 8px; }
 #merge-search { min-width: 0; width: 150px; font-size: 13px; border-color: var(--control-line); }
 .merge-row select { min-width: 0; width: 160px; max-width: 180px; }
@@ -626,6 +629,9 @@ body.is-people-view .masthead {
   .panel { padding: 18px; }
   .principle { grid-template-columns: 1fr; gap: 5px; }
   .compact-dialog, .person-dialog { padding: 24px 18px; }
+  .person-name-form { flex-wrap: wrap; }
+  .person-name-form input { flex: 1 1 calc(50% - 4px); width: auto; max-width: none; }
+  .person-save-state { flex: 1 1 120px; }
   .date-row { grid-template-columns: minmax(0,1fr); }
   .merge-row > input, .merge-row > select { width: 100%; max-width: none; }
   .directory-input input { min-width: 0; flex-basis: 100%; }

@@ -99,6 +99,7 @@ def seed() -> dict[str, int]:
             "face_restore": add_person(conn, 5, "路人", 0, 1, [6]),
             "split_restore": add_person(conn, 6, "路人", 0, 1, [7]),
             "browser_restore": add_person(conn, 7, "路人", 0, 1, [9]),
+            "browser_name_feedback": add_person(conn, 8, None, 0, 0, [9]),
         }
         conn.commit()
     (DATA / "faces").mkdir()
@@ -170,6 +171,33 @@ def main() -> int:
             errors: list[str] = []
             page.on("pageerror", lambda error: errors.append(str(error)))
             page.goto(URL, wait_until="domcontentloaded")
+            page.evaluate("setView('people')")
+            page.wait_for_selector('#people-grid [data-open-person="8"]')
+            page.locator('#people-grid [data-open-person="8"]').click()
+            page.wait_for_selector("#person-dialog[open]")
+            check(page.locator("#person-save-state").is_hidden(), "未命名人物打开详情时不显示虚假的已保存状态")
+            page.locator("#person-name").fill("测试姓名")
+            page.locator('#person-form button[type="submit"]').click()
+            page.wait_for_function("document.querySelector('#person-save-state').textContent === '已标记为：测试姓名'")
+            check(page.locator("#person-dialog").get_attribute("open") is not None, "确认姓名后人物详情保持打开供用户核对")
+            status_box = page.locator("#person-save-state").bounding_box()
+            button_box = page.locator('#person-form button[type="submit"]').bounding_box()
+            check(
+                bool(status_box and button_box and status_box["x"] >= button_box["x"] + button_box["width"]),
+                "姓名保存结果显示在确认按钮右侧",
+            )
+            check(req("/api/people/8?limit=48")["name"] == "测试姓名", "右侧成功反馈对应隔离数据库中的真实姓名")
+            page.screenshot(path=str(RUN / "person-name-feedback.png"))
+            page.set_viewport_size({"width": 390, "height": 844})
+            check(
+                not page.evaluate("document.querySelector('#person-dialog').scrollWidth > document.querySelector('#person-dialog').clientWidth"),
+                "390px 人物详情姓名反馈没有横向溢出",
+            )
+            page.set_viewport_size({"width": 1440, "height": 960})
+            page.locator("#person-name").fill("尚未再次保存")
+            check(page.locator("#person-save-state").is_hidden(), "继续编辑姓名时清除旧成功状态，避免误认已保存")
+            page.locator("#person-dialog").evaluate("dialog => dialog.close()")
+
             page.evaluate("setView('passersby')")
             page.wait_for_selector('#passersby-grid [data-person="7"]')
             card = page.locator('#passersby-grid [data-person="7"]')
@@ -192,7 +220,10 @@ def main() -> int:
             page.route("**/api/original/5", lambda route: route.abort())
             page.route("**/api/preview/5*", lambda route: route.abort())
             page.evaluate("openPhoto(5,{q:'',filter:'all',person:'4',directory:'',sort:'date_desc'})")
-            page.wait_for_timeout(1200)
+            page.wait_for_function(
+                "document.querySelector('#viewer-message').textContent.includes('暂时无法显示')",
+                timeout=5000,
+            )
             check(page.locator("#detail-img").is_hidden() or not page.locator("#detail-img").get_attribute("src"), "关闭后打开失败照片不会残留上一张图")
             check("暂时无法显示" in page.locator("#viewer-message").inner_text(), "图片失败时给出当前照片的明确提示")
             check(not errors, "真实 Chrome 路人恢复与失败图片路径无 JavaScript 错误")
