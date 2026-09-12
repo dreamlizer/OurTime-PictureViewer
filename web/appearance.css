@@ -414,6 +414,9 @@ body.is-sticky-browser-view .view-chrome {
   top: calc(var(--sticky-topbar-height) + var(--sticky-masthead-height));
   z-index: 10;
 }
+body.is-home-view .chrome-row {
+  display: none;
+}
 #people-view .people-view-chrome {
   padding: 4px 0 10px;
 }

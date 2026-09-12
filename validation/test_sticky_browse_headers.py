@@ -67,6 +67,17 @@ def check_sticky(page: Page, label: str, chrome_selector: str) -> None:
     page.wait_for_timeout(80)
 
 
+def content_gap(page: Page, controls: str, content: str) -> float:
+    return page.evaluate(
+        """selectors => {
+            const controls = document.querySelector(selectors.controls).getBoundingClientRect();
+            const content = document.querySelector(selectors.content).getBoundingClientRect();
+            return content.top - controls.bottom;
+        }""",
+        {"controls": controls, "content": content},
+    )
+
+
 def main() -> int:
     with urlopen(URL + "/api/status", timeout=20) as response:
         status = json.load(response)
@@ -106,7 +117,14 @@ def main() -> int:
         check_sticky(page, "合影总览", "#groups-view > .view-chrome")
         page.locator("#groups-list [data-group]").first.click()
         page.wait_for_selector("#library-view:not([hidden]) #home-query-host .ot-home-ui", timeout=15000)
+        page.wait_for_selector("#photo-grid [data-photo]", timeout=30000)
         check_sticky(page, "合影详情", "#library-view > .view-chrome")
+        group_gap = content_gap(page, "#home-query-host .ot-home-query", "#photo-grid")
+
+        page.locator('[data-view="people"]').click()
+        page.wait_for_selector("#people-grid .person-card", timeout=30000)
+        people_gap = content_gap(page, "#people-view .toolbar", "#people-grid")
+        check(abs(group_gap - people_gap) <= 4, "合影详情与人物档案的标题栏下间距一致")
 
         page.set_viewport_size({"width": 390, "height": 844})
         page.locator('[data-view="timeline"]').click()
