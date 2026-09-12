@@ -88,7 +88,16 @@ async function streamPage(index){
    waterfall.error=false;$('#stream-retry').hidden=true;
    $('#result-count').textContent=fmt(data.total)+' 张';
    const pageTitle=$('#page-title');
-   if(pageTitle && String(state.view||'').startsWith('group:')) { const title=typeof groupTitle==='function'?groupTitle(state.view):['合影','']; pageTitle.textContent=title[1]; }
+   if(pageTitle && String(state.view||'').startsWith('group:')){
+     const title=typeof groupTitle==='function'?groupTitle(state.view):['合影','合影'];
+     pageTitle.textContent=title[1];
+   }
+   const groupCount=$('#group-result-count');
+   if(groupCount){
+     const on=String(state.view||'').startsWith('group:');
+     groupCount.hidden=!on;
+     if(on) groupCount.textContent=fmt(data.total)+' 张';
+   }
    return page;
   }catch(e){if(e.name!=='AbortError'&&generation===waterfall.generation){waterfall.error=true;$('#stream-status').textContent='加载暂时失败，已显示的照片仍可查看';$('#stream-retry').hidden=false;toast(e.message,true);}return null;}
   finally{if(generation===waterfall.generation){waterfall.pending.delete(index);streamSchedule();}}

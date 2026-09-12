@@ -66,6 +66,11 @@ main { margin-left: 208px; padding: 0 28px 24px; min-width: 0; }
 .edition { font: 11px/1.4 var(--sans); letter-spacing: .4px; color: var(--muted); }
 .masthead { min-height: 68px; padding: 18px 0 14px; gap: 20px; }
 .masthead h1 { font: 600 21px/1.45 var(--sans); letter-spacing: .2px; white-space: normal; }
+.group-detail-back { flex: 0 0 36px; width: 36px; height: 36px; min-height: 36px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border: 1px solid #bac5be; border-radius: 50%; background: var(--panel); color: var(--green); }
+.group-detail-back:hover { background: var(--surface-hover); border-color: #829b8b; }
+.group-detail-back svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.masthead-title { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
+.group-result-count { color: var(--muted); font-size: 14px; font-variant-numeric: tabular-nums; }
 .masthead .stats { flex-wrap: wrap; flex-shrink: 1; justify-content: flex-end; max-width: 100%; }
 .masthead .stats button { gap: 7px; padding: 4px 12px; min-height: 34px; border-radius: 4px; }
 .masthead .stats button:first-child { padding-left: 8px; }

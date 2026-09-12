@@ -121,7 +121,11 @@
       });
     },
     personLabel: id => {
-      const person = (app.state.people || []).find(item => String(item.id) === String(id));
+      const key = String(id);
+      const cached = app.state.personLabels && app.state.personLabels[key];
+      if (cached) return cached;
+      const person = (app.state.people || []).find(item => String(item.id) === key)
+        || (app.state.personDetail && String(app.state.personDetail.id) === key ? app.state.personDetail : null);
       return person ? app.personLabel(person) : '';
     },
     selectionKind: source => source.view === 'excluded' ? 'restore' : 'exclude',
@@ -135,6 +139,10 @@
     return;
   }
   global.__ourTimeHomeUI = homeUI;
+  global.__ourTimeRememberPersonLabel = (id, label) => {
+    if (homeUI && typeof homeUI.rememberPersonLabel === 'function') homeUI.rememberPersonLabel(id, label);
+    if (homeUI) homeUI.sync();
+  };
   syncLegacyControls();
   document.addEventListener('click', () => global.setTimeout(sync, 0), { passive: true });
 })(window);

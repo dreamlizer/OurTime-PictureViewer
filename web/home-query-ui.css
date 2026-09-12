@@ -198,8 +198,10 @@ body.is-home-view .masthead-title { flex: 1 1 auto; }
 body.is-home-view #home-query-host { flex: 1 1 100%; }
 body.is-home-view .view-chrome .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; }
 body.is-home-view .view-chrome .toolbar > .section-heading { display: none; }
-body.is-group-query .view-chrome .toolbar > .section-heading { display: flex; align-items: baseline; gap: 10px; }
-body.is-group-query #collection-title { display: none; }
+body.is-group-query .view-chrome .toolbar > .section-heading { display: none; }
+body.is-people-view .view-chrome .toolbar > .section-heading { display: none; }
+.group-result-count { color: var(--ot-muted, #72817b); font-size: 14px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+body.is-people-view .people-search { margin-left: auto; }
 .ot-home-ui .ot-home-query { width: 100%; }
 .ot-home-ui .ot-home-query .ot-home-search { flex: 0 1 600px; }
 .ot-home-ui .ot-home-query .ot-home-spacer { display: block; }

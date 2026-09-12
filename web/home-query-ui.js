@@ -107,10 +107,23 @@
       el.hidden = !error;
     }
     function personLabel(id) { return peopleLabels.get(id) || (people.find(item => item.id === id) || {}).label || ('ID ' + id); }
+    function rememberLabel(id, label) {
+      const key = text(id).trim();
+      const name = text(label).trim();
+      if (!key || !name) return;
+      peopleLabels.set(key, name);
+    }
+    function resolvePersonLabel(id) {
+      const key = text(id).trim();
+      return peopleLabels.get(key)
+        || (people.find(item => item.id === key) || {}).label
+        || (typeof adapter.personLabel === 'function' ? text(adapter.personLabel(key)).trim() : '')
+        || ('ID ' + key);
+    }
     function chips(s) {
       const box = all('chips'); box.replaceChildren();
       const entries = [];
-      for (const id of personIds(s.query.person)) entries.push(['person:' + id, personLabel(id)]);
+      for (const id of personIds(s.query.person)) entries.push(['person:' + id, resolvePersonLabel(id)]);
       const time = dateLabel(s.query.dateFrom, s.query.dateTo);
       if (time) entries.push(['time', time]);
       if (s.query.place) entries.push(['place', '地点：' + s.query.place]);
@@ -201,7 +214,7 @@
         people = Array.isArray(result) ? result.map(item => {
           const id = text(item && item.id).trim();
           const label = text(item && item.label).trim() || ('ID ' + id);
-          if (id) peopleLabels.set(id, label);
+          if (id) rememberLabel(id, label);
           return { id, label, photoCount: Number(item && item.photoCount || 0) };
         }).filter(item => item.id) : [];
         renderPeople();
@@ -378,6 +391,7 @@
     snapshot(); host.appendChild(root); document.body.appendChild(popover);
     const controller = Object.freeze({
       sync,
+      rememberPersonLabel: rememberLabel,
       destroy() {
         if (destroyed) return;
         closePopover(true); destroyed = true; life.abort();
