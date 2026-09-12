@@ -41,6 +41,8 @@ DATA = Path(os.environ.get('PHOTO_LIBRARY_DATA', str(BASE / 'data'))).resolve()
 DATA.mkdir(parents=True, exist_ok=True)
 (DATA / 'thumbs').mkdir(exist_ok=True)
 (DATA / 'faces').mkdir(exist_ok=True)
+FACE_LABEL_DIR = DATA / '人名标签'
+FACE_LABEL_FILES = {f'{i}.png' for i in range(1, 10)}
 MODEL_ROOT = Path(os.environ.get('PHOTO_MODEL_ROOT', 'G:/CodexModels/insightface'))
 GEO_ROOT = Path(os.environ.get('PHOTO_GEO_ROOT', 'G:/CodexModels/geo'))
 PLACES = PlaceIndex(GEO_ROOT)
@@ -1399,6 +1401,15 @@ def face_crop(fid:int):
     path=DATA/'faces'/f'{fid}.jpg'
     if not path.exists(): raise HTTPException(404,'人脸缩略图不存在')
     return FileResponse(path,media_type='image/jpeg')
+
+@app.get('/api/face-label-bg/{filename}')
+def face_label_background(filename:str):
+    if filename not in FACE_LABEL_FILES:
+        raise HTTPException(404,'标签底图不存在')
+    path=FACE_LABEL_DIR/filename
+    if not path.is_file():
+        raise HTTPException(404,'标签底图不存在')
+    return FileResponse(path,media_type='image/png',headers={'Cache-Control':'public, max-age=86400'})
 
 def original_path(aid):
     with db() as c: rows=c.execute('SELECT path FROM files WHERE asset_id=? ORDER BY excluded,exists_now DESC,id',(aid,)).fetchall()

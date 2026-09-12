@@ -1,0 +1,55 @@
+{
+  "scope": "Generated files only. No complete upstream checkout, original smoke test or live app integration available.",
+  "javascript_syntax": [
+    {
+      "file": "web/home-query-ui.js",
+      "status": "PASS",
+      "exit_code": 0
+    },
+    {
+      "file": "web/home-query-bridge.js",
+      "status": "PASS",
+      "exit_code": 0
+    }
+  ],
+  "upstream_full_checkout": {
+    "status": "NOT_AVAILABLE"
+  },
+  "real_app_smoke": {
+    "status": "NOT_RUN",
+    "reason": "Complete local project and its runtime are not available in this environment."
+  },
+  "live_library_writes": {
+    "status": "NOT_RUN",
+    "reason": "Never requested; local production database is unavailable and must not be modified by tests."
+  },
+  "python_syntax": {
+    "status": "PASS",
+    "files": [
+      "tools/preflight.py",
+      "tests/run_browser_checks.py"
+    ]
+  },
+  "new_file_patch": {
+    "status": "PASS",
+    "target": "Empty isolated temporary Git repository",
+    "git_apply_check_exit": 0,
+    "git_apply_exit": 0,
+    "files": [
+      "web/home-query-ui.js",
+      "web/home-query-ui.css",
+      "web/home-query-bridge.js"
+    ],
+    "file_bytes_match": true,
+    "second_application_rejected": true,
+    "existing_project_files_modified": false
+  },
+  "preflight_synthetic_checks": {
+    "status": "PASS",
+    "cases": [
+      "New files absent: verifies package and additions-only patch without changing target.",
+      "Different existing file: reports CONFLICT and refuses overwrite."
+    ],
+    "target": "Synthetic temporary repository only, not the user project."
+  }
+}

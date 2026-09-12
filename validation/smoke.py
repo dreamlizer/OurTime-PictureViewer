@@ -115,6 +115,18 @@ def main():
                 fail("%s 用到 %s()，但 app.js 没有定义" % (filename, name))
     ok("viewer.js / waterfall.js 用到的公共函数由 app.js 提供")
 
+    if '<option value="ivory">素笺</option>' not in viewer:
+        fail("人名标签缺少素笺主题名称")
+    if not all(path in viewer for path in (
+        "/api/face-label-bg/1.png",
+        "/api/face-label-bg/2.png",
+        "/api/face-label-bg/3.png",
+    )):
+        fail("素笺主题没有固定映射 1.png / 2.png / 3.png")
+    if "faceLabelProfile" not in viewer or "[...normalized].length" not in viewer:
+        fail("素笺主题缺少按 Unicode 字符数选择 S/M/L 的规则")
+    ok("素笺主题名称、固定底图映射和姓名长度规则已接入")
+
     for name, text in sources.items():
         bad = visible_undefined(text)
         if bad:

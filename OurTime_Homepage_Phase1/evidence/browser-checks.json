@@ -1,0 +1,173 @@
+{
+  "suite": "OurTime homepage Phase 1 isolated module contract",
+  "scope": "Synthetic adapter + in-memory fixture only; NOT real repo/backend/live-library verification.",
+  "browser": "144.0.7559.96",
+  "elapsed_seconds": 14.95,
+  "checks": [
+    {
+      "name": "default_hidden_states_and_four_controls",
+      "status": "PASS"
+    },
+    {
+      "name": "draft_changes_do_not_apply_on_cancel",
+      "status": "PASS"
+    },
+    {
+      "name": "atomic_filters_one_query_preserve_search_and_sort",
+      "status": "PASS"
+    },
+    {
+      "name": "individual_and_all_clear_leave_sort_unchanged",
+      "status": "PASS"
+    },
+    {
+      "name": "reset_is_draft_only_and_keeps_keyword",
+      "status": "PASS"
+    },
+    {
+      "name": "folder_picker_only_updates_draft_no_scan",
+      "status": "PASS"
+    },
+    {
+      "name": "canceled_folder_picker_preserves_draft_path",
+      "status": "PASS"
+    },
+    {
+      "name": "local_people_search_does_not_search_photos_or_submit",
+      "status": "PASS"
+    },
+    {
+      "name": "IME_and_debounce_no_duplicate_search",
+      "status": "PASS"
+    },
+    {
+      "name": "opening_filter_flushes_pending_keyword_first",
+      "status": "PASS"
+    },
+    {
+      "name": "sorting_and_filters_are_independent",
+      "status": "PASS"
+    },
+    {
+      "name": "batch_selection_delegates_existing_actions_no_delete",
+      "status": "PASS"
+    },
+    {
+      "name": "excluded_context_exposes_restore_not_exclude",
+      "status": "PASS"
+    },
+    {
+      "name": "failed_apply_keeps_drawer_and_authoritative_state",
+      "status": "PASS"
+    },
+    {
+      "name": "busy_guard_prevents_double_apply_and_ambiguous_cancel",
+      "status": "PASS"
+    },
+    {
+      "name": "navigation_closes_drawer_and_discards_late_people",
+      "status": "PASS"
+    },
+    {
+      "name": "late_folder_response_cannot_write_reopened_drawer",
+      "status": "PASS"
+    },
+    {
+      "name": "stale_draft_is_rejected_instead_of_overwriting_state",
+      "status": "PASS"
+    },
+    {
+      "name": "failed_people_load_preserves_unknown_or_multi_person_id",
+      "status": "PASS"
+    },
+    {
+      "name": "large_people_catalog_is_locally_searchable_and_bounded",
+      "status": "PASS"
+    },
+    {
+      "name": "slow_search_serializes_and_preserves_latest_typed_text",
+      "status": "PASS"
+    },
+    {
+      "name": "destroy_is_clean_and_allows_explicit_remount",
+      "status": "PASS"
+    },
+    {
+      "name": "missing_adapter_fails_before_mutating_host",
+      "status": "PASS"
+    },
+    {
+      "name": "untrusted_names_keywords_and_paths_are_plain_text",
+      "status": "PASS"
+    },
+    {
+      "name": "unknown_sort_fails_closed_instead_of_silent_remapping",
+      "status": "PASS"
+    },
+    {
+      "name": "native_dialog_focus_Escape_and_backdrop_close",
+      "status": "PASS"
+    },
+    {
+      "name": "refresh_only_when_host_has_real_updates_and_not_selecting",
+      "status": "PASS"
+    },
+    {
+      "name": "directory_preserves_internal_path_and_never_changes_sort",
+      "status": "PASS"
+    },
+    {
+      "name": "navigation_cancels_not_yet_applied_keyword",
+      "status": "PASS"
+    },
+    {
+      "name": "responsive_1440_1280_768_390_320_and_caption_scope",
+      "status": "PASS"
+    },
+    {
+      "name": "bridge_atomic_flat_state_update_one_existing_reload",
+      "status": "PASS"
+    },
+    {
+      "name": "bridge_legacy_values_sync_without_duplicate_change_events",
+      "status": "PASS"
+    },
+    {
+      "name": "bridge_failed_query_rolls_back_its_own_applied_fields",
+      "status": "PASS"
+    },
+    {
+      "name": "bridge_stale_query_rejected_before_mutation_or_reload",
+      "status": "PASS"
+    },
+    {
+      "name": "bridge_inactive_scope_blocks_changes",
+      "status": "PASS"
+    },
+    {
+      "name": "bridge_rollback_does_not_overwrite_newer_external_query",
+      "status": "PASS"
+    },
+    {
+      "name": "bridge_sort_uses_existing_reload_preserves_query",
+      "status": "PASS"
+    },
+    {
+      "name": "bridge_selection_reuses_existing_set_and_guards_empty_action",
+      "status": "PASS"
+    },
+    {
+      "name": "new_UI_and_bridge_work_together_against_flat_state_contract",
+      "status": "PASS"
+    },
+    {
+      "name": "no_browser_errors_or_external_or_write_requests",
+      "status": "PASS"
+    }
+  ],
+  "page_errors": [],
+  "non_get_requests": [],
+  "external_requests": [],
+  "pass_count": 40,
+  "fail_count": 0
+}

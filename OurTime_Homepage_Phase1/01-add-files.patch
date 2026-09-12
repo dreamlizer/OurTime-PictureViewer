@@ -1,0 +1,811 @@
+diff --git a/web/home-query-ui.js b/web/home-query-ui.js
+new file mode 100644
+index 0000000..8880b63
+--- /dev/null
++++ b/web/home-query-ui.js
+@@ -0,0 +1,489 @@
++/* OurTime homepage query controls, Phase 1.
++ * Plain browser JavaScript. No HTTP, storage, database, viewer or grid ownership.
++ * The host adapter is the single source of applied query/selection state.
++ */
++(function (global) {
++  'use strict';
++  const VERSION = '1.0.0';
++  const SORTS = new Map([
++    ['date_desc', '最新优先'], ['date_asc', '最早优先'],
++    ['name_asc', '文件名顺序'], ['name_desc', '文件名倒序']
++  ]);
++  const REQUIRED = ['readState', 'applyQuery', 'applySort', 'getPeople',
++    'setSelecting', 'selectVisible', 'clearSelection', 'editSelected', 'excludeSelected'];
++  const mounts = new WeakMap();
++  let instanceCounter = 0;
++  const text = value => value == null ? '' : String(value);
++  const queryOf = value => ({
++    q: text(value && value.q),
++    person: text(value && value.person).trim(),
++    directory: text(value && value.directory).trim()
++  });
++  const sameQuery = (a, b) => a.q === b.q && a.person === b.person && a.directory === b.directory;
++  const shortPath = value => {
++    if (/^[a-z]:[\\/]?$/i.test(value)) return value;
++    const parts = value.replace(/[\\/]+$/, '').split(/[\\/]/);
++    return parts[parts.length - 1] || value;
++  };
++  const svg = (body) => '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">' + body + '</svg>';
++  const ICONS = {
++    search: svg('<circle cx="10.7" cy="10.7" r="6.7"/><path d="m16 16 4.5 4.5"/>'),
++    filter: svg('<path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="2.3"/><circle cx="15" cy="17" r="2.3"/>'),
++    select: svg('<rect x="4" y="4" width="16" height="16" rx="4"/><path d="m8 12 3 3 5-6"/>'),
++    close: svg('<path d="m7 7 10 10M17 7 7 17"/>')
++  };
++
++  function mount(options) {
++    const host = options && options.host;
++    const adapter = options && options.adapter;
++    if (!host || host.nodeType !== 1 || !host.ownerDocument) {
++      throw new TypeError('OurTimeHomeUI.mount requires a host element.');
++    }
++    if (mounts.has(host)) throw new Error('This homepage host is already mounted.');
++    for (const key of REQUIRED) {
++      if (!adapter || typeof adapter[key] !== 'function') {
++        throw new TypeError('Homepage adapter is missing: ' + key);
++      }
++    }
++    const document = host.ownerDocument;
++    const window = document.defaultView;
++    const life = new window.AbortController();
++    const root = document.createElement('section');
++    root.className = 'ot-home-ui';
++    root.setAttribute('aria-label', '照片查询与选择');
++    // Only constant, owned markup is assigned with innerHTML. User data uses textContent.
++    root.innerHTML = `
++      <form class="ot-home-query" role="search" aria-label="搜索照片">
++        <label class="ot-home-search">
++          <span class="ot-home-icon">${ICONS.search}</span>
++          <span class="ot-home-sr-only">搜索照片</span>
++          <input data-ot="search" type="search" placeholder="搜索照片…" autocomplete="off"
++            title="按现有关键词搜索；精确人物和文件夹条件请使用筛选">
++        </label>
++        <button data-ot="filters" class="ot-home-button" type="button" aria-haspopup="dialog" aria-expanded="false">
++          ${ICONS.filter}<span>筛选</span><span data-ot="badge" class="ot-home-badge" hidden></span>
++        </button>
++        <button data-ot="select" class="ot-home-button" type="button">${ICONS.select}<span>选择</span></button>
++        <label class="ot-home-sort"><span class="ot-home-sr-only">照片排序</span>
++          <select data-ot="sort" aria-label="照片排序"></select>
++        </label>
++      </form>
++      <div data-ot="batch" class="ot-home-batch" role="group" aria-label="批量选择操作" hidden>
++        <strong data-ot="selected-count" class="ot-home-selected-count" role="status" aria-live="polite"></strong>
++        <button data-ot="visible" class="ot-home-button ot-home-quiet" type="button">选择当前屏幕</button>
++        <button data-ot="clear-selection" class="ot-home-button ot-home-quiet" type="button">清空</button>
++        <span class="ot-home-spacer" aria-hidden="true"></span>
++        <button data-ot="exclude" class="ot-home-button ot-home-danger" type="button">排除所选…</button>
++        <button data-ot="restore" class="ot-home-button" type="button" hidden>恢复所选</button>
++        <button data-ot="edit" class="ot-home-button" type="button">批量补录</button>
++        <button data-ot="cancel-selection" class="ot-home-button" type="button">取消</button>
++      </div>
++      <div data-ot="chips" class="ot-home-chips" aria-label="已应用的查询条件" hidden></div>
++      <div data-ot="notice" class="ot-home-notice" hidden>
++        <span>照片库有更新，可刷新当前列表。</span>
++        <button data-ot="refresh" class="ot-home-link" type="button">刷新照片</button>
++      </div>
++      <p data-ot="error" class="ot-home-error" role="alert" hidden></p>`;
++
++    const dialog = document.createElement('dialog');
++    dialog.className = 'ot-home-filter-dialog';
++    dialog.setAttribute('aria-label', '筛选照片');
++    do { dialog.id = 'ot-home-filter-' + (++instanceCounter); } while (document.getElementById(dialog.id));
++    root.querySelector('[data-ot="filters"]').setAttribute('aria-controls', dialog.id);
++    dialog.innerHTML = `
++      <form class="ot-home-filter-form" aria-label="精确筛选">
++        <header class="ot-home-filter-header">
++          <div><h2>筛选照片</h2><p>条件同时满足时，照片才会显示。</p></div>
++          <button data-ot="close" class="ot-home-icon-button" type="button" aria-label="关闭筛选">${ICONS.close}</button>
++        </header>
++        <div class="ot-home-filter-body">
++          <fieldset class="ot-home-fieldset">
++            <legend>人物</legend>
++            <label class="ot-home-label ot-home-people-search"><span class="ot-home-sr-only">查找已有人物</span>
++              <input data-ot="people-search" type="search" placeholder="搜索已有人物…" autocomplete="off"
++                aria-label="查找已有人物"></label>
++            <label class="ot-home-label"><span class="ot-home-sr-only">筛选人物</span>
++              <select data-ot="person" size="5" aria-label="筛选人物"><option value="">全部人物</option></select>
++            </label>
++            <p data-ot="people-status" class="ot-home-help" role="status"></p>
++          </fieldset>
++          <fieldset class="ot-home-fieldset">
++            <legend>文件夹</legend>
++            <label class="ot-home-label"><span class="ot-home-sr-only">文件夹路径</span>
++              <input data-ot="directory" type="text" placeholder="粘贴照片文件夹路径" autocomplete="off" spellcheck="false">
++            </label>
++            <button data-ot="choose-folder" class="ot-home-button ot-home-folder-button" type="button" hidden>选择文件夹…</button>
++            <p class="ot-home-help">包含子文件夹；只筛选现有资料，不会扫描或添加照片。</p>
++          </fieldset>
++          <p data-ot="filter-error" class="ot-home-error" role="alert" hidden></p>
++        </div>
++        <footer class="ot-home-filter-footer">
++          <button data-ot="reset-draft" class="ot-home-link" type="button">重置条件</button>
++          <span class="ot-home-spacer" aria-hidden="true"></span>
++          <button data-ot="cancel" class="ot-home-button" type="button">取消</button>
++          <button data-ot="apply" class="ot-home-button ot-home-primary" type="submit">应用筛选</button>
++        </footer>
++      </form>`;
++    const all = name => root.querySelector(`[data-ot="${name}"]`) || dialog.querySelector(`[data-ot="${name}"]`);
++    for (const [value, label] of SORTS) all('sort').add(new window.Option(label, value));
++    const queryForm = root.querySelector('form');
++    const filterForm = dialog.querySelector('form');
++    let destroyed = false;
++    let busy = false;
++    let composing = false;
++    let searchDirty = false;
++    let searchTimer = null;
++    let draft = null;
++    let openedState = null;
++    let openToken = 0;
++    let peopleController = null;
++    let people = [];
++    let peopleLoaded = false;
++    let folderPending = false;
++    let lastFocus = null;
++    let lastScope = null;
++
++    function listen(element, event, handler) {
++      element.addEventListener(event, handler, { signal: life.signal });
++    }
++    function snapshot() {
++      const raw = adapter.readState();
++      if (!raw || typeof raw !== 'object' || raw.then) throw new TypeError('readState must return a synchronous object.');
++      const sort = text(raw.sort || 'date_desc');
++      if (!SORTS.has(sort)) throw new Error('Unsupported homepage sort: ' + sort);
++      return {
++        active: raw.active === true,
++        scopeKey: text(raw.scopeKey),
++        query: queryOf(raw.query), sort,
++        selecting: raw.selecting === true,
++        selectedCount: Number.isFinite(Number(raw.selectedCount)) ? Math.max(0, Math.floor(Number(raw.selectedCount))) : 0,
++        selectionKind: raw.selectionKind === 'restore' ? 'restore' : 'exclude',
++        refreshAvailable: raw.refreshAvailable === true,
++        personLabel: text(raw.personLabel)
++      };
++    }
++    function report(error, inDialog) {
++      const el = all(inDialog ? 'filter-error' : 'error');
++      el.textContent = error ? (text(error.message || error) || '操作未完成，请重试。') : '';
++      el.hidden = !error;
++    }
++    function currentPersonLabel(s) {
++      if (s.personLabel) return s.personLabel;
++      const ids = s.query.person.split(',').filter(Boolean);
++      return ids.map(id => {
++        const found = people.find(person => person.id === id);
++        return found ? found.label : 'ID ' + id;
++      }).join('、');
++    }
++    function chips(s) {
++      const box = all('chips');
++      box.replaceChildren();
++      const entries = [
++        ['q', '关键词', s.query.q, s.query.q],
++        ['person', '人物', s.query.person, currentPersonLabel(s)],
++        ['directory', '文件夹', s.query.directory, shortPath(s.query.directory)]
++      ].filter(entry => entry[2] !== '');
++      box.hidden = !entries.length;
++      for (const [key, label, raw, display] of entries) {
++        const button = document.createElement('button');
++        button.type = 'button';
++        button.className = 'ot-home-chip';
++        button.dataset.condition = key;
++        button.title = label + '：' + raw;
++        button.setAttribute('aria-label', '移除' + label + '条件：' + display);
++        const caption = document.createElement('span');
++        caption.textContent = label + '：' + display;
++        button.appendChild(caption);
++        const close = document.createElement('span');
++        close.textContent = '×'; close.setAttribute('aria-hidden', 'true');
++        button.appendChild(close);
++        button.disabled = busy || s.selecting;
++        box.appendChild(button);
++      }
++      if (entries.length) {
++        const button = document.createElement('button');
++        button.type = 'button'; button.className = 'ot-home-link';
++        button.dataset.condition = 'all'; button.textContent = '清除全部';
++        button.disabled = busy || s.selecting;
++        box.appendChild(button);
++      }
++    }
++    function sync() {
++      if (destroyed) return;
++      const s = snapshot();
++      if (lastScope !== null && (lastScope !== s.scopeKey || !s.active)) {
++        clearTimeout(searchTimer); searchTimer = null; searchDirty = false;
++        if (dialog.open) closeFilters(true);
++      }
++      lastScope = s.scopeKey;
++      root.hidden = !s.active;
++      if (!searchDirty && !composing) all('search').value = s.query.q;
++      all('sort').value = s.sort;
++      queryForm.hidden = s.selecting;
++      all('batch').hidden = !s.selecting;
++      root.setAttribute('aria-busy', String(busy));
++      const count = Number(Boolean(s.query.person)) + Number(Boolean(s.query.directory));
++      all('badge').textContent = text(count); all('badge').hidden = !count;
++      all('filters').setAttribute('aria-expanded', String(dialog.open));
++      all('filters').classList.toggle('ot-home-filter-active', count > 0);
++      all('selected-count').textContent = '已选择 ' + s.selectedCount + ' 张';
++      all('exclude').hidden = s.selectionKind === 'restore';
++      all('edit').hidden = s.selectionKind === 'restore';
++      all('restore').hidden = s.selectionKind !== 'restore';
++      all('restore').disabled = busy || !s.selectedCount || typeof adapter.restoreSelected !== 'function';
++      for (const key of ['filters', 'select', 'sort', 'visible', 'cancel-selection', 'refresh']) all(key).disabled = busy;
++      for (const key of ['clear-selection', 'exclude', 'edit']) all(key).disabled = busy || !s.selectedCount;
++      all('notice').hidden = !s.refreshAvailable || s.selecting || typeof adapter.refresh !== 'function';
++      for (const key of ['apply', 'reset-draft', 'person', 'directory', 'people-search', 'choose-folder']) {
++        all(key).disabled = busy || folderPending;
++      }
++      all('cancel').disabled = busy; all('close').disabled = busy;
++      chips(s);
++    }
++    async function runAction(callback, inDialog) {
++      if (busy || destroyed) return false;
++      busy = true; report(null, inDialog); sync();
++      let succeeded = false;
++      try {
++        await callback(life.signal);
++        succeeded = !destroyed;
++      } catch (error) {
++        if (!destroyed && error.name !== 'AbortError') report(error, inDialog && dialog.open);
++      } finally {
++        busy = false;
++        if (!destroyed) {
++          sync();
++          if (searchDirty && !composing && !dialog.open) scheduleSearch();
++        }
++      }
++      return succeeded;
++    }
++    function context(s, signal) {
++      return { expectedScopeKey: s.scopeKey, expectedQuery: Object.freeze({ ...s.query }), signal };
++    }
++    async function applyQuery(next, inDialog) {
++      const before = snapshot();
++      if (!before.active || before.selecting) return false;
++      const query = queryOf(next);
++      if (sameQuery(before.query, query)) return true;
++      return runAction(signal => adapter.applyQuery(Object.freeze(query), context(before, signal)), inDialog);
++    }
++    function scheduleSearch() {
++      clearTimeout(searchTimer);
++      if (destroyed || composing) return;
++      searchTimer = window.setTimeout(() => {
++        searchTimer = null;
++        if (!busy) void commitSearch();
++      }, 300);
++    }
++    async function commitSearch() {
++      clearTimeout(searchTimer); searchTimer = null;
++      if (composing || busy || destroyed) return false;
++      if (!searchDirty) return true;
++      const before = snapshot();
++      if (!before.active || before.selecting) return false;
++      const value = all('search').value;
++      searchDirty = false;
++      const ok = await applyQuery({ ...before.query, q: value });
++      // Failure leaves authoritative state unchanged; typed text remains available for retry.
++      if (!ok && !destroyed && !searchDirty) {
++        all('search').value = value;
++      }
++      return ok;
++    }
++    function closeFilters(force = false) {
++      if (busy && !force) return;
++      if (!dialog.open && !draft) return;
++      openToken += 1;
++      if (peopleController) peopleController.abort();
++      peopleController = null; folderPending = false;
++      draft = null; openedState = null;
++      if (dialog.open) dialog.close();
++      all('filters').setAttribute('aria-expanded', 'false');
++      if (lastFocus && lastFocus.isConnected && !destroyed) lastFocus.focus({ preventScroll: true });
++    }
++    function renderPeople() {
++      if (!draft || destroyed) return;
++      const needle = all('people-search').value.trim().toLocaleLowerCase();
++      const matches = people.filter(person => !needle || person.label.toLocaleLowerCase().includes(needle));
++      const select = all('person');
++      select.replaceChildren(new window.Option('全部人物', ''));
++      const visible = matches.slice(0, 200);
++      if (draft.person && !visible.some(person => person.id === draft.person)) {
++        const known = people.find(person => person.id === draft.person);
++        select.add(new window.Option(known ? known.label : '当前已选人物（' + draft.person + '）', draft.person));
++      }
++      for (const person of visible) select.add(new window.Option(person.label, person.id));
++      select.value = draft.person;
++      if (peopleLoaded) {
++        all('people-status').textContent = matches.length > 200
++          ? '匹配 ' + matches.length + ' 位，显示前 200 位。可继续输入姓名缩小范围。'
++          : (people.length ? '只显示包含所选人物的照片。' : '当前没有可选人物。');
++      }
++    }
++    async function loadPeople(token) {
++      peopleController = new window.AbortController();
++      const controller = peopleController;
++      all('people-status').textContent = '正在读取已有人物…';
++      peopleLoaded = false;
++      try {
++        const result = await adapter.getPeople({ signal: controller.signal });
++        if (destroyed || !draft || token !== openToken || controller.signal.aborted) return;
++        if (!Array.isArray(result)) throw new TypeError('人物数据格式不正确。');
++        const unique = new Map();
++        for (const item of result) {
++          if (!item || item.id == null || !text(item.id).trim()) continue;
++          const id = text(item.id).trim();
++          unique.set(id, { id, label: text(item.label).trim() || 'ID ' + id });
++        }
++        people = [...unique.values()]; peopleLoaded = true;
++        renderPeople(); sync();
++      } catch (error) {
++        if (!destroyed && draft && token === openToken && error.name !== 'AbortError') {
++          all('people-status').textContent = '人物列表暂时无法读取；现有的人物条件仍保留。';
++        }
++      }
++    }
++    async function openFilters() {
++      if (destroyed || busy || composing) return false;
++      if (!await commitSearch()) return false;
++      const s = snapshot();
++      if (!s.active || s.selecting || dialog.open) return false;
++      draft = { ...s.query }; openedState = s;
++      openToken += 1;
++      all('directory').value = draft.directory;
++      all('people-search').value = '';
++      all('choose-folder').hidden = typeof adapter.chooseFolder !== 'function';
++      report(null, true); renderPeople();
++      lastFocus = document.activeElement;
++      dialog.showModal(); sync();
++      all('people-search').focus();
++      void loadPeople(openToken);
++      return true;
++    }
++    async function applyDraft() {
++      if (!draft || busy || folderPending || destroyed) return;
++      const s = snapshot();
++      if (!openedState || s.scopeKey !== openedState.scopeKey || !sameQuery(s.query, openedState.query)) {
++        report('当前查询范围已变化，请关闭筛选后重新打开。', true); return;
++      }
++      const token = openToken;
++      const next = { ...s.query, person: draft.person, directory: all('directory').value.trim() };
++      const ok = await applyQuery(next, true);
++      if (ok && !destroyed && token === openToken) closeFilters();
++    }
++    async function chooseFolder() {
++      if (!draft || busy || folderPending || typeof adapter.chooseFolder !== 'function') return;
++      const token = openToken;
++      folderPending = true; report(null, true); sync();
++      try {
++        const path = await adapter.chooseFolder({ current: all('directory').value, signal: life.signal });
++        if (destroyed || !draft || token !== openToken) return;
++        // Null means canceled. Empty text means an explicit clear, never a scan request.
++        if (path != null) all('directory').value = text(path);
++      } catch (error) {
++        if (!destroyed && draft && token === openToken && error.name !== 'AbortError') report(error, true);
++      } finally {
++        if (!destroyed && token === openToken) { folderPending = false; sync(); }
++      }
++    }
++    async function doSelection(method) {
++      if (busy || destroyed) return;
++      const s = snapshot();
++      if (!s.active || !s.selecting) return;
++      if (['editSelected', 'excludeSelected', 'restoreSelected', 'clearSelection'].includes(method) && !s.selectedCount) return;
++      if (method === 'excludeSelected' && s.selectionKind === 'restore') return;
++      if (method === 'restoreSelected' && s.selectionKind !== 'restore') return;
++      if (typeof adapter[method] !== 'function') return;
++      await runAction(signal => adapter[method](context(s, signal)));
++    }
++    listen(all('search'), 'compositionstart', () => { composing = true; clearTimeout(searchTimer); });
++    listen(all('search'), 'compositionend', () => { composing = false; searchDirty = true; scheduleSearch(); });
++    listen(all('search'), 'input', () => { searchDirty = true; if (!composing) scheduleSearch(); });
++    listen(queryForm, 'submit', event => {
++      event.preventDefault(); if (event.isComposing || composing) return;
++      searchDirty = true; void commitSearch();
++    });
++    listen(all('filters'), 'click', () => void openFilters());
++    listen(all('select'), 'click', async () => {
++      if (busy || !await commitSearch()) return;
++      const s = snapshot();
++      if (!s.active) return;
++      const ok = await runAction(signal => adapter.setSelecting(true, context(s, signal)));
++      if (ok && !destroyed) all('visible').focus({ preventScroll: true });
++    });
++    listen(all('sort'), 'change', async () => {
++      const value = all('sort').value;
++      if (busy || !await commitSearch()) { sync(); return; }
++      const s = snapshot();
++      if (!s.active || !SORTS.has(value)) return;
++      await runAction(signal => adapter.applySort(value, context(s, signal)));
++    });
++    listen(all('chips'), 'click', async event => {
++      const button = event.target.closest('button[data-condition]');
++      if (!button || button.disabled || busy) return;
++      if (!await commitSearch()) return;
++      const s = snapshot();
++      if (!s.active || s.selecting) return;
++      const key = button.dataset.condition;
++      const next = key === 'all' ? queryOf({}) : { ...s.query, [key]: '' };
++      const ok = await applyQuery(next);
++      if (ok && !destroyed) all('filters').focus({ preventScroll: true });
++    });
++    for (const [key, method] of [
++      ['visible', 'selectVisible'], ['clear-selection', 'clearSelection'],
++      ['edit', 'editSelected'], ['exclude', 'excludeSelected'], ['restore', 'restoreSelected']
++    ]) listen(all(key), 'click', () => void doSelection(method));
++    listen(all('cancel-selection'), 'click', async () => {
++      const s = snapshot();
++      if (s.active) {
++        const ok = await runAction(signal => adapter.setSelecting(false, context(s, signal)));
++        if (ok && !destroyed) all('select').focus({ preventScroll: true });
++      }
++    });
++    listen(all('refresh'), 'click', async () => {
++      if (busy || !await commitSearch()) return;
++      const s = snapshot();
++      if (s.active && !s.selecting && typeof adapter.refresh === 'function') {
++        await runAction(signal => adapter.refresh(context(s, signal)));
++      }
++    });
++    listen(filterForm, 'submit', event => { event.preventDefault(); if (!event.isComposing) void applyDraft(); });
++    for (const key of ['cancel', 'close']) listen(all(key), 'click', () => closeFilters());
++    listen(dialog, 'cancel', event => { event.preventDefault(); event.stopPropagation(); closeFilters(); });
++    listen(dialog, 'keydown', event => { if (event.key === 'Escape') event.stopPropagation(); });
++    listen(dialog, 'click', event => {
++      if (event.target !== dialog) return;
++      const rect = dialog.getBoundingClientRect();
++      if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) closeFilters();
++    });
++    listen(all('people-search'), 'input', renderPeople);
++    listen(all('people-search'), 'keydown', event => { if (event.key === 'Enter') event.preventDefault(); });
++    listen(all('person'), 'change', () => { if (draft) draft.person = all('person').value; });
++    listen(all('reset-draft'), 'click', () => {
++      if (!draft || busy) return;
++      draft.person = ''; all('directory').value = ''; all('people-search').value = ''; renderPeople();
++    });
++    listen(all('choose-folder'), 'click', () => void chooseFolder());
++    // Validate before touching the real page so a missing host contract leaves old controls intact.
++    snapshot();
++    host.appendChild(root);
++    document.body.appendChild(dialog);
++    const controller = Object.freeze({
++      sync, openFilters,
++      closeFilters,
++      destroy() {
++        if (destroyed) return;
++        closeFilters(true); destroyed = true;
++        life.abort(); clearTimeout(searchTimer);
++        if (peopleController) peopleController.abort();
++        root.remove(); dialog.remove(); mounts.delete(host);
++      }
++    });
++    mounts.set(host, controller);
++    sync();
++    return controller;
++  }
++  if (global.OurTimeHomeUI) throw new Error('OurTimeHomeUI was loaded twice.');
++  global.OurTimeHomeUI = Object.freeze({ version: VERSION, mount });
++})(window);
+diff --git a/web/home-query-ui.css b/web/home-query-ui.css
+new file mode 100644
+index 0000000..a9d4c76
+--- /dev/null
++++ b/web/home-query-ui.css
+@@ -0,0 +1,182 @@
++/* Deliberately scoped: no body, global button, gallery, viewer or caption overrides. */
++.ot-home-ui,
++.ot-home-filter-dialog {
++  --ot-text: #253934;
++  --ot-muted: #72817b;
++  --ot-line: #dde5df;
++  --ot-soft: #f3f6f2;
++  --ot-accent: #315c49;
++  --ot-focus: #67987a;
++  --ot-danger: #934e46;
++  color: var(--ot-text);
++  font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
++  box-sizing: border-box;
++}
++.ot-home-ui *, .ot-home-filter-dialog * { box-sizing: border-box; }
++.ot-home-ui[hidden], .ot-home-filter-dialog:not([open]),
++.ot-home-ui [hidden], .ot-home-filter-dialog [hidden] { display: none !important; }
++.ot-home-ui { width: 100%; min-width: 0; margin-block: 0 20px; }
++.ot-home-ui button, .ot-home-ui input, .ot-home-ui select,
++.ot-home-filter-dialog button, .ot-home-filter-dialog input, .ot-home-filter-dialog select {
++  font: inherit;
++  letter-spacing: normal;
++}
++.ot-home-ui svg, .ot-home-filter-dialog svg {
++  display: block; width: 18px; height: 18px; flex: 0 0 18px;
++  fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round;
++}
++.ot-home-ui .ot-home-query {
++  display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
++  padding: 0; margin: 0; border: 0; background: transparent;
++}
++.ot-home-ui .ot-home-search {
++  display: flex; align-items: center; gap: 10px;
++  flex: 1 1 270px; min-width: 170px;
++  min-height: 42px; margin: 0; padding: 0 14px;
++  border: 1px solid var(--ot-line); border-radius: 10px;
++  background: #fff; color: var(--ot-muted);
++}
++.ot-home-ui .ot-home-search input {
++  width: 100%; min-width: 0; height: 40px; margin: 0; padding: 0;
++  color: var(--ot-text); background: transparent; border: 0; border-radius: 0;
++  box-shadow: none;
++}
++.ot-home-ui .ot-home-search input:focus { outline: none; }
++.ot-home-ui .ot-home-search:focus-within {
++  border-color: var(--ot-focus); box-shadow: 0 0 0 3px rgb(103 152 122 / 15%);
++}
++.ot-home-ui .ot-home-search input::placeholder,
++.ot-home-filter-dialog input::placeholder { color: #88948d; opacity: 1; }
++.ot-home-ui .ot-home-button, .ot-home-filter-dialog .ot-home-button {
++  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
++  flex: 0 0 auto; min-height: 42px; min-width: 64px;
++  margin: 0; padding: 9px 14px;
++  color: var(--ot-text); background: #fff;
++  border: 1px solid var(--ot-line); border-radius: 10px;
++  font-weight: 500; white-space: nowrap; cursor: pointer;
++  box-shadow: none; text-decoration: none;
++}
++.ot-home-ui .ot-home-button:hover:not(:disabled),
++.ot-home-filter-dialog .ot-home-button:hover:not(:disabled) { background: var(--ot-soft); border-color: #c0cec3; }
++.ot-home-ui .ot-home-button.ot-home-filter-active {
++  color: var(--ot-accent); background: #edf4ed; border-color: #c8dacb;
++}
++.ot-home-ui .ot-home-badge {
++  min-width: 18px; height: 18px; padding-inline: 4px; border-radius: 9px;
++  color: var(--ot-accent); background: #dbe9dc; font-size: 11px; line-height: 18px; text-align: center;
++}
++.ot-home-ui .ot-home-sort { display: block; flex: 0 0 auto; margin: 0 0 0 12px; }
++.ot-home-ui .ot-home-sort select {
++  display: block; width: auto; min-width: 123px; min-height: 42px; margin: 0;
++  padding: 8px 12px; color: var(--ot-text); background: transparent;
++  border: 1px solid transparent; border-radius: 8px; cursor: pointer;
++}
++.ot-home-ui .ot-home-sort select:hover { border-color: var(--ot-line); background: #fff; }
++.ot-home-ui .ot-home-chips {
++  display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px 0 0; margin: 0;
++}
++.ot-home-ui .ot-home-chip {
++  display: inline-flex; align-items: center; gap: 10px; min-height: 32px; max-width: min(100%, 360px);
++  padding: 5px 11px; margin: 0; border: 1px solid #e0e7df; border-radius: 7px;
++  color: #516850; background: var(--ot-soft); font-size: 12px; cursor: pointer;
++}
++.ot-home-ui .ot-home-chip > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
++.ot-home-ui .ot-home-chip > span:last-child { flex: 0 0 auto; font-size: 16px; line-height: 1; }
++.ot-home-ui .ot-home-link, .ot-home-filter-dialog .ot-home-link {
++  display: inline-flex; align-items: center; min-height: 34px; padding: 5px 7px; margin: 0;
++  border: 0; border-radius: 6px; background: transparent; color: var(--ot-muted);
++  font-size: 13px; font-weight: 400; cursor: pointer; white-space: nowrap; box-shadow: none;
++}
++.ot-home-ui .ot-home-link:hover:not(:disabled),
++.ot-home-filter-dialog .ot-home-link:hover:not(:disabled) { color: var(--ot-accent); background: var(--ot-soft); }
++.ot-home-ui .ot-home-batch {
++  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
++  min-height: 42px; padding: 0; margin: 0;
++}
++.ot-home-ui .ot-home-selected-count { padding-right: 8px; font-size: 14px; font-weight: 600; white-space: nowrap; }
++.ot-home-ui .ot-home-spacer, .ot-home-filter-dialog .ot-home-spacer { flex: 1 1 auto; }
++.ot-home-ui .ot-home-quiet { background: transparent; border-color: transparent; padding-inline: 8px; }
++.ot-home-ui .ot-home-danger { color: var(--ot-danger); }
++.ot-home-ui .ot-home-notice {
++  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
++  margin-top: 10px; color: var(--ot-muted); font-size: 12px;
++}
++.ot-home-ui .ot-home-error, .ot-home-filter-dialog .ot-home-error {
++  margin: 12px 0 0; padding: 10px 12px; border: 1px solid #efd5cf; border-radius: 8px;
++  color: #813f35; background: #fff5f1; font-size: 13px; overflow-wrap: anywhere;
++}
++.ot-home-ui button:disabled, .ot-home-ui select:disabled,
++.ot-home-filter-dialog button:disabled, .ot-home-filter-dialog select:disabled,
++.ot-home-filter-dialog input:disabled { opacity: .5; cursor: default; }
++.ot-home-ui :is(button, select):focus-visible,
++.ot-home-filter-dialog :is(button, input, select):focus-visible {
++  outline: 2px solid var(--ot-focus); outline-offset: 3px;
++}
++.ot-home-ui .ot-home-sr-only, .ot-home-filter-dialog .ot-home-sr-only {
++  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
++  overflow: hidden; clip-path: inset(50%); border: 0; white-space: nowrap;
++}
++.ot-home-filter-dialog {
++  position: fixed; inset: 0 0 0 auto;
++  width: min(430px, 100vw); max-width: 100vw;
++  height: 100%; height: 100dvh; max-height: 100%; max-height: 100dvh;
++  margin: 0; padding: 0; overflow: hidden;
++  border: 0; border-left: 1px solid var(--ot-line); border-radius: 16px 0 0 16px;
++  background: #fcfdfb; box-shadow: -12px 0 48px rgb(24 45 35 / 12%);
++}
++.ot-home-filter-dialog::backdrop { background: rgb(25 42 33 / 24%); }
++.ot-home-filter-dialog .ot-home-filter-form { display: flex; flex-direction: column; height: 100%; margin: 0; }
++.ot-home-filter-dialog .ot-home-filter-header {
++  display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;
++  flex: 0 0 auto; padding: 26px 24px 22px; border-bottom: 1px solid #e6ebe5; background: transparent;
++}
++.ot-home-filter-dialog h2 { padding: 0; margin: 0; font-size: 21px; line-height: 1.4; font-weight: 600; letter-spacing: 0; }
++.ot-home-filter-dialog .ot-home-filter-header p { margin: 7px 0 0; color: var(--ot-muted); font-size: 12px; }
++.ot-home-filter-dialog .ot-home-icon-button {
++  display: inline-flex; align-items: center; justify-content: center; flex: 0 0 36px;
++  width: 36px; height: 36px; min-width: 0; padding: 0; margin: -4px -7px 0 0;
++  background: transparent; color: var(--ot-muted); border: 0; border-radius: 8px; cursor: pointer;
++}
++.ot-home-filter-dialog .ot-home-icon-button:hover { background: var(--ot-soft); }
++.ot-home-filter-dialog .ot-home-filter-body {
++  flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 24px;
++}
++.ot-home-filter-dialog .ot-home-fieldset { min-width: 0; padding: 0; margin: 0 0 28px; border: 0; }
++.ot-home-filter-dialog .ot-home-fieldset legend { float: none; width: auto; margin: 0 0 10px; padding: 0; font-size: 14px; font-weight: 600; }
++.ot-home-filter-dialog .ot-home-label { display: block; margin: 0; }
++.ot-home-filter-dialog .ot-home-label input,
++.ot-home-filter-dialog .ot-home-label select {
++  display: block; width: 100%; min-width: 0; min-height: 42px; margin: 0;
++  border: 1px solid var(--ot-line); border-radius: 8px; padding: 10px 12px;
++  color: var(--ot-text); background: #fff; box-shadow: none;
++}
++.ot-home-filter-dialog .ot-home-label select { margin-top: 8px; padding: 5px; }
++.ot-home-filter-dialog .ot-home-label select option { padding: 7px 9px; border-radius: 5px; }
++.ot-home-filter-dialog .ot-home-help { margin: 9px 0 0; color: var(--ot-muted); font-size: 12px; line-height: 1.7; }
++.ot-home-filter-dialog .ot-home-folder-button { min-height: 36px; margin-top: 10px; padding: 6px 11px; font-size: 12px; }
++.ot-home-filter-dialog .ot-home-filter-footer {
++  display: flex; flex: 0 0 auto; align-items: center; gap: 8px;
++  padding: 17px 24px max(17px, env(safe-area-inset-bottom));
++  border-top: 1px solid var(--ot-line); background: #fcfdfb;
++}
++.ot-home-filter-dialog .ot-home-primary { color: #fff; background: var(--ot-accent); border-color: var(--ot-accent); }
++.ot-home-filter-dialog .ot-home-primary:hover:not(:disabled) { color: #fff; background: #274c3d; border-color: #274c3d; }
++@media (max-width: 720px) {
++  .ot-home-ui .ot-home-query { gap: 8px; }
++  .ot-home-ui .ot-home-search { flex-basis: 100%; }
++  .ot-home-ui .ot-home-sort { margin-left: auto; }
++  .ot-home-ui .ot-home-selected-count { flex-basis: 100%; margin-bottom: 2px; }
++  .ot-home-ui .ot-home-batch .ot-home-spacer { display: none; }
++  .ot-home-ui .ot-home-batch { gap: 6px; }
++  .ot-home-ui .ot-home-batch .ot-home-button { padding-inline: 9px; }
++}
++@media (max-width: 420px) {
++  .ot-home-ui .ot-home-button { padding-inline: 11px; }
++  .ot-home-filter-dialog { border-radius: 0; border-left: 0; }
++  .ot-home-filter-dialog .ot-home-filter-header { padding: 22px 18px 18px; }
++  .ot-home-filter-dialog .ot-home-filter-body { padding: 20px 18px; }
++  .ot-home-filter-dialog .ot-home-filter-footer { padding-inline: 16px; }
++}
++@media (prefers-reduced-motion: reduce) {
++  .ot-home-ui *, .ot-home-filter-dialog * { scroll-behavior: auto; }
++}
+diff --git a/web/home-query-bridge.js b/web/home-query-bridge.js
+new file mode 100644
+index 0000000..7996f9c
+--- /dev/null
++++ b/web/home-query-bridge.js
+@@ -0,0 +1,122 @@
++/* Bridge for OurTime's existing flat state (q/person/directory/sort/selected).
++ * Existing loader, folder picker and batch actions are supplied by the host.
++ * This file neither locates DOM by guessed IDs nor issues HTTP requests.
++ */
++(function (global) {
++  'use strict';
++  const value = input => input == null ? '' : String(input);
++  const fields = ['q', 'person', 'directory'];
++  const allowedSort = new Set(['date_desc', 'date_asc', 'name_asc', 'name_desc']);
++  const same = (a, b) => fields.every(key => value(a[key]) === value(b[key]));
++
++  function create(bindings) {
++    if (!bindings || !bindings.source || typeof bindings.source !== 'object') {
++      throw new TypeError('Bridge requires the existing state as source.');
++    }
++    for (const key of ['isActive', 'scopeKey', 'reloadPhotos', 'getPeople', 'setSelecting',
++      'selectVisible', 'clearSelection', 'editSelected', 'excludeSelected']) {
++      if (typeof bindings[key] !== 'function') throw new TypeError('Bridge binding is missing: ' + key);
++    }
++    const source = bindings.source;
++    const inputs = bindings.legacyInputs || {};
++    let generation = 0;
++    let working = false;
++    const query = () => Object.fromEntries(fields.map(key => [key, value(source[key])]));
++    const scope = () => value(bindings.scopeKey(source));
++    function writeInputs() {
++      for (const key of [...fields, 'sort']) {
++        if (inputs[key] && 'value' in inputs[key]) inputs[key].value = value(source[key]);
++      }
++      // No input/change event dispatch: one user operation -> one existing loader call.
++    }
++    function notify() {
++      writeInputs();
++      if (typeof bindings.onStateChange === 'function') bindings.onStateChange();
++    }
++    function guard(context) {
++      if (context && context.signal && context.signal.aborted) throw new DOMException('Aborted', 'AbortError');
++      if (!bindings.isActive(source)) throw new Error('当前页面已离开照片查询范围。');
++      if (context && context.expectedScopeKey != null && value(context.expectedScopeKey) !== scope()) {
++        throw new Error('当前查询范围已变化，请重新操作。');
++      }
++      if (context && context.expectedQuery && !same(context.expectedQuery, query())) {
++        throw new Error('查询条件已被其他操作更新，请重新操作。');
++      }
++    }
++    async function update(next, context, reason) {
++      guard(context);
++      if (working) throw new Error('照片列表正在更新，请稍候。');
++      if (source.selecting) throw new Error('请先退出批量选择，再修改查询。');
++      const before = { ...query(), sort: value(source.sort), scope: scope() };
++      const token = ++generation;
++      working = true;
++      Object.assign(source, next);
++      try {
++        notify();
++        // Must bind to the existing reset/reload path, NOT append/next-page loading.
++        await bindings.reloadPhotos({ reason, signal: context && context.signal });
++      } catch (error) {
++        const stillOurs = token === generation && scope() === before.scope
++          && Object.keys(next).every(key => value(source[key]) === value(next[key]));
++        if (stillOurs) {
++          for (const key of Object.keys(next)) source[key] = before[key];
++          notify();
++        }
++        throw error;
++      } finally {
++        working = false;
++        notify();
++      }
++    }
++    function delegate(key, extraGuard) {
++      return async context => {
++        guard(context);
++        if (extraGuard) extraGuard();
++        try { return await bindings[key](context); }
++        finally { notify(); }
++      };
++    }
++    const selectedCount = () => source.selected && Number.isFinite(source.selected.size) ? source.selected.size : 0;
++    const requireSelection = () => {
++      if (!source.selecting || !selectedCount()) throw new Error('请先选择照片。');
++    };
++    const adapter = {
++      readState() {
++        const rawQuery = query();
++        return {
++          active: Boolean(bindings.isActive(source)), scopeKey: scope(), query: rawQuery,
++          sort: value(source.sort || 'date_desc'), selecting: Boolean(source.selecting),
++          selectedCount: selectedCount(),
++          personLabel: typeof bindings.personLabel === 'function' ? value(bindings.personLabel(source.person)) : '',
++          selectionKind: typeof bindings.selectionKind === 'function' ? bindings.selectionKind(source) : 'exclude',
++          refreshAvailable: typeof bindings.refreshAvailable === 'function' && Boolean(bindings.refreshAvailable(source))
++        };
++      },
++      applyQuery(next, context) {
++        // Only these three query fields are written; sorting and other view state stay separate.
++        const cleaned = { q: value(next.q), person: value(next.person).trim(), directory: value(next.directory).trim() };
++        return update(cleaned, context, 'query');
++      },
++      applySort(sort, context) {
++        if (!allowedSort.has(sort)) return Promise.reject(new Error('不支持的照片排序。'));
++        return update({ sort }, context, 'sort');
++      },
++      getPeople: context => bindings.getPeople(context),
++      async setSelecting(on, context) {
++        guard(context);
++        try { return await bindings.setSelecting(Boolean(on), context); }
++        finally { notify(); }
++      },
++      selectVisible: delegate('selectVisible', () => { if (!source.selecting) throw new Error('请先进入选择模式。'); }),
++      clearSelection: delegate('clearSelection'),
++      editSelected: delegate('editSelected', requireSelection),
++      excludeSelected: delegate('excludeSelected', requireSelection)
++    };
++    if (typeof bindings.restoreSelected === 'function') adapter.restoreSelected = delegate('restoreSelected', requireSelection);
++    if (typeof bindings.chooseFolder === 'function') adapter.chooseFolder = context => bindings.chooseFolder(context);
++    if (typeof bindings.refreshPhotos === 'function') adapter.refresh = delegate('refreshPhotos');
++    return Object.freeze(adapter);
++  }
++  if (global.OurTimeHomeBridge) throw new Error('OurTimeHomeBridge was loaded twice.');
++  global.OurTimeHomeBridge = Object.freeze({ version: '1.0.0', create });
++})(window);

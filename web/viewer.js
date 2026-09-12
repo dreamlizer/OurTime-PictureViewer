@@ -3,6 +3,14 @@
 // adaptive photo metadata strip. 2026-09-11.
 
 const VIEWER_PREFS_KEY='ourtime.viewer.preferences.v2';
+const FACE_LABEL_IMAGES={
+  ivory:{
+    s:'/api/face-label-bg/1.png',
+    m:'/api/face-label-bg/2.png',
+    l:'/api/face-label-bg/3.png'
+  }
+};
+const faceLabelThemeReadiness=new Map();
 const FACE_STYLE_PRESETS={
   classic:{
     theme:'classic',
@@ -16,16 +24,16 @@ const FACE_STYLE_PRESETS={
     paddingY:5,
     shadow:true
   },
-  soft:{
-    theme:'soft',
-    fontSize:13,
-    fontFamily:'serif',
-    textColor:'#30342f',
-    backgroundColor:'#f2eee5',
-    backgroundOpacity:.88,
-    radius:7,
-    paddingX:8,
-    paddingY:6,
+  ivory:{
+    theme:'ivory',
+    fontSize:15,
+    fontFamily:'kai',
+    textColor:'#4b433a',
+    backgroundColor:'#ffffff',
+    backgroundOpacity:0,
+    radius:0,
+    paddingX:0,
+    paddingY:0,
     shadow:false
   },
   outline:{
@@ -171,13 +179,13 @@ function buildFaceStylePopover(){
   pop.innerHTML=`
     <div class="face-style-head"><b>人名标签</b><button type="button" id="face-style-close" aria-label="关闭">×</button></div>
     <div class="face-style-preview"><span id="face-style-preview-label">示例姓名</span></div>
-    <label>风格 <select id="face-theme"><option value="classic">原始</option><option value="soft">雾白</option><option value="outline">线框</option><option value="accent">暗朱</option></select></label>
-    <label>字号 <output id="face-font-size-value"></output><input id="face-font-size" type="range" min="10" max="22" step="1"></label>
-    <label>字体 <select id="face-font-family"><option value="sans">黑体 / 无衬线</option><option value="serif">宋体 / 衬线</option><option value="kai">楷体</option><option value="fangsong">仿宋</option></select></label>
+    <label>风格 <select id="face-theme"><option value="classic">原始</option><option value="ivory">素笺</option><option value="outline">线框</option><option value="accent">暗朱</option></select></label>
+    <label class="face-custom-control">字号 <output id="face-font-size-value"></output><input id="face-font-size" type="range" min="10" max="22" step="1"></label>
+    <label class="face-custom-control">字体 <select id="face-font-family"><option value="sans">黑体 / 无衬线</option><option value="serif">宋体 / 衬线</option><option value="kai">楷体</option><option value="fangsong">仿宋</option></select></label>
     <label>标签位置 <select id="face-label-position"><option value="auto">自动</option><option value="left">优先左侧</option><option value="right">优先右侧</option></select></label>
     <div class="face-style-colors"><label>文字<input id="face-text-color" type="color"></label><label>底色<input id="face-bg-color" type="color"></label></div>
-    <label>底色透明度 <output id="face-bg-opacity-value"></output><input id="face-bg-opacity" type="range" min="0" max="90" step="1"></label>
-    <label>圆角 <select id="face-radius"><option value="0">直角</option><option value="4">微圆角</option><option value="10">圆角</option><option value="999">胶囊</option></select></label>
+    <label class="face-custom-control">底色透明度 <output id="face-bg-opacity-value"></output><input id="face-bg-opacity" type="range" min="0" max="90" step="1"></label>
+    <label class="face-custom-control">圆角 <select id="face-radius"><option value="0">直角</option><option value="4">微圆角</option><option value="10">圆角</option><option value="999">胶囊</option></select></label>
     <label class="face-shadow-row"><input id="face-shadow" type="checkbox"> 文字阴影（亮背景更清楚）</label>
     <button type="button" id="face-style-reset" class="face-style-reset">恢复默认</button>`;
   body.appendChild(pop);
@@ -200,15 +208,53 @@ function applyFacePreset(name){
   const valid=Object.prototype.hasOwnProperty.call(FACE_STYLE_PRESETS,name);
   const theme=valid?name:'classic';
   viewer.faceStyle={...FACE_STYLE_PRESETS[theme]};
+  if(FACE_LABEL_IMAGES[theme])viewer.faceVertical=true;
   applyFaceStyle();
   saveViewerPrefs();
   if(state.detail)requestAnimationFrame(()=>renderFaceNames(state.detail));
 }
 function faceFontStack(kind){
   if(kind==='sans')return '"Microsoft YaHei UI","Microsoft YaHei","PingFang SC","Noto Sans CJK SC",sans-serif';
-  if(kind==='kai')return '"KaiTi","STKaiti","Kaiti SC","FZKai-Z03","SimKai",serif';
+  if(kind==='kai')return '"LXGW WenKai","STKaiti","Kaiti SC","KaiTi",serif';
   if(kind==='fangsong')return '"FangSong","STFangsong","FangSong_GB2312","Songti SC","STSong","SimSun",serif';
   return '"Iowan Old Style","Palatino Linotype","STSong","SimSun",serif';
+}
+function faceLabelProfile(name){
+  const normalized=String(name||'').replace(/\s+/g,'');
+  const count=[...normalized].length;
+  return {count,size:count<=2?'s':count===3?'m':'l',long:count>=5};
+}
+function applyFaceLabelProfile(element,name){
+  if(!element)return;
+  const profile=faceLabelProfile(name);
+  element.dataset.faceLabelSize=profile.size;
+  element.classList.toggle('long-name',profile.long);
+}
+function faceLabelsVertical(){
+  return Boolean(FACE_LABEL_IMAGES[viewer.faceStyle?.theme])||viewer.faceVertical!==false;
+}
+function faceLabelThemeReady(theme){
+  if(!FACE_LABEL_IMAGES[theme])return Promise.resolve(true);
+  if(faceLabelThemeReadiness.has(theme))return faceLabelThemeReadiness.get(theme);
+  const promise=Promise.all(Object.values(FACE_LABEL_IMAGES[theme]).map(src=>new Promise(resolve=>{
+    const image=new Image();
+    image.onload=()=>resolve(true);
+    image.onerror=()=>resolve(false);
+    image.src=src;
+  }))).then(results=>results.every(Boolean));
+  faceLabelThemeReadiness.set(theme,promise);
+  return promise;
+}
+function ensureFaceLabelThemeAvailable(theme){
+  if(!FACE_LABEL_IMAGES[theme])return;
+  faceLabelThemeReady(theme).then(ready=>{
+    if(ready||viewer.faceStyle?.theme!==theme)return;
+    console.warn(`人名标签主题 ${theme} 的底图缺失，已恢复原始样式`);
+    viewer.faceStyle={...DEFAULT_FACE_STYLE};
+    applyFaceStyle();
+    saveViewerPrefs();
+    if(state.detail)requestAnimationFrame(()=>renderFaceNames(state.detail));
+  });
 }
 function applyFaceStyle(){
   const root=$('#detail-dialog')||document.documentElement;
@@ -227,6 +273,10 @@ function applyFaceStyle(){
   root.style.setProperty('--face-padding-x',`${s.paddingX}px`);
   root.style.setProperty('--face-padding-y',`${s.paddingY}px`);
   root.style.setProperty('--face-shadow',s.shadow?'0 1px 10px rgba(0,0,0,.65)':'none');
+  const themeImages=FACE_LABEL_IMAGES[theme];
+  if(themeImages){
+    Object.entries(themeImages).forEach(([size,url])=>root.style.setProperty(`--face-label-${size}-image`,`url("${url}")`));
+  }
 
   const themeSelect=$('#face-theme'),fontSize=$('#face-font-size'),family=$('#face-font-family'),position=$('#face-label-position'),text=$('#face-text-color'),bg=$('#face-bg-color'),op=$('#face-bg-opacity'),radius=$('#face-radius'),shadow=$('#face-shadow');
   if(themeSelect)themeSelect.value=theme;
@@ -238,17 +288,32 @@ function applyFaceStyle(){
   if(op)op.value=String(Math.round(s.backgroundOpacity*100));
   if(radius)radius.value=String(s.radius);
   if(shadow)shadow.checked=!!s.shadow;
+  const themeLocksCustomStyle=Boolean(themeImages);
+  [fontSize,family,text,bg,op,radius,shadow].forEach(control=>{
+    if(control)control.disabled=themeLocksCustomStyle;
+  });
+  if(pop){
+    pop.querySelectorAll('.face-custom-control,.face-style-colors,.face-shadow-row').forEach(section=>{
+      section.classList.toggle('is-disabled',themeLocksCustomStyle);
+    });
+  }
   if($('#face-font-size-value'))$('#face-font-size-value').textContent=`${s.fontSize}px`;
   if($('#face-bg-opacity-value'))$('#face-bg-opacity-value').textContent=`${Math.round(s.backgroundOpacity*100)}%`;
   const preview=$('#face-style-preview-label');
   if(preview){
     const currentFaces=typeof state!=='undefined'?namedFaces(state.detail):[];
     preview.textContent=currentFaces[0]?.name||'示例姓名';
-    preview.style.fontSize=`${s.fontSize}px`;preview.style.fontFamily=faceFontStack(s.fontFamily);preview.style.color=s.textColor;
-    preview.style.backgroundColor=hexToRgba(s.backgroundColor,s.backgroundOpacity);preview.style.borderRadius=s.radius>=999?'999px':`${s.radius}px`;preview.style.textShadow=s.shadow?'0 1px 10px rgba(0,0,0,.65)':'none';
-    preview.style.writingMode=viewer.faceVertical!==false?'vertical-rl':'horizontal-tb';
-    preview.style.textOrientation=viewer.faceVertical!==false?'upright':'mixed';
+    applyFaceLabelProfile(preview,preview.textContent);
+    preview.style.fontSize=themeImages?'':`${s.fontSize}px`;
+    preview.style.fontFamily=themeImages?'':faceFontStack(s.fontFamily);
+    preview.style.color=themeImages?'':s.textColor;
+    preview.style.backgroundColor=themeImages?'':hexToRgba(s.backgroundColor,s.backgroundOpacity);
+    preview.style.borderRadius=themeImages?'':s.radius>=999?'999px':`${s.radius}px`;
+    preview.style.textShadow=themeImages?'':s.shadow?'0 1px 10px rgba(0,0,0,.65)':'none';
+    preview.style.writingMode=faceLabelsVertical()?'vertical-rl':'horizontal-tb';
+    preview.style.textOrientation=faceLabelsVertical()?'upright':'mixed';
   }
+  ensureFaceLabelThemeAvailable(theme);
 }
 function hexToRgba(hex,alpha){
   const h=String(hex||'#000000').replace('#','');
@@ -269,9 +334,10 @@ function toggleFaceStylePopover(force){
 function updateToolVisuals(){
   const dir=$('#toggle-face-dir');
   if(dir){
-    const vertical=viewer.faceVertical!==false;
+    const fixedVertical=Boolean(FACE_LABEL_IMAGES[viewer.faceStyle?.theme]);
+    const vertical=faceLabelsVertical();
     dir.innerHTML=vertical?iconSvg.vertical:iconSvg.horizontal;
-    const next=vertical?'切换为横排':'切换为竖排';
+    const next=fixedVertical?'素笺使用竖排':vertical?'切换为横排':'切换为竖排';
     dir.title=next;dir.setAttribute('aria-label',next);
   }
   const play=$('#viewer-play');
@@ -316,7 +382,7 @@ function syncViewerTools(){
  pressTool('#viewer-info', !$('#detail-dialog').classList.contains('hide-info'));
  pressTool('#viewer-play', viewer.playing);
  const aliasBtn=$('#toggle-face-alias'); if(aliasBtn) aliasBtn.disabled=viewer.faceNames===false;
- const dirBtn=$('#toggle-face-dir'); if(dirBtn) dirBtn.disabled=viewer.faceNames===false;
+ const dirBtn=$('#toggle-face-dir'); if(dirBtn) dirBtn.disabled=viewer.faceNames===false||Boolean(FACE_LABEL_IMAGES[viewer.faceStyle?.theme]);
  const styleBtn=$('#face-style-button');if(styleBtn)styleBtn.disabled=viewer.faceNames===false;
  updateToolVisuals();
 }
@@ -499,7 +565,7 @@ function layoutFaceNameButtons(layer, faces, alias){
   items.sort((a,b)=>a.cy-b.cy||a.cx-b.cx);
   layer.innerHTML=items.map(it=>`<button type="button" class="face-name${it.named?'':' unnamed'}" data-face-person="${it.face.person_id}"${it.named?'':' title="命名人物" aria-label="命名人物"'}>${esc(it.label)}</button>`).join('');
   const buttons=[...layer.querySelectorAll('.face-name')];
-  const vertical=viewer.faceVertical!==false;
+  const vertical=faceLabelsVertical();
   const placed=[];
   const gap=6;
   const preferredSide=vertical?faceLabelSide(items,ox,imgW):'bottom';
@@ -508,6 +574,7 @@ function layoutFaceNameButtons(layer, faces, alias){
   buttons.forEach((btn,i)=>{
     const it=items[i];
     it.btn=btn;
+    if(it.named)applyFaceLabelProfile(btn,it.label);
     const w=Math.max(18, btn.offsetWidth);
     const h=Math.max(18, btn.offsetHeight);
     const sides=vertical?[preferredSide,preferredSide==='left'?'right':'left']:[preferredSide,'top'];
@@ -548,7 +615,7 @@ function renderFaceNames(photo){
  const layer=$('#face-name-layer'); if(!layer)return;
  const show=viewer.faceNames!==false;
  const alias=viewer.faceAlias===true;
- const vertical=viewer.faceVertical!==false;
+  const vertical=faceLabelsVertical();
  layer.hidden=!show;
  layer.classList.toggle('horizontal',!vertical);
   if(!show){layer.innerHTML='';syncViewerTools();return;}

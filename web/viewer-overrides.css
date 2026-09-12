@@ -212,7 +212,7 @@
 
 /* ==================================================
    Face label variants
-   Mature compact-label system: Classic / Soft / Outline / Accent
+   Mature compact-label system: Classic / Ivory / Outline / Accent
    ================================================== */
 
 #detail-dialog .face-name:not(.unnamed){
@@ -237,15 +237,64 @@
   -webkit-backdrop-filter:blur(2px);
 }
 
-/* Soft: quiet surface with a barely visible boundary. */
-#detail-dialog[data-face-theme="soft"] .face-name:not(.unnamed){
-  background:var(--face-bg-rgba);
-  color:var(--face-text-color);
-  border-color:rgba(58,63,57,.11);
-  box-shadow:0 1px 6px rgba(32,35,31,.07);
+/* Ivory: transparent PNG plate with HTML text centered on top. */
+#detail-dialog[data-face-theme="ivory"] .face-name:not(.unnamed){
+  display:grid;
+  place-items:center;
+  isolation:isolate;
+  padding:6px 9px 6px 7px;
+  border:0;
+  border-radius:0;
+  background-color:transparent;
+  background-image:none;
+  color:#4b433a;
+  font-family:"LXGW WenKai","STKaiti","Kaiti SC","KaiTi",serif;
+  font-weight:500;
+  line-height:1.08;
+  letter-spacing:.02em;
+  writing-mode:vertical-rl;
+  text-orientation:upright;
+  max-height:none;
+  overflow:visible;
+  box-shadow:none;
   text-shadow:none;
-  backdrop-filter:blur(5px) saturate(.92);
-  -webkit-backdrop-filter:blur(5px) saturate(.92);
+  backdrop-filter:none;
+  -webkit-backdrop-filter:none;
+}
+#detail-dialog[data-face-theme="ivory"] .face-name:not(.unnamed)::before{
+  content:"";
+  position:absolute;
+  inset:0;
+  z-index:-1;
+  pointer-events:none;
+  background-image:var(--face-label-image);
+  background-repeat:no-repeat;
+  background-position:center;
+  background-size:100% 100%;
+  opacity:.76;
+}
+#detail-dialog[data-face-theme="ivory"] .face-name[data-face-label-size="s"]{
+  --face-label-image:var(--face-label-s-image);
+  width:34px;
+  height:56px;
+  font-size:15px;
+  letter-spacing:.14em;
+}
+#detail-dialog[data-face-theme="ivory"] .face-name[data-face-label-size="m"]{
+  --face-label-image:var(--face-label-m-image);
+  width:34px;
+  height:72px;
+  font-size:14px;
+}
+#detail-dialog[data-face-theme="ivory"] .face-name[data-face-label-size="l"]{
+  --face-label-image:var(--face-label-l-image);
+  width:34px;
+  height:86px;
+  padding-inline:7px;
+  font-size:13px;
+}
+#detail-dialog[data-face-theme="ivory"] .face-name[data-face-label-size="l"].long-name{
+  font-size:12px;
 }
 
 /* Outline: let the boundary carry the label without a heavy fill. */
@@ -444,9 +493,52 @@
   border-color:transparent;
   box-shadow:0 1px 2px rgba(0,0,0,.08);
 }
-#detail-dialog .face-style-popover[data-face-theme="soft"] #face-style-preview-label{
-  border-color:rgba(58,63,57,.11);
-  box-shadow:0 1px 6px rgba(32,35,31,.07);
+#detail-dialog .face-style-popover[data-face-theme="ivory"] .face-style-preview{
+  height:104px;
+}
+#detail-dialog .face-style-popover[data-face-theme="ivory"] #face-style-preview-label{
+  display:grid;
+  place-items:center;
+  position:relative;
+  isolation:isolate;
+  padding:6px 9px 6px 7px;
+  border:0;
+  border-radius:0;
+  background-color:transparent;
+  background-image:none;
+  color:#4b433a;
+  font-family:"LXGW WenKai","STKaiti","Kaiti SC","KaiTi",serif;
+  font-weight:500;
+  line-height:1.08;
+  letter-spacing:.02em;
+  writing-mode:vertical-rl;
+  text-orientation:upright;
+  box-shadow:none;
+  text-shadow:none;
+}
+#detail-dialog .face-style-popover[data-face-theme="ivory"] #face-style-preview-label::before{
+  content:"";
+  position:absolute;
+  inset:0;
+  z-index:-1;
+  pointer-events:none;
+  background-image:var(--face-label-image);
+  background-repeat:no-repeat;
+  background-position:center;
+  background-size:100% 100%;
+  opacity:.76;
+}
+#detail-dialog .face-style-popover[data-face-theme="ivory"] #face-style-preview-label[data-face-label-size="s"]{
+  --face-label-image:var(--face-label-s-image);width:34px;height:56px;font-size:15px;letter-spacing:.14em;
+}
+#detail-dialog .face-style-popover[data-face-theme="ivory"] #face-style-preview-label[data-face-label-size="m"]{
+  --face-label-image:var(--face-label-m-image);width:34px;height:72px;font-size:14px;
+}
+#detail-dialog .face-style-popover[data-face-theme="ivory"] #face-style-preview-label[data-face-label-size="l"]{
+  --face-label-image:var(--face-label-l-image);width:34px;height:86px;padding-inline:7px;font-size:13px;
+}
+#detail-dialog .face-style-popover[data-face-theme="ivory"] #face-style-preview-label[data-face-label-size="l"].long-name{
+  font-size:12px;
 }
 #detail-dialog .face-style-popover[data-face-theme="outline"] #face-style-preview-label{
   border-color:rgba(255,255,255,.56);
@@ -499,6 +591,17 @@
   display:flex;align-items:center;gap:6px;margin-top:11px;
 }
 #detail-dialog .face-style-popover .face-shadow-row input{margin:0;accent-color:#54735a}
+#detail-dialog .face-style-popover .is-disabled{
+  opacity:.46;
+  color:#8d938d;
+}
+#detail-dialog .face-style-popover input:disabled,
+#detail-dialog .face-style-popover select:disabled{
+  cursor:not-allowed;
+  color:#8d938d;
+  background-color:#f0f1ed;
+  border-color:#e1e3dd;
+}
 #detail-dialog .face-style-reset{
   width:100%;
   margin-top:13px;

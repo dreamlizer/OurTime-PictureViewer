@@ -1,0 +1,26 @@
+{
+  "package": "OurTime_Homepage_Phase1",
+  "version": "1.0.0",
+  "date": "2026-09-11",
+  "source_repository": "https://github.com/dreamlizer/OurTime-PictureViewer",
+  "upstream_commit": null,
+  "baseline_mode": "Partial public source read; no verified full checkout. Additions-only patch.",
+  "requires_local_adapter_integration": true,
+  "sha256": {
+    "00_README.md": "403aaff58b38203fd5a54fef48468d0392e36a21d1289c7618e0891c3efe4b5b",
+    "01-add-files.patch": "d79269e03850160d9819535157991634dc983913d7de634f700152253ac354b3",
+    "ACCEPTANCE-CHECKLIST.md": "0e1cab1880613df2df62069998d13c34971c11cacf44578ca6d6b52d0886b6b9",
+    "BASELINE.md": "2b0598a79f7d69aa71f7ab03f77f8ebf5ad014510d0db11e31e1920da6adf61c",
+    "LUNA_MAX_PROMPT.md": "ea57cdabb7489fd2fe50d26932c7503f4a96fe42634b84784bc63fee6ed04c2c",
+    "evidence/browser-checks.json": "4fb2af3f4bd9bda42b47dbeac4a0dcd17346876f40309bbd6335de9de1591888",
+    "evidence/static-and-patch-checks.json": "2752b3f767d6229d010d2722aab45f9d13a7926776ee5eaaf86e8ac1c83e42ff",
+    "files/web/home-query-bridge.js": "8fb0b2850e2fbddfae60168b36b27ec4e9be584d2f0a0daa985584a9bdf3bc12",
+    "files/web/home-query-ui.css": "600c9b9613a9eb392fe6dc93c0a2c7e7402fb6240247be3368ba629ebad80bd7",
+    "files/web/home-query-ui.js": "e78ebdeb96aaad7c8c88ec0c218a5092c0d7ed8488cb00f61fdc2399acf1afc3",
+    "integration/ADAPTER-CONTRACT.md": "84c0bd0672e3540c4fd8a464ca58a300fc733e073f3956cef514a207d57e1b16",
+    "integration/IMPLEMENTATION.md": "b94000c7a7f075c3496ac82013fbf7b3728ff5f49bf008b587375513daa98e82",
+    "tests/fixture.html": "36d67cbda44358e0b2ecdf3ca86b38047477c2bce0102f966e06b54795215b9a",
+    "tests/run_browser_checks.py": "fa6d75283ddb6ca380ea5014c1bd6c43c1b4b5816584ff06ca1fb2d1646f3a89",
+    "tools/preflight.py": "a10ecac480242e01c0950bc08b094adecc15c557e53f38a20a8e4f81e6722f90"
+  }
+}
