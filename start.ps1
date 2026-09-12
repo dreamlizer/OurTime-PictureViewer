@@ -12,14 +12,23 @@ function Test-OurTimePage {
         return $false
     }
 }
+function Test-OurTimeOwnedPort {
+    $appPath = Join-Path $projectRoot 'app.py'
+    $connections = @(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue)
+    foreach ($connection in $connections) {
+        $listener = Get-CimInstance Win32_Process -Filter "ProcessId=$($connection.OwningProcess)" -ErrorAction SilentlyContinue
+        if ($listener -and $listener.CommandLine -and $listener.CommandLine.Contains($appPath)) { return $true }
+    }
+    return $false
+}
 try {
     if (Test-OurTimePage) {
+        if (-not (Test-OurTimeOwnedPort)) { throw 'port 8765 is already used by another service.' }
         if ($env:PHOTO_NO_BROWSER -ne '1') { Start-Process $serverUrl }
         exit 0
     }
-    throw '端口 8765 已被另一个服务使用。'
 } catch {
-    if ($_.Exception.Message -like '*另一个服务*') { throw }
+    if ($_.Exception.Message -like '*already used*') { throw }
 }
 $pythonCandidates = @(
     (Join-Path $projectRoot '.venv\Scripts\python.exe'),

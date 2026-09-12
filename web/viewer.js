@@ -286,7 +286,7 @@ function setViewerLoading(loading){
  dialog.classList.toggle('is-loading',Boolean(loading));
  if(indicator)indicator.hidden=!loading;
  if(loading){
-  if(img){img.hidden=true;img.removeAttribute('src');}
+  if(img && !img.getAttribute('src')) img.hidden=true;
   if(signature){signature.hidden=true;signature.replaceChildren();}
   if(faces){faces.hidden=true;faces.replaceChildren();}
   viewerMessage('');
@@ -551,7 +551,7 @@ function renderFaceNames(photo){
 function zoomTo(scale){viewer.fit=false;viewer.scale=Math.max(.05,Math.min(4,scale));updateZoom();}
 async function displayPhoto(id){
  const ticket=renderPhoto.ticket+1;
- setViewerLoading(true);
+ const keep=Boolean($('#detail-img')&&$('#detail-img').getAttribute('src')); setViewerLoading(!keep);
  if(viewer.loader){viewer.loader.onload=null;viewer.loader.onerror=null;viewer.loader.src='';}
  try{
   if(!await renderPhoto(id))return false;

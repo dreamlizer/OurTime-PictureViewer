@@ -657,3 +657,40 @@ dialog::backdrop { background: #162b2466; backdrop-filter: blur(4px); }
 .person-name-form input{max-width:180px;}
 .merge-row{margin:8px 0 8px;padding-bottom:8px;}
 #person-help{display:none;}
+
+
+/* Light page-switch and dialog motion. Keep durations under 160ms. */
+#people-view, #passersby-view, #folders-view, #places-view, #groups-view,
+#timeline-view, #scan-view, #library-view {
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+#people-view.is-switching, #passersby-view.is-switching, #folders-view.is-switching,
+#places-view.is-switching, #groups-view.is-switching, #timeline-view.is-switching,
+#scan-view.is-switching, #library-view.is-switching {
+  opacity: 0;
+  transform: translateY(2px);
+  pointer-events: none;
+}
+#people-view.is-pending, #passersby-view.is-pending, #folders-view.is-pending,
+#places-view.is-pending, #groups-view.is-pending, #timeline-view.is-pending,
+#scan-view.is-pending, #library-view.is-pending {
+  opacity: .55;
+}
+#people-view.is-ready, #passersby-view.is-ready, #folders-view.is-ready,
+#places-view.is-ready, #groups-view.is-ready, #timeline-view.is-ready,
+#scan-view.is-ready, #library-view.is-ready {
+  opacity: 1;
+  transform: none;
+}
+#photo-grid.is-updating { opacity: .55; pointer-events: none; transition: opacity 140ms ease; }
+#people-grid.is-switching, #passersby-grid.is-switching, #folders-list.is-switching,
+#places-list.is-switching, #groups-list.is-switching, #timeline-list.is-switching {
+  opacity: 0;
+  min-height: 240px;
+  pointer-events: none;
+}
+.folder-card.is-active { outline: 2px solid var(--green); }
+dialog.dialog-enter { opacity: 0; transform: scale(.985); }
+dialog.dialog-open { opacity: 1; transform: none; transition: opacity 140ms ease, transform 140ms ease; }
+.nav-organize, .maintain-menu { transition: opacity 120ms ease; }
+.nav-organize[open], .maintain-menu[open] { opacity: 1; }

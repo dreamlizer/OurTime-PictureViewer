@@ -30,8 +30,8 @@
   pointer-events:none;
 }
 #detail-dialog #viewer-loading[hidden]{display:none!important}
-#detail-dialog.is-loading #photo-mat{visibility:hidden;opacity:0}
-#detail-dialog:not(.is-loading) #photo-mat{opacity:1;transition:opacity 220ms ease-out}
+#detail-dialog.is-loading #photo-mat{opacity:.72}
+#detail-dialog #photo-mat{opacity:1;transition:opacity 140ms ease}
 #detail-dialog #photo-mat{
   overflow:visible;
   background:transparent;

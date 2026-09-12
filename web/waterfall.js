@@ -1,17 +1,17 @@
 // Only nearby image elements and up to six pages of records are retained.
-const waterfall={pageSize:24,cache:new Map(),heights:[],pending:new Map(),generation:0,abort:null,query:null,width:0,columns:0,total:0,maxId:0,raf:0,error:false};
+const waterfall={pageSize:24,cache:new Map(),heights:[],pending:new Map(),generation:0,abort:null,query:null,width:0,columns:0,total:0,maxId:0,raf:0,error:false,seenPhotos:new Set()};
 // Observe only mounted, not-yet-visible tiles; recycling never retains old nodes.
 const streamEntrance=new IntersectionObserver(entries=>{
  for(const entry of entries)if(entry.isIntersecting){entry.target.classList.add('stream-entered');streamEntrance.unobserve(entry.target);}
 },{threshold:0,rootMargin:'0px 0px 40px 0px'});
 function streamMountMotion(card){
- card.classList.add('stream-motion');
+ const id=Number(card.dataset.photo);const seen=waterfall.seenPhotos&&waterfall.seenPhotos.has(id);if(!seen){card.classList.add('stream-motion');if(waterfall.seenPhotos)waterfall.seenPhotos.add(id);}else{card.classList.add('stream-image-ready');}
  const img=card.querySelector('img');
  const ready=()=>{if(card.isConnected)card.classList.add('stream-image-ready');};
  const failed=()=>{if(card.isConnected){card.classList.add('stream-image-error');card.querySelector('.photo-frame').setAttribute('data-preview-message','预览暂不可用');}};
  img.addEventListener('load',ready,{once:true});img.addEventListener('error',failed,{once:true});
  if(img.complete){if(img.naturalWidth)ready();else failed();}
- streamEntrance.observe(card);
+ if(!seen) streamEntrance.observe(card);
 }
 let streamScrollTime=performance.now(),streamScrollY=scrollY,streamScrollTimer;
 function streamScroll(){
@@ -157,10 +157,10 @@ async function loadPhotos(){
  waterfall.pending.clear();waterfall.cache.clear();waterfall.heights=[];waterfall.total=0;waterfall.maxId=0;waterfall.error=false;
  waterfall.query={q:state.q,filter:state.view,person:state.person,directory:state.directory,sort:state.sort,date_from:state.dateFrom||'',date_to:state.dateTo||'',place:state.place||''};
  waterfall.width=streamMetrics().width;waterfall.columns=streamMetrics().columns;state.offset=0;
- streamEntrance.disconnect();$('#photo-grid').replaceChildren();$('#photo-grid').style.height='0px';$('#stream-status').textContent='正在加载照片…';$('#stream-retry').hidden=true;$('#no-results').hidden=true;$('#empty').hidden=true;$('#result-count').textContent='加载中';
+ const grid=$('#photo-grid');const keepHeight=Math.max(grid.offsetHeight||0,window.innerHeight*0.45);waterfall.seenPhotos=new Set();streamEntrance.disconnect();grid.classList.add('is-updating');grid.style.minHeight=keepHeight+'px';$('#stream-status').textContent='正在加载照片…';$('#stream-retry').hidden=true;$('#no-results').hidden=true;$('#empty').hidden=true;$('#result-count').textContent='加载中';
  if(typeof syncGroupResultCount==='function') syncGroupResultCount(state.view,{clear:true});
  if(oldTop<0&&!$('#detail-dialog').open)scrollTo({top:scrollY+oldTop-24,behavior:'instant'});
- await streamPage(0);streamPaint();
+ await streamPage(0);const g=$('#photo-grid');if(g){g.replaceChildren();g.style.height='0px';g.classList.remove('is-updating');}streamPaint();
 }
 window.addEventListener('scroll',streamScroll,{passive:true});
 new ResizeObserver(()=>streamSchedule()).observe($('#photo-grid'));

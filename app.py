@@ -781,6 +781,10 @@ def resume(jid:str):
     if not row: raise HTTPException(404,'任务不存在')
     return begin_scan(ScanRequest(roots=json.loads(row['roots']),with_faces=bool(row['with_faces']),include_system=bool(row['include_system']),workers=row['workers']))
 
+@app.get('/api/health')
+def health():
+    return {'ok': True, 'data_dir': str(DATA)}
+
 @app.get('/api/status')
 def status():
     with STATUS_CACHE_LOCK:

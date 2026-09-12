@@ -1,6 +1,6 @@
 const $=s=>document.querySelector(s);
 const $$=s=>[...document.querySelectorAll(s)];
-const state={view:'timeline',q:'',person:'',place:'',dateFrom:'',dateTo:'',offset:0,total:0,items:[],people:[],passersby:[],selected:new Set(),peopleSelected:new Set(),peopleMerging:false,personLabels:{},selecting:false,detail:null,personId:null,status:null,folder:null,directory:'',sort:'date_desc',maxId:0,folderTarget:'scan',scanRoots:[],scanSubmitting:false,scanStartedThisVisit:false,scanShowCompletedResult:false,exclusion:null,thumbRevision:0,peopleStream:{people:{items:[],offset:0,total:0,more:true,loading:false,q:'',generation:0},passersby:{items:[],offset:0,total:0,more:true,loading:false,q:'',generation:0}}};
+const state={view:'timeline',q:'',person:'',place:'',dateFrom:'',dateTo:'',offset:0,total:0,items:[],people:[],passersby:[],selected:new Set(),peopleSelected:new Set(),peopleMerging:false,personLabels:{},selecting:false,detail:null,personId:null,status:null,folder:null,directory:'',sort:'date_desc',maxId:0,folderTarget:'scan',scanRoots:[],scanSubmitting:false,scanStartedThisVisit:false,scanShowCompletedResult:false,viewGeneration:0,viewAbort:null,folderNav:{generation:0,abort:null,parent:'',cache:{}},placeGeneration:0,placeAbort:null,groupsGeneration:0,timelineGeneration:0,personOpenToken:0,exclusion:null,thumbRevision:0,peopleStream:{people:{items:[],offset:0,total:0,more:true,loading:false,q:'',generation:0},passersby:{items:[],offset:0,total:0,more:true,loading:false,q:'',generation:0}}};
 const titles={all:['全部照片','全部照片'],folders:['文件夹','只看 I 盘。'],people:['人物档案','人物档案'],passersby:['路人','先不识别，以后还能找回来。'],timeline:['全部照片','全部照片'],years:['按年份查看','点某一年，只看那一年。'],places:['按地点','记得那是在哪里。'],objects:['物体','照片里有什么。'],groups:['合影','合影'],uncertain:['待确认时间','给记忆一个时间。'],no_place:['待补充地点','记得那是在哪里吗？'],duplicates:['重复副本','一张照片，多个来处。'],screenshots:['截图与小图','日常的片段，也有位置。'],errors:['读取问题','把未完成的部分看清楚。'],missing:['原文件缺失','寻找照片现在的位置。'],scan:['添加照片','添加照片'],excluded:['已排除','留下值得保存的记忆。']};
 const statuses={running:'正在扫描',pausing:'正在暂停',paused:'已暂停',completed:'已完成',completed_with_errors:'完成，有读取问题',failed:'扫描失败'};
 function setText(sel,value){const el=$(sel); if(el) el.textContent=value;}
@@ -19,9 +19,46 @@ function toast(message,error=false){const el=$('#toast');if(!el)return;el.textCo
 function showNotice(message,error=false){const notice=$('#person-notice');if(notice&&$('#person-dialog')&&$('#person-dialog').open){notice.hidden=false;notice.textContent=message;notice.className='person-notice'+(error?' error':'');}toast(message,error);}
 function hideNotice(){const notice=$('#person-notice');if(notice){notice.hidden=true;notice.textContent='';notice.className='person-notice';}}
 function apiError(value,text,status){const detail=value&&value.detail;if(typeof detail==='string')return detail;if(Array.isArray(detail)){return detail.map(x=>{if(typeof x==='string')return x;const loc=Array.isArray(x&&x.loc)?x.loc:[];if(x&&x.msg==='Field required'&&(loc.includes('target_id')||loc.includes('body')))return '请先选择要合并到的人';return (x&&(x.msg||x.message))||JSON.stringify(x);}).filter(Boolean).join('；');}if(detail)return JSON.stringify(detail);return (text||'').slice(0,180)||('请求失败 '+status);}
-async function api(url,options={}){const headers={'Accept':'application/json',...(options.headers||{})};if(options.body!=null&&!headers['Content-Type'])headers['Content-Type']='application/json';const res=await fetch(url,{...options,headers});const text=await res.text();let value={};if(text){try{value=JSON.parse(text);}catch(err){throw new Error(res.ok?'服务器返回了无法解析的内容':((text||'').slice(0,180)||('请求失败 '+res.status)));}}if(!res.ok)throw new Error(apiError(value,text,res.status));return value;}
-function action(fn){return async(...args)=>{try{await fn(...args);}catch(e){showNotice(e.message,true);}};}
-function showDialog(id){const el=$(id);if(!el.open)el.showModal();}
+async function api(url,options={}){const headers={'Accept':'application/json',...(options.headers||{})};if(options.body!=null&&!headers['Content-Type'])headers['Content-Type']='application/json';const timeoutMs=options.timeoutMs;const extra={...options};delete extra.timeoutMs;let timer=null;let timedOut=false;if(timeoutMs&&!extra.signal){const controller=new AbortController();extra.signal=controller.signal;timer=setTimeout(()=>{timedOut=true;controller.abort();},timeoutMs);}try{const res=await fetch(url,{...extra,headers});const text=await res.text();let value={};if(text){try{value=JSON.parse(text);}catch(err){throw new Error(res.ok?'服务器返回了无法解析的内容':((text||'').slice(0,180)||('请求失败 '+res.status)));}}if(!res.ok)throw new Error(apiError(value,text,res.status));return value;}catch(err){if(err&&err.name==='AbortError'){if(timedOut)throw new Error('后台响应超时，请稍后刷新');const abortErr=new Error('Aborted');abortErr.name='AbortError';throw abortErr;}throw err;}finally{if(timer)clearTimeout(timer);}}
+function action(fn){return async(...args)=>{try{await fn(...args);}catch(e){if(e&&e.name==='AbortError')return;showNotice(e.message,true);}};}
+
+function viewPanel(view=state.view){
+  if(view==='people')return $('#people-view');
+  if(view==='passersby')return $('#passersby-view');
+  if(view==='folders')return $('#folders-view');
+  if(view==='places'||String(view).startsWith('place:'))return $('#places-view');
+  if(view==='groups')return $('#groups-view');
+  if(view==='years')return $('#timeline-view');
+  if(view==='scan')return $('#scan-view');
+  if(view==='objects')return $('#objects-view');
+  return $('#library-view');
+}
+function beginViewChange(view){
+  state.viewGeneration=(state.viewGeneration||0)+1;
+  if(state.viewAbort)state.viewAbort.abort();
+  state.viewAbort=new AbortController();
+  return {generation:state.viewGeneration,signal:state.viewAbort.signal,view};
+}
+function isCurrentView(token, view=state.view){
+  return token && token.generation===state.viewGeneration && (!view || state.view===view);
+}
+function preparePanel(panel){
+  if(!panel)return;
+  panel.classList.add('is-switching');
+  panel.classList.remove('is-ready','is-pending');
+  if(panel._pendingTimer)clearTimeout(panel._pendingTimer);
+  panel._pendingTimer=setTimeout(()=>{if(panel.classList.contains('is-switching'))panel.classList.add('is-pending');},120);
+}
+function revealPanel(panel, token){
+  if(!panel||(token&&!isCurrentView(token)))return;
+  if(panel._pendingTimer){clearTimeout(panel._pendingTimer);panel._pendingTimer=null;}
+  panel.classList.remove('is-pending');
+  requestAnimationFrame(()=>{
+    panel.classList.remove('is-switching');
+    panel.classList.add('is-ready');
+  });
+}
+function showDialog(id){const el=$(id);if(!el||el.open)return;el.classList.add('dialog-enter');el.classList.remove('dialog-open');el.showModal();requestAnimationFrame(()=>{requestAnimationFrame(()=>el.classList.add('dialog-open'));});}
 function isTimelineView(view=state.view){return view==='timeline'||String(view).startsWith('year:');}
 function isGroupView(view=state.view){return view==='groups'||String(view).startsWith('group:');}
 function groupTitle(view=state.view){if(String(view).startsWith('group:')){const key=view.slice(6);if(key==='10plus')return ['合影','10人及以上'];const n=Number(key);return ['合影', Number.isFinite(n)?n+'人合影':'合影'];}return ['合影','合影'];}
@@ -73,48 +110,68 @@ function updateChrome(){
     el.classList.toggle('active',el.dataset.view===view||(el.dataset.view==='timeline'&&isTimelineView(view))||(el.dataset.view==='places'&&String(view).startsWith('place:'))||(el.dataset.view==='groups'&&isGroupView(view)));
   });
 }
-async function loadFolderBrowser(path){
-  state.folderPath=path||'';
-  const [data,ex]=await Promise.all([api('/api/folders?path='+encodeURIComponent(state.folderPath||'')), api('/api/exclusions')]);
-  const excluded=new Set((ex.roots||[]).map(r=>(r.path||'').replace(/[\/]+$/,'').toLowerCase()));
-  const current=(data.path||'').replace(/[\/]+$/,'');
-  const parts=current?current.split(/[\/]+/).filter(Boolean):[];
-  const depth=current?parts.length:0;
-  const up=$('#folders-up'); if(up) up.hidden=!data.path;
-  const trail=$('#folders-trail');
-  if(trail){
-    trail.hidden=false;
-    const crumbs=[];
-    crumbs.push('<button type="button" class="trail-item'+(depth?'' :' current')+'" data-folder-open="'+esc(FOLDER_ONLY_DRIVE+'\\')+'">I 盘</button>');
-    if(parts.length){
-      const slash=String.fromCharCode(92); const drive=parts[0].endsWith(":")?parts[0]+slash:parts[0];
-      crumbs.push('<button type="button" class="trail-item'+(parts.length===1?' current':'')+'" data-folder-open="'+esc(drive)+'">'+esc(parts[0])+'</button>');
-      let acc=drive.endsWith(slash)?drive.slice(0,-1):drive;
-      for(let i=1;i<parts.length;i++){
-        acc+=slash+parts[i];
-        crumbs.push('<button type="button" class="trail-item'+(i===parts.length-1?' current':'')+'" data-folder-open="'+esc(acc)+'">'+esc(parts[i])+'</button>');
+async function loadFolderBrowser(path, viewToken=null){
+  const next=path||'';
+  state.folderPath=next;
+  const nav=state.folderNav||(state.folderNav={generation:0,abort:null,parent:'',cache:{}});
+  nav.generation+=1; const ticket=nav.generation;
+  if(nav.abort)nav.abort.abort();
+  nav.abort=new AbortController();
+  const list=$('#folders-list');
+  if(list){list.classList.add('is-switching'); list.querySelectorAll('[data-folder-open]').forEach(el=>el.classList.toggle('is-active', el.dataset.folderOpen===next));}
+  const cached=nav.cache[next];
+  try{
+    const [data,ex]=cached? [cached.data, cached.ex] : await Promise.all([
+      api('/api/folders?path='+encodeURIComponent(next), {signal:nav.abort.signal}),
+      api('/api/exclusions', {signal:nav.abort.signal})
+    ]);
+    if(ticket!==nav.generation)return;
+    nav.cache[next]={data,ex};
+    nav.parent=data.parent||'';
+    const excluded=new Set((ex.roots||[]).map(r=>(r.path||'').replace(/[/]+$/,'').toLowerCase()));
+    const current=(data.path||'').replace(/[/]+$/,'');
+    const parts=current?current.split(/[/]+/).filter(Boolean):[];
+    const depth=current?parts.length:0;
+    const up=$('#folders-up'); if(up) up.hidden=!data.path;
+    const trail=$('#folders-trail');
+    if(trail){
+      trail.hidden=false;
+      const crumbs=[];
+      crumbs.push('<button type="button" class="trail-item'+(depth?'' :' current')+'" data-folder-open="'+esc(FOLDER_ONLY_DRIVE+'\\')+'">I 盘</button>');
+      if(parts.length){
+        const slash=String.fromCharCode(92); const drive=parts[0].endsWith(":")?parts[0]+slash:parts[0];
+        crumbs.push('<button type="button" class="trail-item'+(parts.length===1?' current':'')+'" data-folder-open="'+esc(drive)+'">'+esc(parts[0])+'</button>');
+        let acc=drive.endsWith(slash)?drive.slice(0,-1):drive;
+        for(let i=1;i<parts.length;i++){
+          acc+=slash+parts[i];
+          crumbs.push('<button type="button" class="trail-item'+(i===parts.length-1?' current':'')+'" data-folder-open="'+esc(acc)+'">'+esc(parts[i])+'</button>');
+        }
       }
+      trail.innerHTML=crumbs.join('<span class="trail-sep">/</span>');
     }
-    trail.innerHTML=crumbs.join('<span class="trail-sep">/</span>');
+    const total=$('#folders-total');
+    if(!list)return;
+    const slash=String.fromCharCode(92);
+    const items=(data.items||[]).filter(item=>depth>0 || folderDrive(item.path)===FOLDER_ONLY_DRIVE);
+    if(total) total.textContent=items.length+' 项';
+    if(!state.folderPath && items.length===1){
+      await loadFolderBrowser(items[0].path, viewToken);
+      return;
+    }
+    list.dataset.depth=String(Math.min(depth,3));
+    list.innerHTML=items.map(item=>{
+      const key=(item.path||'').replace(/[/]+$/,'').toLowerCase();
+      const on=!excluded.has(key) && ![...excluded].some(r=>key===r || key.startsWith(r+slash) || key.startsWith(r+'/'));
+      const kind=depth===0?'drive':(depth===1?'folder':(depth===2?'sub':'deep'));
+      const label=depth===0?'I 盘':item.name;
+      const add=depth===0?'<button type="button" class="text-button folder-add" data-folder-add="'+esc(item.path)+'">扫描文件夹</button>':'';
+      return '<article class="folder-card '+kind+'" data-folder-open="'+esc(item.path)+'"><input class="folder-tick" type="checkbox" data-folder-toggle="'+esc(item.path)+'" '+(on?'checked':'')+' aria-label="包含这里"><span class="folder-name">'+esc(label)+'</span>'+add+'</article>';
+    }).join('')||'<div class="no-results">I 盘还没有可看的文件夹。</div>';
+    list.classList.remove('is-switching');
+  }catch(err){
+    if(err&&err.name==='AbortError')return;
+    throw err;
   }
-  const total=$('#folders-total');
-  const list=$('#folders-list'); if(!list)return;
-  const slash=String.fromCharCode(92);
-  const items=(data.items||[]).filter(item=>depth>0 || folderDrive(item.path)===FOLDER_ONLY_DRIVE);
-  if(total) total.textContent=items.length+' 项';
-  if(!state.folderPath && items.length===1){
-    await loadFolderBrowser(items[0].path);
-    return;
-  }
-  list.dataset.depth=String(Math.min(depth,3));
-  list.innerHTML=items.map(item=>{
-    const key=(item.path||'').replace(/[\/]+$/,'').toLowerCase();
-    const on=!excluded.has(key) && ![...excluded].some(r=>key===r || key.startsWith(r+slash) || key.startsWith(r+'/'));
-    const kind=depth===0?'drive':(depth===1?'folder':(depth===2?'sub':'deep'));
-    const label=depth===0?'I 盘':item.name;
-    const add=depth===0?'<button type="button" class="text-button folder-add" data-folder-add="'+esc(item.path)+'">添加文件夹</button>':'';
-    return '<article class="folder-card '+kind+'" data-folder-open="'+esc(item.path)+'"><input class="folder-tick" type="checkbox" data-folder-toggle="'+esc(item.path)+'" '+(on?'checked':'')+' aria-label="纳入浏览"><span class="folder-name">'+esc(label)+'</span>'+add+'</article>';
-  }).join('')||'<div class="no-results">I 盘里没有可看的文件夹。</div>';
 }
 async function toggleFolderInclusion(path, include){
   if(include){
@@ -151,9 +208,9 @@ function syncGroupResultCount(view=state.view, {clear=false, total=null}={}){
   el.textContent=fmt(total)+' 张';
   el.hidden=false;
 }
-async function setView(view){if(view==='all')view='timeline';const previousView=state.view;if(previousView==='scan'&&view!=='scan'){state.scanStartedThisVisit=false;state.scanShowCompletedResult=false;}if(view==='scan'&&previousView!=='scan'){state.scanStartedThisVisit=false;state.scanShowCompletedResult=false;}const leavingHome=previousView==='timeline'||String(previousView).startsWith('group:');const enteringHome=view==='timeline'||String(view).startsWith('group:');if(leavingHome&&!enteringHome){state.q='';state.person='';state.directory='';state.place='';state.dateFrom='';state.dateTo='';}if(['people','passersby','scan','places','years','groups','objects'].includes(view)||String(view).startsWith('year:')||String(view).startsWith('place:')||String(view).startsWith('group:'))resetPhotoStream();state.view=view;$('#exclusion-panel').hidden=view!=='excluded';if(view==='excluded')await loadExclusionRules();state.offset=0;state.selected.clear();state.selecting=false;if(view!=='people')setPeopleMerging(false);updateBatch();$$('.nav[data-view]').forEach(el=>el.classList.toggle('active',el.dataset.view===view||(el.dataset.view==='timeline'&&isTimelineView(view))||(el.dataset.view==='places'&&String(view).startsWith('place:'))||(el.dataset.view==='groups'&&isGroupView(view))));const title=titles[view]||(isTimelineView(view)?timelineTitle(view):isGroupView(view)?groupTitle(view):String(view).startsWith('place:')?['按地点',view.slice(6)]:[view,view]);const isGroupDetail=String(view).startsWith('group:');$('#breadcrumb').textContent=title[0];$('#page-title').textContent=currentPageTitle(view,title[1]);const groupsBack=$('#groups-back');if(groupsBack)groupsBack.hidden=!isGroupDetail;syncGroupResultCount(view,{clear:true});const hideLibrary=['people','passersby','scan','years','places','groups','folders'].includes(view) && !isGroupDetail;$('#library-view').hidden=hideLibrary;$('#people-view').hidden=view!=='people';$('#passersby-view').hidden=view!=='passersby';$('#timeline-view').hidden=view!=='years';$('#places-view').hidden=view!=='places';$('#groups-view').hidden=view!=='groups';$('#objects-view').hidden=view!=='objects';$('#scan-view').hidden=view!=='scan';const foldersView=$('#folders-view');if(foldersView)foldersView.hidden=view!=='folders';$('#collection-title').textContent=title[0];updateChrome();updateTimelineTools();updatePlaceRefine();if(view==='people'){state.peopleSelected.clear();setPeopleMerging(false);await loadPeople();}else if(view==='passersby')await loadPassersby();else if(view==='years')await loadTimeline();else if(view==='places')await loadPlaces();else if(view==='groups')await loadGroups();else if(view==='objects'){await setView('timeline');return;}else if(view==='folders')await loadFolderBrowser(state.folderPath||'');else if(view==='scan'){renderScanRoots();await refreshStatus();}else {if((isTimelineView(view)||String(view).startsWith('group:'))&&!['date_asc','date_desc'].includes(state.sort)){state.sort='date_desc';$('#sort-order').value=state.sort;}loadPhotos();refreshStatus();}}
+async function setView(view){if(view==='all')view='timeline';const previousView=state.view;if(previousView==='scan'&&view!=='scan'){state.scanStartedThisVisit=false;state.scanShowCompletedResult=false;}if(view==='scan'&&previousView!=='scan'){state.scanStartedThisVisit=false;state.scanShowCompletedResult=false;}const leavingHome=previousView==='timeline'||String(previousView).startsWith('group:');const enteringHome=view==='timeline'||String(view).startsWith('group:');if(leavingHome&&!enteringHome){state.q='';state.person='';state.directory='';state.place='';state.dateFrom='';state.dateTo='';}if(['people','passersby','scan','places','years','groups','objects'].includes(view)||String(view).startsWith('year:')||String(view).startsWith('place:')||String(view).startsWith('group:'))resetPhotoStream();state.view=view;const viewToken=beginViewChange(view);$('#exclusion-panel').hidden=view!=='excluded';if(view==='excluded')await loadExclusionRules();state.offset=0;state.selected.clear();state.selecting=false;if(view!=='people')setPeopleMerging(false);updateBatch();$$('.nav[data-view]').forEach(el=>el.classList.toggle('active',el.dataset.view===view||(el.dataset.view==='timeline'&&isTimelineView(view))||(el.dataset.view==='places'&&String(view).startsWith('place:'))||(el.dataset.view==='groups'&&isGroupView(view))));const title=titles[view]||(isTimelineView(view)?timelineTitle(view):isGroupView(view)?groupTitle(view):String(view).startsWith('place:')?['按地点',view.slice(6)]:[view,view]);const isGroupDetail=String(view).startsWith('group:');$('#breadcrumb').textContent=title[0];$('#page-title').textContent=currentPageTitle(view,title[1]);const groupsBack=$('#groups-back');if(groupsBack)groupsBack.hidden=!isGroupDetail;syncGroupResultCount(view,{clear:true});const hideLibrary=['people','passersby','scan','years','places','groups','folders'].includes(view) && !isGroupDetail;$('#library-view').hidden=hideLibrary;$('#people-view').hidden=view!=='people';$('#passersby-view').hidden=view!=='passersby';$('#timeline-view').hidden=view!=='years';$('#places-view').hidden=view!=='places';$('#groups-view').hidden=view!=='groups';$('#objects-view').hidden=view!=='objects';$('#scan-view').hidden=view!=='scan';const foldersView=$('#folders-view');if(foldersView)foldersView.hidden=view!=='folders';$('#collection-title').textContent=title[0];updateChrome();updateTimelineTools();updatePlaceRefine();const panel=viewPanel(view);preparePanel(panel);try{if(view==='people'){state.peopleSelected.clear();setPeopleMerging(false);await loadPeople(viewToken);}else if(view==='passersby')await loadPassersby(viewToken);else if(view==='years')await loadTimeline(viewToken);else if(view==='places')await loadPlaces(true,viewToken);else if(view==='groups')await loadGroups(viewToken);else if(view==='objects'){await setView('timeline');return;}else if(view==='folders')await loadFolderBrowser(state.folderPath||'',viewToken);else if(view==='scan'){renderScanRoots();await refreshStatus();}else {if((isTimelineView(view)||String(view).startsWith('group:'))&&!['date_asc','date_desc'].includes(state.sort)){state.sort='date_desc';$('#sort-order').value=state.sort;}await loadPhotos();refreshStatus();}if(isCurrentView(viewToken,view))revealPanel(panel,viewToken);}catch(err){if(!(err&&err.name==='AbortError'))throw err;}}
 
-async function refreshStatus(){const previous=state.status;const data=await api('/api/status');const previousActive=Boolean(previous?.job&&['running','pausing','paused'].includes(previous.job.status));const terminal=Boolean(data.job&&['completed','completed_with_errors','failed'].includes(data.job.status));if(state.view==='scan'&&state.scanStartedThisVisit&&previousActive&&terminal)state.scanShowCompletedResult=true;state.status=data;const s=data.stats;setText('#s-assets',fmt(s.assets));setText('#nav-count',fmt(s.assets));setText('#excluded-count',fmt(s.excluded_assets));if(typeof s.group_photos==='number'&&Number.isFinite(s.group_photos))setText('#groups-count',fmt(s.group_photos));state.connectionNotice=false;setText('#s-people',fmt(s.people));setText('#people-count',fmt(s.people));setText('#s-uncertain',fmt(s.uncertain_dates));setText('#s-duplicates',fmt(s.duplicates));const j=data.job;renderScanStatus(data);const active=j&&['running','pausing'].includes(j.status);const running=$('#running-dot'); if(running) running.className=active?'active':'';setDisabled('#start-scan',Boolean(active)||!state.scanRoots.length||state.scanSubmitting);setHidden('#job-banner',!active);setHtml('#job-banner',active?`<span>● ${statuses[j.status]} · 本轮已检查 ${fmt(j.processed)} 个文件 · ${j.workers} 路 · 新资料读取 ${data.metadata_per_second} 张/秒</span><button class="text-button" id="banner-details">查看进度 →</button>`:'');setText('#job-status',j?statuses[j.status]:'');if(j){setHtml('#job-details',`<div>${esc(JSON.parse(j.roots).join('；'))}</div><div class="job-metrics"><span><b>${fmt(j.discovered)}</b>本轮发现文件</span><span><b>${fmt(j.processed)}</b>本轮已检查</span><span><b>${fmt(j.metadata_reads)}</b>新读取元数据</span><span><b>${fmt(j.skipped)}</b>已完成直接跳过</span><span><b>${fmt(j.errors)}</b>读取问题</span></div><p>${esc(j.message||'正在扫描；已完成文件会快速跳过。')} · ${j.workers} 路处理 · 近一分钟新资料读取 ${data.metadata_per_second} 张/秒 · 略过 ${fmt(j.auxiliary)} 个辅助文件</p><div class="path-line">${esc(j.current_path)}</div>`);setHtml('#job-actions',active?'<button class="secondary" id="pause-scan">暂停扫描</button>':`<button class="secondary" id="resume-scan">${j.status==='paused'?'继续扫描':'按此范围重新扫描'}</button>`);}setHidden('#error-details',!data.errors.length);setText('#error-summary',`读取问题：共 ${fmt(j?.errors)} 项，显示最近 ${data.errors.length} 项`);setHtml('#scan-errors',data.errors.map(e=>`<div class="error-row"><b>${esc(e.stage)}</b><div>${esc(e.path)}</div><div>${esc(readableError(e.message))}</div><details><summary>原始诊断（技术信息）</summary><pre>${esc(e.message)}</pre></details></div>`).join(''));const cap=data.capabilities;setHtml('#capabilities',`人脸模型：${cap.face_model?'已找到 · '+(cap.face_runtime||'处理器')+' 运行':'未找到'}<br>HEIC / HEIF：${cap.heif?'可读取':'尚未安装解码组件，遇到时会记录问题'}<br>扩展元数据：${cap.exiftool?'已就绪 · 常驻进程':'仅基础读取器'}<br>离线地名：${cap.geo?'中文及海外地名数据已就绪':'未找到，保留 GPS 原始坐标'}<br>资料库：${esc(cap.data_dir)}`);if(previousActive&&!active&&terminal){toast(j.message||'扫描结束');if(state.view==='people')await loadPeople();else if(state.view==='passersby')await loadPassersby();else if(!['scan'].includes(state.view))await loadPhotos();}if(j&&!state.scanPrefilled){$('#scan-roots').value=JSON.parse(j.roots).join('\n');$('#scan-workers').value=String(j.workers);state.scanPrefilled=true;}return data;}
+async function refreshStatus(){const previous=state.status;const data=await api('/api/status',{timeoutMs:15000});const previousActive=Boolean(previous?.job&&['running','pausing','paused'].includes(previous.job.status));const terminal=Boolean(data.job&&['completed','completed_with_errors','failed'].includes(data.job.status));if(state.view==='scan'&&state.scanStartedThisVisit&&previousActive&&terminal)state.scanShowCompletedResult=true;state.status=data;const s=data.stats;setText('#s-assets',fmt(s.assets));setText('#nav-count',fmt(s.assets));setText('#excluded-count',fmt(s.excluded_assets));if(typeof s.group_photos==='number'&&Number.isFinite(s.group_photos))setText('#groups-count',fmt(s.group_photos));state.connectionNotice=false;setText('#s-people',fmt(s.people));setText('#people-count',fmt(s.people));setText('#s-uncertain',fmt(s.uncertain_dates));setText('#s-duplicates',fmt(s.duplicates));const j=data.job;renderScanStatus(data);const active=j&&['running','pausing'].includes(j.status);const running=$('#running-dot'); if(running) running.className=active?'active':'';setDisabled('#start-scan',Boolean(active)||!state.scanRoots.length||state.scanSubmitting);setHidden('#job-banner',!active);setHtml('#job-banner',active?`<span>● ${statuses[j.status]} · 本轮已检查 ${fmt(j.processed)} 个文件 · ${j.workers} 路 · 新资料读取 ${data.metadata_per_second} 张/秒</span><button class="text-button" id="banner-details">查看进度 →</button>`:'');setText('#job-status',j?statuses[j.status]:'');if(j){setHtml('#job-details',`<div>${esc(JSON.parse(j.roots).join('；'))}</div><div class="job-metrics"><span><b>${fmt(j.discovered)}</b>本轮发现文件</span><span><b>${fmt(j.processed)}</b>本轮已检查</span><span><b>${fmt(j.metadata_reads)}</b>新读取元数据</span><span><b>${fmt(j.skipped)}</b>已完成直接跳过</span><span><b>${fmt(j.errors)}</b>读取问题</span></div><p>${esc(j.message||'正在扫描；已完成文件会快速跳过。')} · ${j.workers} 路处理 · 近一分钟新资料读取 ${data.metadata_per_second} 张/秒 · 略过 ${fmt(j.auxiliary)} 个辅助文件</p><div class="path-line">${esc(j.current_path)}</div>`);setHtml('#job-actions',active?'<button class="secondary" id="pause-scan">暂停扫描</button>':`<button class="secondary" id="resume-scan">${j.status==='paused'?'继续扫描':'按此范围重新扫描'}</button>`);}setHidden('#error-details',!data.errors.length);setText('#error-summary',`读取问题：共 ${fmt(j?.errors)} 项，显示最近 ${data.errors.length} 项`);setHtml('#scan-errors',data.errors.map(e=>`<div class="error-row"><b>${esc(e.stage)}</b><div>${esc(e.path)}</div><div>${esc(readableError(e.message))}</div><details><summary>原始诊断（技术信息）</summary><pre>${esc(e.message)}</pre></details></div>`).join(''));const cap=data.capabilities;setHtml('#capabilities',`人脸模型：${cap.face_model?'已找到 · '+(cap.face_runtime||'处理器')+' 运行':'未找到'}<br>HEIC / HEIF：${cap.heif?'可读取':'尚未安装解码组件，遇到时会记录问题'}<br>扩展元数据：${cap.exiftool?'已就绪 · 常驻进程':'仅基础读取器'}<br>离线地名：${cap.geo?'中文及海外地名数据已就绪':'未找到，保留 GPS 原始坐标'}<br>资料库：${esc(cap.data_dir)}`);if(previousActive&&!active&&terminal){toast(j.message||'扫描结束');if(state.view==='people')await loadPeople();else if(state.view==='passersby')await loadPassersby();else if(!['scan'].includes(state.view))await loadPhotos();}if(j&&!state.scanPrefilled){$('#scan-roots').value=JSON.parse(j.roots).join('\n');$('#scan-workers').value=String(j.workers);state.scanPrefilled=true;}return data;}
 function personLabel(p){if(p.ignored)return p.name||'路人';return p.alias?(p.name||('待命名 '+p.id))+' / '+p.alias:(p.name||('待命名 '+p.id));}
 function personStatus(p){if(p.ignored)return '路人 · 暂不识别';if(p.confirmed)return p.alias?'已命名 · '+p.alias:'已人工确认';return p.suggested_name?'可能是 '+p.suggested_name:'待核对分组';}
 function updatePeopleMerge(){const n=state.peopleSelected.size;const merging=Boolean(state.peopleMerging);const bar=$('#people-merge-bar');if(!bar)return;bar.hidden=!merging;const count=$('#people-selected-count');if(count)count.textContent='已选 '+n+' 组';const merge=$('#merge-selected-people');if(merge)merge.disabled=n<2;const grid=$('#people-grid');if(grid)grid.classList.toggle('selecting',merging);const toggle=$('#people-merge-toggle');if(toggle){toggle.textContent=merging?'取消合并':'合并人物';toggle.setAttribute('aria-pressed',merging?'true':'false');}document.body.classList.toggle('is-people-merging',merging&&state.view==='people');}
@@ -272,16 +329,16 @@ function personCard(p,mode='people'){
   const merging=Boolean(state.peopleMerging);
   return `<article class="person-card ${state.peopleSelected.has(p.id)?'selected':''}" data-person="${p.id}">${merging?'<label class="person-check"><input type="checkbox" data-select-person="'+p.id+'" '+(state.peopleSelected.has(p.id)?'checked':'')+' aria-label="选择这个人"></label>':''}<button type="button" class="person-open" data-open-person="${p.id}"><img src="/api/face/${p.cover}" alt="人物候选缩略图" loading="lazy"><b>${esc(personLabel(p))}</b><p>${p.photo_count} 张</p></button>${named?'':'<button type="button" class="text-button person-quick-name" data-quick-name="'+p.id+'">命名</button><button type="button" class="text-button person-ignore" data-ignore-person="'+p.id+'">标为路人</button>'}</article>`;
 }
-async function fetchPeoplePage(kind, reset=false){
+async function fetchPeoplePage(kind, reset=false, viewToken=null){
   const stream=state.peopleStream[kind];
   if(stream.loading||(!reset&&!stream.more))return;
-  if(reset){stream.offset=0;stream.items=[];stream.more=true;}
+  if(reset){stream.offset=0;stream.items=[];stream.more=true;const grid=$(kind==='people'?'#people-grid':'#passersby-grid');if(grid){grid.classList.add('is-switching');grid.innerHTML='';}}
   stream.loading=true;stream.generation++; const ticket=stream.generation;
   const status=$(kind==='people'?'#people-stream-status':'#passersby-stream-status');
   if(status)status.textContent=reset?'正在加载…':'继续加载…';
   try{
     const data=await api(peopleQuery({ignored:kind==='passersby'?1:0,q:stream.q,offset:stream.offset,limit:48}));
-    if(ticket!==stream.generation)return;
+    if(ticket!==stream.generation||(viewToken&&!isCurrentView(viewToken)))return;
     stream.total=data.total; stream.items=reset?data.items:stream.items.concat(data.items); stream.offset=stream.items.length; stream.more=stream.items.length<data.total;
     const grid=$(kind==='people'?'#people-grid':'#passersby-grid');
     const total=$(kind==='people'?'#people-total':'#passersby-total');
@@ -304,8 +361,8 @@ async function loadPeopleOptions(){
   $('#people-count').textContent=fmt(named.total);
   const pc=$('#passersby-count'); if(pc)pc.textContent=fmt(ignored.total);
 }
-async function loadPeople(){state.peopleStream.people.q=($('#people-search')?.value||'').trim(); await fetchPeoplePage('people',true); loadPeopleOptions();}
-async function loadPassersby(){state.peopleStream.passersby.q=($('#passersby-search')?.value||'').trim(); await fetchPeoplePage('passersby',true); loadPeopleOptions();}
+async function loadPeople(viewToken=null){state.peopleStream.people.q=($('#people-search')?.value||'').trim(); await fetchPeoplePage('people',true,viewToken); loadPeopleOptions();}
+async function loadPassersby(viewToken=null){state.peopleStream.passersby.q=($('#passersby-search')?.value||'').trim(); await fetchPeoplePage('passersby',true,viewToken); loadPeopleOptions();}
 async function fillMergeTargets(query, selectedId){
   const ignored=state.personDetail?.ignored?1:0;
   const data=await api(peopleQuery({ignored,q:query||'',limit:40,ids:selectedId?String(selectedId):''}));
@@ -315,24 +372,24 @@ async function fillMergeTargets(query, selectedId){
   select.innerHTML='<option value="">选择已有的人物…</option>'+items.map(p=>`<option value="${p.id}" ${Number(selectedId)===p.id?'selected':''}>${esc(personLabel(p))} · ${p.photo_count} 张照片</option>`).join('');
   if(selectedId&&!items.some(p=>p.id===Number(selectedId)))select.value='';
 }
-async function loadTimeline(){
- const data=await api('/api/timeline');
+async function loadTimeline(viewToken=null){
+ const ticket=++state.timelineGeneration; const list=$('#timeline-list'); if(list){list.classList.add('is-switching');} const data=await api('/api/timeline'); if(ticket!==state.timelineGeneration||(viewToken&&!isCurrentView(viewToken)))return;
  const years=data.years||[];
  $('#timeline-total').textContent=years.length?fmt(data.dated)+' 张':'还没有可按年汇总的照片';
- $('#timeline-list').innerHTML=years.length?years.map(y=>{
+ $('#timeline-list').classList.remove('is-switching'); $('#timeline-list').innerHTML=years.length?years.map(y=>{
   const label=y.year==='unknown'?'时间未记录':y.year+' 年';
   return '<button class="facet-card" data-year="'+esc(y.year)+'"><b>'+esc(label)+'</b><span>'+fmt(y.count)+' 张</span></button>';
  }).join(''):'<div class="no-results">还没有可按年份汇总的照片。</div>';
 }
 function groupLabel(g){return g.key==='10plus'||g.people>=10?'10人及以上':g.people+'人合影';}
 async function loadObjects(){const data=await api('/api/objects');const job=await api('/api/objects/job').catch(()=>({status:'idle'}));const count=$('#objects-count');if(count)count.textContent=fmt(data.tagged||0);$('#objects-total').textContent=fmt(data.tagged||0)+' tagged / '+fmt(data.pending||0)+' pending';$('#objects-job').textContent=job.status==='running'?('running '+fmt(job.processed||0)+' / '+fmt(job.limit||0)):(job.message||'idle');$('#objects-list').innerHTML=(data.items||[]).map(x=>'<button class="facet-card" data-object="'+esc(x.label)+'"><b>'+esc(x.label)+'</b><span>'+fmt(x.n)+'</span></button>').join('')||'<div class="no-results">no object tags yet</div>';}
-async function loadGroups(){
- const data=await api('/api/groups');
+async function loadGroups(viewToken=null){ const ticket=++state.groupsGeneration; const glist=$("#groups-list"); if(glist) glist.classList.add("is-switching");
+ const data=await api('/api/groups'); if(ticket!==state.groupsGeneration||(viewToken&&!isCurrentView(viewToken)))return;
  const items=data.items||[];
  const count=$('#groups-count'); if(count) count.textContent=fmt(data.photos||0);
  const ready=items.some(g=>g.count);
  $('#groups-total').textContent=ready?fmt(data.photos)+' 张合影':'暂无合影';
- $('#groups-list').innerHTML=items.map(g=>{
+ $('#groups-list').classList.remove('is-switching'); $('#groups-list').innerHTML=items.map(g=>{
   const empty=g.count? '':' empty';
   const coverKey=g.key==='10plus'?'10':g.key;
   const label=groupLabel(g);
@@ -410,19 +467,19 @@ async function loadPlaceMap(){
   }
   const status=$('#places-stream-status'); if(status)status.textContent=data.clusters&&data.clusters.length?'点击圆点查看该处照片':'这一层视野里还没有坐标点，可缩小地图或回到北京';
 }
-async function loadPlaces(reset=true){
+async function loadPlaces(reset=true, viewToken=null){
   const q=($('#places-search')&&$('#places-search').value||'').trim();
-  if(reset){state.placeStream={items:[],offset:0,total:0,more:true,loading:false,q:q,unknown:0,dated:0};}
+  if(reset){state.placeStream={items:[],offset:0,total:0,more:true,loading:false,q:q,unknown:0,dated:0}; state.placeGeneration=(state.placeGeneration||0)+1; if(state.placeAbort)state.placeAbort.abort(); state.placeAbort=new AbortController(); const list=$('#places-list'); if(list&&reset){list.classList.add('is-switching'); list.innerHTML='';}}
   const stream=state.placeStream; if(stream.loading||(!reset&&!stream.more))return; stream.loading=true;
   const status=$('#places-stream-status'); if(status&&q)status.textContent=reset?'正在搜索地点…':'继续加载…';
   try{
     if(!q){ await loadPlaceMap(); return; }
-    const data=await api('/api/places?'+new URLSearchParams({q:stream.q,offset:String(stream.offset),limit:'24'}));
+    const ticket=state.placeGeneration; const data=await api('/api/places?'+new URLSearchParams({q:stream.q,offset:String(stream.offset),limit:'24'}), {signal:state.placeAbort&&state.placeAbort.signal}); if(ticket!==state.placeGeneration||(viewToken&&!isCurrentView(viewToken)))return;
     stream.total=data.total; stream.unknown=data.unknown||0; stream.dated=data.dated||0;
     stream.items=reset?data.places:stream.items.concat(data.places||[]);
     stream.offset=stream.items.length; stream.more=stream.items.length<data.total;
     const unknownCard=stream.unknown?'<button class="facet-card" data-place="unknown"><b>地点未记录</b><span>'+fmt(stream.unknown)+' 张</span></button>':'';
-    $('#places-list').innerHTML=(stream.items.map(p=>'<button class="facet-card" data-place="'+esc(p.place)+'"><b>'+esc(prettyPlace(p.place))+'</b><span>'+fmt(p.count)+' 张</span></button>').join('')+unknownCard)||'<div class="no-results">还没有可按地点汇总的照片。</div>';
+    $('#places-list').classList.remove('is-switching'); $('#places-list').innerHTML=(stream.items.map(p=>'<button class="facet-card" data-place="'+esc(p.place)+'"><b>'+esc(prettyPlace(p.place))+'</b><span>'+fmt(p.count)+' 张</span></button>').join('')+unknownCard)||'<div class="no-results">还没有可按地点汇总的照片。</div>';
     if(q&&status)status.textContent=stream.more?'向下滚动继续加载':(stream.items.length?'已显示全部':'');
   }finally{stream.loading=false;}
 }
@@ -446,7 +503,7 @@ document.addEventListener('click',action(async e=>{
  const open=e.target.closest('[data-folder-open]');
  if(open){e.preventDefault();await loadFolderBrowser(open.dataset.folderOpen);return;}
 }));
-$('#folders-up')&&$('#folders-up').addEventListener('click',action(async()=>{const data=await api('/api/folders?path='+encodeURIComponent(state.folderPath||'')); const parent=data.parent||''; const slash=String.fromCharCode(92); await loadFolderBrowser(parent && folderDrive(parent)===FOLDER_ONLY_DRIVE ? parent : (FOLDER_ONLY_DRIVE+slash));}));
+$('#folders-up')&&$('#folders-up').addEventListener('click',action(async()=>{const slash=String.fromCharCode(92); const parent=(state.folderNav&&state.folderNav.parent)||''; await loadFolderBrowser(parent && folderDrive(parent)===FOLDER_ONLY_DRIVE ? parent : (FOLDER_ONLY_DRIVE+slash));}));
 $('#folders-scan-new')&&$('#folders-scan-new').addEventListener('click',action(async()=>{const path=state.folderPath;if(!path)throw new Error('先进入一个盘符或文件夹，再扫描新照片');state.scanStartedThisVisit=true;state.scanShowCompletedResult=false;await api('/api/scan',{method:'POST',body:JSON.stringify({roots:[path],with_faces:true,include_system:false,workers:1})});toast('开始增量扫描，已入库的会跳过');await setView('scan');state.scanStartedThisVisit=true;state.scanShowCompletedResult=false;const status=await refreshStatus();if(status.job&&['completed','completed_with_errors','failed'].includes(status.job.status)){state.scanShowCompletedResult=true;renderScanStatus(status);}}));
 document.addEventListener('change',action(async e=>{const box=e.target.closest('[data-folder-toggle]');if(!box)return;await toggleFolderInclusion(box.dataset.folderToggle, box.checked);}));
 $$('[data-view]').forEach(b=>b.addEventListener('click',action(()=>setView(b.dataset.view))));$$('[data-jump]').forEach(b=>b.addEventListener('click',action(()=>setView(b.dataset.jump))));['#add-folder','#empty-add'].forEach(s=>$(s).addEventListener('click',action(()=>openAddPhotos())));$$('[data-close]').forEach(b=>b.addEventListener('click',()=>$('#'+b.dataset.close).close()));
@@ -624,7 +681,7 @@ document.addEventListener('click',action(async e=>{const button=e.target.closest
 
 window.__ourTimeApp={state,api,peopleQuery,personLabel,prettyPlace,showDialog,openFolder,exclusionDialog,restoreAssets,refreshStatus,setView,openAddPhotos};
 
-setInterval(()=>refreshStatus().catch(()=>{if(!state.connectionNotice){toast('本机后台暂时没有响应，请检查是否仍在运行',true);state.connectionNotice=true;}}),8000);
+setInterval(()=>{fetch('/',{cache:'no-store'}).then(res=>{if(res.ok)state.connectionNotice=false;else throw new Error('offline');}).catch(()=>{if(!state.connectionNotice){toast('后台暂时繁忙，已加载的照片仍可继续看；完整状态请稍后刷新',true);state.connectionNotice=true;}});refreshStatus().catch(()=>{});},8000);
 
 document.querySelectorAll("dialog").forEach(el=>{if(el.open)el.close();});
 renderPhoto.ticket=0;
