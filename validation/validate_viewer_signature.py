@@ -94,8 +94,14 @@ def caption_state(page: Page) -> dict:
             text: signature.textContent,
             title: signature.title,
             scrollWidth: signature.scrollWidth,
-            clientWidth: signature.clientWidth,
-            tokens: tokens.map(token => ({
+             clientWidth: signature.clientWidth,
+             viewportWidth: innerWidth,
+             groups: Object.fromEntries(['signature-seal-v3','signature-memory','signature-capture','signature-file'].map(cls => {
+               const node = document.querySelector('.' + cls);
+               const rect = node?.getBoundingClientRect();
+               return [cls, rect ? {top:rect.top,bottom:rect.bottom,left:rect.left,width:rect.width,height:rect.height} : null];
+             })),
+             tokens: tokens.map(token => ({
               text: token.textContent,
               scrollWidth: token.scrollWidth,
               clientWidth: token.clientWidth,
@@ -167,6 +173,19 @@ def main() -> int:
         medium_state = assert_caption_fits(page, "Medium")
         check(medium_state["height"] >= 84 and medium_state["height"] <= 88, "Medium 题注高度约为 86px")
         check("..." not in medium_state["text"], "Medium 摄影参数没有被截断")
+        memory_rect = medium_state["groups"]["signature-memory"]
+        capture_rect = medium_state["groups"]["signature-capture"]
+        file_rect = medium_state["groups"]["signature-file"]
+        seal_rect = medium_state["groups"]["signature-seal-v3"]
+        check(medium_state["viewportWidth"] > 979, "Medium 结构测试使用宽桌面 viewport")
+        check(capture_rect["top"] > memory_rect["top"], "Medium Capture 位于 Memory 下方第二带")
+        check(file_rect["top"] < capture_rect["top"], "Medium File 保持在第一带右上")
+        seal_center = (seal_rect["top"] + seal_rect["bottom"]) / 2
+        content_top = min(memory_rect["top"], file_rect["top"])
+        content_bottom = max(capture_rect["bottom"], file_rect["bottom"])
+        content_center = (content_top + content_bottom) / 2
+        check(abs(seal_center - content_center) <= 4, "Medium 拾印章跨两带居中")
+        check(capture_rect["width"] > 300, "Medium Capture 使用跨列后的完整宽度")
         page.screenshot(path=str(REPORT_DIR / "02-medium.png"))
         results["medium"] = {"asset_id": medium_detail["id"], "state": medium_state}
 
@@ -175,25 +194,44 @@ def main() -> int:
         narrow_state = caption_state(page)
         check(narrow_state["mode"] == "narrow", "390px 窗口按实际渲染宽度进入 narrow")
         narrow_state = assert_caption_fits(page, "Narrow")
-        check(92 <= narrow_state["height"] <= 100, "Narrow 题注高度约为 96px")
+        check(100 <= narrow_state["height"] <= 108, "Narrow 题注高度约为 104px")
         page.screenshot(path=str(REPORT_DIR / "03-narrow.png"))
         results["narrow"] = {"asset_id": medium_detail["id"], "state": narrow_state}
 
         synthetic = page.evaluate(
             """() => {
               renderSignature({effective_date:'',effective_place:'',camera:'',format:'PNG',width:1080,height:1920,metadata:{},files:[]},{path:'screenshot.png',size:2150400});
-              return {
+              const sparse = {
                 text: document.querySelector('#photo-signature').textContent,
                 captureHidden: document.querySelector('#signature-settings').hidden,
                 memoryHidden: document.querySelector('#signature-primary').hidden,
                 file: document.querySelector('#signature-format').textContent,
                 title: document.querySelector('#photo-signature').title,
               };
+              renderSignature({effective_date:'2025-05-26T13:56',effective_place:'',camera:'',format:'JPEG',width:1080,height:1920,metadata:{},files:[]},{path:'ordinary.jpg',size:1000});
+              const ordinary = {
+                defaultKind: Boolean(document.querySelector('#signature-primary-kind')),
+                title: document.querySelector('#photo-signature').title,
+              };
+              renderSignature({effective_date:'2025-05-26T13:56',effective_place:'',camera:'',format:'JPEG',width:1080,height:1920,effective_source:'人工确认',metadata:{},files:[]},{path:'confirmed.jpg',size:1000});
+              return {
+                text: sparse.text,
+                captureHidden: sparse.captureHidden,
+                memoryHidden: sparse.memoryHidden,
+                file: sparse.file,
+                title: sparse.title,
+                sparseText: sparse.text,
+                defaultKind: ordinary.defaultKind,
+                ordinaryTitle: ordinary.title,
+                confirmedKind: Boolean(document.querySelector('#signature-primary-kind')),
+              };
             }"""
         )
         check(synthetic["captureHidden"] and synthetic["memoryHidden"], "只有文件信息时不生成空的 Memory / Capture")
         check("1080 × 1920" in synthetic["file"] and "PNG" in synthetic["file"] and "2.1 MB" in synthetic["file"], "只有文件信息时只显示实际 File 信息")
         check("未知" not in synthetic["text"] and "暂无" not in synthetic["text"], "缺少时间地点时不显示 placeholder")
+        check(not synthetic["defaultKind"] and "拍摄时间：" in synthetic["ordinaryTitle"], "普通拍摄时间不占可见题注但保留在 title")
+        check(synthetic["confirmedKind"], "非默认时间来源仍显示时间来源")
 
         long_fixture = page.evaluate(
             """() => {
@@ -224,7 +262,7 @@ def main() -> int:
             page.wait_for_function("!document.querySelector('#detail-dialog').classList.contains('is-loading')")
             after = caption_state(page)
             check(after["mode"] == ("wide" if after["width"] >= 980 else "medium" if after["width"] >= 620 else "narrow"), "连续翻页后题注模式跟随新照片实际宽度")
-            check(abs(after["height"] - (68 if after["mode"] == "wide" else 86 if after["mode"] == "medium" else 96)) <= 1, "连续翻页后题注高度同步")
+            check(abs(after["height"] - (68 if after["mode"] == "wide" else 86 if after["mode"] == "medium" else 104)) <= 1, "连续翻页后题注高度同步")
             results["next"] = {"before": before, "after": after}
         else:
             check(False, "连续翻页场景存在下一张照片")

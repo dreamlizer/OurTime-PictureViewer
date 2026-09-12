@@ -348,6 +348,8 @@ dialog::backdrop { background: #162b2466; backdrop-filter: blur(4px); }
 .quick-name-form input { width: 100%; }
 .quick-name-actions { display: flex; justify-content: flex-end; gap: 10px; align-items: center; margin-top: 16px; }
 .quick-name-actions .primary { min-width: 88px; }
+.quick-name-actions .quick-ignore-person { margin-right: auto; color: #866c63; }
+.quick-name-actions .quick-ignore-person:hover { color: #684a40; background: #f4ece8; }
 .quick-merge-toggle { justify-content: flex-start; padding-inline: 0; color: var(--muted); font-size: 11px; }
 .quick-merge-panel { display: grid; gap: 6px; margin-top: 2px; padding: 10px 0 4px; border-top: 1px solid var(--line); }
 .quick-merge-panel[hidden] { display: none; }

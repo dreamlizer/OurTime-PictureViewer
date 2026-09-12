@@ -87,8 +87,9 @@ def main():
     html = read(WEB / "index.html")
     app = read(WEB / "app.js")
     viewer = read(WEB / "viewer.js")
+    viewer_overrides = read(WEB / "viewer-overrides.css")
     waterfall = read(WEB / "waterfall.js")
-    sources = {"app.js": app, "viewer.js": viewer, "waterfall.js": waterfall, "index.html": html}
+    sources = {"app.js": app, "viewer.js": viewer, "viewer-overrides.css": viewer_overrides, "waterfall.js": waterfall, "index.html": html}
 
     order = re.findall(r'src="/(app\.js|viewer\.js|waterfall\.js)"', html)
     if order != ["app.js", "viewer.js", "waterfall.js"]:
@@ -142,10 +143,20 @@ def main():
         '<option value="pulse">呼吸绿点</option>',
         '<option value="ring">静态绿环</option>',
         "FACE_LABEL_OVERLAP_LIMIT=.12",
+        "FACE_LABEL_FACE_OVERLAP_LIMIT=.25",
         "rectOverlapRatio",
+        "maxFaceRatio",
         "labelOverlapRatio",
     )):
         fail("待命名标记或标签重叠比例防碰撞机制缺失")
+    if (
+        'id="quick-ignore-person"' not in html
+        or "/api/people/'+id+'/ignore" not in app
+        or "applyIgnoredPersonToOpenPhoto" not in app
+        or "function visibleFaces(photo){return (photo&&photo.faces||[]);}" not in viewer
+        or "face-name.unnamed.passerby" not in viewer_overrides
+    ):
+        fail("照片快捷命名缺少路人操作，或路人淡色加号显示规则缺失")
     if not all(path in viewer for path in (
         "/api/face-label-bg/1.png",
         "/api/face-label-bg/2.png",
@@ -241,7 +252,7 @@ def main():
         fail("照片流缺少加载中文案")
     ok("切到时间/地点时先显示加载中，不先说没有照片")
 
-    for item in ["photo-grid", "people-grid", "person-dialog", "person-title", "person-notice", "person-faces-status", "merge-person", "quick-name-dialog", "quick-name-form", "detail-dialog", "no-results", "empty", "stream-status", "places-view", "timeline-tools", "groups-view", "groups-list"]:
+    for item in ["photo-grid", "people-grid", "person-dialog", "person-title", "person-notice", "person-faces-status", "merge-person", "quick-name-dialog", "quick-name-form", "quick-ignore-person", "detail-dialog", "no-results", "empty", "stream-status", "places-view", "timeline-tools", "groups-view", "groups-list"]:
         if ('id="%s"' % item) not in html:
             fail("index.html 缺少必要节点: %s" % item)
     ok("人物页、大图、时间流、地点流的关键节点都在")

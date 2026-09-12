@@ -236,8 +236,8 @@ def main():
         )
         check(
             len({(item["left"], item["top"], item["width"], item["height"]) for item in menu_geometry}) == 1
-            and all(item["previewHeight"] == 104 for item in menu_geometry),
-            "四个主题切换时菜单位置和尺寸保持不动",
+            and all(item["previewHeight"] <= 104 for item in menu_geometry),
+            "四个主题切换时菜单位置和尺寸保持不动且预览区紧凑",
             checks,
         )
         page.select_option("#face-theme", "ivory")

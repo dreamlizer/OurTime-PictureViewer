@@ -1385,6 +1385,66 @@ def split_face(fid:int):
 class IgnoreRequest(BaseModel):
     ignored:bool=True
 
+class PhotoPassersbyRequest(BaseModel):
+    ignored:bool=True
+    person_ids:list[int]=Field(default_factory=list)
+
+@app.post('/api/photos/{aid}/passersby')
+def mark_photo_passersby(aid:int,body:PhotoPassersbyRequest):
+    """Mark only this photo's still-unnamed people as passersby, with a bounded undo."""
+    with db() as c:
+        asset=c.execute('SELECT 1 FROM assets a WHERE a.id=? AND '+ACTIVE_ASSET,(aid,)).fetchone()
+        if not asset: raise HTTPException(404,'照片不存在或已不在资料库中')
+        if body.ignored:
+            rows=c.execute(
+                '''SELECT DISTINCT p.id
+                   FROM faces f JOIN people p ON p.id=f.person_id
+                   WHERE f.asset_id=? AND coalesce(p.ignored,0)=0
+                     AND (coalesce(trim(p.name),'')='' OR trim(p.name) IN ('待核对','命名'))''',
+                (aid,),
+            ).fetchall()
+            person_ids=[int(row['id']) for row in rows]
+        else:
+            requested=[]
+            seen=set()
+            for raw in body.person_ids[:250]:
+                pid=int(raw)
+                if pid>0 and pid not in seen:
+                    seen.add(pid);requested.append(pid)
+            if requested:
+                placeholders=','.join('?' for _ in requested)
+                rows=c.execute(
+                    f'''SELECT DISTINCT p.id
+                        FROM faces f JOIN people p ON p.id=f.person_id
+                        WHERE f.asset_id=? AND coalesce(p.ignored,0)=1
+                          AND p.id IN ({placeholders})''',
+                    (aid,*requested),
+                ).fetchall()
+                person_ids=[int(row['id']) for row in rows]
+            else:
+                person_ids=[]
+        for pid in person_ids:
+            before=c.execute('SELECT * FROM people WHERE id=?',(pid,)).fetchone()
+            if not before: continue
+            if body.ignored:
+                c.execute('UPDATE people SET ignored=1 WHERE id=?',(pid,))
+                c.execute('UPDATE faces SET ignored=1 WHERE person_id=?',(pid,))
+            else:
+                synthetic=not int(before['confirmed'] or 0) and normalize_person_text(before['name'])=='路人'
+                if synthetic:
+                    c.execute("UPDATE people SET ignored=0,name=NULL,alias='' WHERE id=?",(pid,))
+                    c.execute('UPDATE faces SET ignored=0,reviewed=0 WHERE person_id=?',(pid,))
+                else:
+                    c.execute('UPDATE people SET ignored=0 WHERE id=?',(pid,))
+                    c.execute('UPDATE faces SET ignored=0 WHERE person_id=?',(pid,))
+            after=c.execute('SELECT * FROM people WHERE id=?',(pid,)).fetchone()
+            c.execute('INSERT INTO edits(created_at,target,before_json,after_json) VALUES (?,?,?,?)',(
+                now(),f'person:{pid}:photo-passersby:{aid}',
+                json.dumps(dict(before),ensure_ascii=False),json.dumps(dict(after),ensure_ascii=False),
+            ))
+    if person_ids: invalidate_face_index()
+    return {'ok':True,'ignored':body.ignored,'count':len(person_ids),'person_ids':person_ids}
+
 @app.post('/api/people/{pid}/ignore')
 def ignore_person(pid:int,body:IgnoreRequest):
     with db() as c:

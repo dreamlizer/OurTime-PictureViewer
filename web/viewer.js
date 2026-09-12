@@ -89,7 +89,9 @@ const DEFAULT_FACE_STYLE={
   ...FACE_STYLE_PRESETS.classic
 };
 const FACE_UNNAMED_MARKERS=new Set(['plus','pulse','ring']);
+const FACE_LABEL_POSITIONS=new Set(['auto','left','right','top','bottom']);
 const FACE_LABEL_OVERLAP_LIMIT=.12;
+const FACE_LABEL_FACE_OVERLAP_LIMIT=.25;
 const LEGACY_CLASSIC_FACE_STYLE={
   theme:'classic',
   fontSize:13,
@@ -138,7 +140,7 @@ const viewer={
   faceNames:storedViewerPrefs.faceNames!==false,
   faceAlias:storedViewerPrefs.faceAlias===true,
   faceVertical:storedViewerPrefs.faceVertical!==false,
-  faceLabelPosition:['auto','left','right'].includes(storedViewerPrefs.faceLabelPosition)?storedViewerPrefs.faceLabelPosition:'auto',
+  faceLabelPosition:FACE_LABEL_POSITIONS.has(storedViewerPrefs.faceLabelPosition)?storedViewerPrefs.faceLabelPosition:'auto',
   faceUnnamedMarker:FACE_UNNAMED_MARKERS.has(storedViewerPrefs.faceUnnamedMarker)?storedViewerPrefs.faceUnnamedMarker:'plus',
   faceStyle:initialFaceStyle()
 };
@@ -178,7 +180,8 @@ const iconSvg={
   info:'<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 10v7M12 7h.01"/></svg>',
   play:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 7 8 5-8 5V7Z"/></svg>',
   pause:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7v10M15 7v10"/></svg>',
-  locate:'<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>'
+  locate:'<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>',
+  organize:'<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="8" r="2.5"/><circle cx="16" cy="9" r="2"/><path d="M3.5 18v-1a4.5 4.5 0 0 1 9 0v1M13 17.5a3.5 3.5 0 0 1 7 0V18"/></svg>'
 };
 function setToolIcon(selector,svg,label){
   const el=$(selector); if(!el)return;
@@ -203,6 +206,11 @@ function buildViewerToolbar(){
   styleBtn.innerHTML=iconSvg.style;styleBtn.title='人名标签样式';styleBtn.setAttribute('aria-label','人名标签样式');
   peopleGroup.appendChild(styleBtn);
 
+  const manageBtn=document.createElement('button');
+  manageBtn.type='button';manageBtn.id='photo-people-manage';manageBtn.setAttribute('aria-expanded','false');
+  manageBtn.innerHTML=iconSvg.organize;manageBtn.title='整理本照片人物';manageBtn.setAttribute('aria-label','整理本照片人物');
+  peopleGroup.appendChild(manageBtn);
+
   ['#viewer-info','#viewer-play','#slide-delay','#reveal-button'].forEach(sel=>{const el=$(sel);if(el)actionGroup.appendChild(el);});
   tools.replaceChildren(zoomGroup,peopleGroup,actionGroup);
 
@@ -223,6 +231,8 @@ function buildViewerToolbar(){
     delay.title='幻灯片切换间隔';
   }
   buildFaceStylePopover();
+  buildPhotoPeoplePopover();
+  buildFaceActionPopover();
 }
 function buildFaceStylePopover(){
   if($('#face-style-popover'))return;
@@ -247,7 +257,7 @@ function buildFaceStylePopover(){
     </div>
     <div class="face-style-group">
       <div class="face-style-group-title">布局</div>
-      <label class="face-style-field"><span>标签位置</span><select id="face-label-position"><option value="auto">自动</option><option value="left">优先左侧</option><option value="right">优先右侧</option></select></label>
+      <label class="face-style-field"><span>标签位置</span><select id="face-label-position"><option value="auto">自动</option><option value="left">优先左侧</option><option value="right">优先右侧</option><option value="top">优先上方</option><option value="bottom">优先下方</option></select></label>
       <label class="face-style-field"><span>待命名标记</span><select id="face-unnamed-marker"><option value="plus">默认加号</option><option value="pulse">呼吸绿点</option><option value="ring">静态绿环</option></select></label>
     </div>
     <div class="face-style-group">
@@ -272,7 +282,7 @@ function buildFaceStylePopover(){
     }
     updateFaceStyle({fontFamily:e.target.value});
   });
-  bind('#face-label-position','change',e=>{viewer.faceLabelPosition=e.target.value;saveViewerPrefs();if(state.detail)renderFaceNames(state.detail);});
+  bind('#face-label-position','change',e=>{viewer.faceLabelPosition=FACE_LABEL_POSITIONS.has(e.target.value)?e.target.value:'auto';saveViewerPrefs();if(state.detail)renderFaceNames(state.detail);});
   bind('#face-unnamed-marker','change',e=>{
     viewer.faceUnnamedMarker=FACE_UNNAMED_MARKERS.has(e.target.value)?e.target.value:'plus';
     applyFaceStyle();
@@ -286,6 +296,136 @@ function buildFaceStylePopover(){
   bind('#face-style-reset','click',()=>{viewer.faceStyle={...DEFAULT_FACE_STYLE};viewer.faceLabelPosition='auto';viewer.faceUnnamedMarker='plus';applyFaceStyle();saveViewerPrefs();if(state.detail)renderFaceNames(state.detail);});
   buildLocalFontDialog();
   applyFaceStyle();
+}
+function faceHasUsableName(face){
+  const name=String(face?.name||'').trim();
+  return !face?.ignored&&Boolean(name)&&!['待核对','命名','路人'].includes(name);
+}
+function photoPeopleSummary(){
+  const unique=new Map();
+  for(const face of state.detail?.faces||[])if(!unique.has(Number(face.person_id)))unique.set(Number(face.person_id),face);
+  const values=[...unique.values()];
+  return {
+    named:values.filter(faceHasUsableName).length,
+    pending:values.filter(face=>!face.ignored&&!faceHasUsableName(face)).length,
+    passerby:values.filter(face=>Boolean(face.ignored)).length
+  };
+}
+function buildPhotoPeoplePopover(){
+  if($('#photo-people-popover'))return;
+  const shell=$('#detail-dialog .dialog-shell');if(!shell)return;
+  const pop=document.createElement('section');
+  pop.id='photo-people-popover';pop.className='people-manage-popover';pop.hidden=true;
+  pop.setAttribute('aria-label','整理本照片人物');
+  pop.innerHTML=`<div class="people-manage-head"><div><b>整理本照片人物</b><span>快速收起合影中的无关人物</span></div><button type="button" data-close-people-popover aria-label="关闭">×</button></div>
+    <div class="people-manage-counts" aria-live="polite"><span><strong id="photo-named-count">0</strong> 已命名</span><span><strong id="photo-pending-count">0</strong> 待处理</span><span><strong id="photo-passerby-count">0</strong> 路人</span></div>
+    <button type="button" id="photo-passersby-start" class="people-manage-primary">将剩余待命名者设为路人</button>
+    <div id="photo-passersby-confirm" class="people-manage-confirm" hidden><p id="photo-passersby-copy"></p><small>同一人物组在其他照片中的人脸也会一起归入路人。</small><div><button type="button" id="photo-passersby-cancel">取消</button><button type="button" id="photo-passersby-confirm-button">确认处理</button></div></div>
+    <button type="button" id="photo-passersby-undo" class="people-manage-undo" hidden>撤销上一步</button>`;
+  shell.appendChild(pop);
+  pop.querySelector('[data-close-people-popover]').addEventListener('click',()=>togglePhotoPeoplePopover(false));
+  $('#photo-passersby-start').addEventListener('click',()=>{
+    const summary=photoPeopleSummary();
+    if(!summary.pending){toast('当前照片没有待命名人物');return;}
+    $('#photo-passersby-copy').textContent=`保留 ${summary.named} 位已命名人物；只处理本照片中的 ${summary.pending} 位待命名者。`;
+    $('#photo-passersby-confirm').hidden=false;
+  });
+  $('#photo-passersby-cancel').addEventListener('click',()=>{$('#photo-passersby-confirm').hidden=true;});
+  $('#photo-passersby-confirm-button').addEventListener('click',action(async()=>{
+    const assetId=Number(state.detail?.id);if(!assetId)throw new Error('当前照片未载入');
+    const button=$('#photo-passersby-confirm-button');button.disabled=true;
+    try{
+      const result=await api(`/api/photos/${assetId}/passersby`,{method:'POST',body:JSON.stringify({ignored:true})});
+      const ids=(result.person_ids||[]).map(Number);
+      setCurrentPeopleIgnored(ids,true);
+      viewer.lastPasserbyBatch=ids.length?{assetId,personIds:ids}:null;
+      $('#photo-passersby-confirm').hidden=true;
+      updatePhotoPeoplePopover();
+      toast(ids.length?`已将 ${ids.length} 位待命名者设为路人`:'当前照片没有需要处理的人物');
+      loadPeopleOptions().catch(()=>{});
+    }finally{button.disabled=false;}
+  }));
+  $('#photo-passersby-undo').addEventListener('click',action(async()=>{
+    const batch=viewer.lastPasserbyBatch;
+    if(!batch||batch.assetId!==Number(state.detail?.id))return;
+    const button=$('#photo-passersby-undo');button.disabled=true;
+    try{
+      const result=await api(`/api/photos/${batch.assetId}/passersby`,{method:'POST',body:JSON.stringify({ignored:false,person_ids:batch.personIds})});
+      setCurrentPeopleIgnored((result.person_ids||[]).map(Number),false);
+      viewer.lastPasserbyBatch=null;
+      updatePhotoPeoplePopover();
+      toast(`已恢复 ${Number(result.count)||0} 位待命名者`);
+      loadPeopleOptions().catch(()=>{});
+    }finally{button.disabled=false;}
+  }));
+}
+function setCurrentPeopleIgnored(personIds,ignored){
+  const ids=new Set(personIds.map(Number));
+  for(const face of state.detail?.faces||[]){
+    if(!ids.has(Number(face.person_id)))continue;
+    face.ignored=ignored?1:0;
+    if(!ignored&&!face.confirmed&&String(face.name||'').trim()==='路人'){face.name='';face.alias='';}
+  }
+  if(state.detail){renderFaceNames(state.detail);if(typeof renderOpenPhotoPeople==='function')renderOpenPhotoPeople();}
+}
+function updatePhotoPeoplePopover(){
+  const pop=$('#photo-people-popover');if(!pop)return;
+  const summary=photoPeopleSummary();
+  $('#photo-named-count').textContent=String(summary.named);
+  $('#photo-pending-count').textContent=String(summary.pending);
+  $('#photo-passerby-count').textContent=String(summary.passerby);
+  const start=$('#photo-passersby-start');
+  if(start){start.disabled=!summary.pending;start.textContent=summary.pending?`将剩余 ${summary.pending} 位设为路人`:'没有待命名人物';}
+  const batch=viewer.lastPasserbyBatch;
+  $('#photo-passersby-undo').hidden=!(batch&&batch.assetId===Number(state.detail?.id)&&batch.personIds.length);
+}
+function togglePhotoPeoplePopover(force){
+  const pop=$('#photo-people-popover'),btn=$('#photo-people-manage');if(!pop)return;
+  const open=force==null?pop.hidden:!!force;
+  if(open){toggleFaceStylePopover(false);closeFaceActionPopover();updatePhotoPeoplePopover();}
+  pop.hidden=!open;if(btn)btn.setAttribute('aria-expanded',String(open));
+  if(!open)$('#photo-passersby-confirm').hidden=true;
+}
+function buildFaceActionPopover(){
+  if($('#face-action-popover'))return;
+  const dialog=$('#detail-dialog');if(!dialog)return;
+  const pop=document.createElement('section');
+  pop.id='face-action-popover';pop.className='face-action-popover';pop.hidden=true;
+  pop.innerHTML=`<div class="face-action-head"><span>这张照片中的</span><b id="face-action-name"></b></div><button type="button" id="face-action-split">认错了 · 从此人物移出</button><button type="button" id="face-action-ignore">这张是路人</button><small>只处理这张照片中的这张脸，不影响此人的其他照片。</small>`;
+  dialog.appendChild(pop);
+  $('#face-action-split').addEventListener('click',action(async()=>{
+    const faceId=Number(pop.dataset.faceId),face=(state.detail?.faces||[]).find(item=>Number(item.id)===faceId);if(!face)return;
+    const oldPerson=Number(face.person_id),oldName=String(face.name||'').trim()||'这个人物';
+    const result=await api(`/api/faces/${faceId}/split`,{method:'POST'});
+    Object.assign(face,{person_id:Number(result.person_id),name:'',alias:'',confirmed:0,ignored:0});
+    closeFaceActionPopover();renderFaceNames(state.detail);renderOpenPhotoPeople();
+    toast(`已从“${oldName}”移出；只影响这张照片`);
+    if(typeof refreshPersonInLocalState==='function')refreshPersonInLocalState(oldPerson).catch(()=>{});
+  }));
+  $('#face-action-ignore').addEventListener('click',action(async()=>{
+    const faceId=Number(pop.dataset.faceId),face=(state.detail?.faces||[]).find(item=>Number(item.id)===faceId);if(!face)return;
+    const oldPerson=Number(face.person_id),result=await api(`/api/faces/${faceId}/ignore`,{method:'POST',body:JSON.stringify({ignored:true})});
+    Object.assign(face,{person_id:Number(result.person_id),name:'路人',alias:'',confirmed:0,ignored:1});
+    closeFaceActionPopover();renderFaceNames(state.detail);renderOpenPhotoPeople();toast('这张脸已标为路人');
+    if(typeof refreshPersonInLocalState==='function')refreshPersonInLocalState(oldPerson).catch(()=>{});
+  }));
+}
+function openFaceActionPopover(button,face){
+  const pop=$('#face-action-popover');if(!pop)return;
+  toggleFaceStylePopover(false);togglePhotoPeoplePopover(false);
+  viewer.faceAction={faceId:Number(face.id),button};
+  pop.dataset.faceId=String(face.id);$('#face-action-name').textContent=String(face.name||'').trim();pop.hidden=false;
+  showFaceGuide(button);
+  requestAnimationFrame(()=>{
+    const rect=button.getBoundingClientRect(),width=pop.offsetWidth,height=pop.offsetHeight,pad=12;
+    const left=rect.right+10+width<=innerWidth-pad?rect.right+10:rect.left-width-10;
+    pop.style.left=Math.round(Math.max(pad,Math.min(innerWidth-width-pad,left)))+'px';
+    pop.style.top=Math.round(Math.max(pad,Math.min(innerHeight-height-pad,rect.top+rect.height/2-height/2)))+'px';
+  });
+}
+function closeFaceActionPopover(){
+  const pop=$('#face-action-popover');if(pop)pop.hidden=true;
+  viewer.faceAction=null;hideFaceGuide(true);
 }
 function applyFacePreset(name){
   const valid=Object.prototype.hasOwnProperty.call(FACE_STYLE_PRESETS,name);
@@ -610,6 +750,7 @@ function updateFaceStyle(patch){
 function toggleFaceStylePopover(force){
   const pop=$('#face-style-popover'),btn=$('#face-style-button');if(!pop)return;
   const open=force==null?pop.hidden:!!force;
+  if(open){togglePhotoPeoplePopover(false);closeFaceActionPopover();}
   pop.hidden=!open;if(btn)btn.setAttribute('aria-expanded',String(open));
   if(open)applyFaceStyle();
 }
@@ -705,7 +846,7 @@ function signatureModeForWidth(width){
  return w>=980?'wide':w>=620?'medium':'narrow';
 }
 function signatureHeightForMode(mode){
- return mode==='narrow'?96:mode==='medium'?86:68;
+ return mode==='narrow'?104:mode==='medium'?86:68;
 }
 function applySignatureMode(mode){
  const dialog=$('#detail-dialog');
@@ -781,6 +922,7 @@ function renderSignature(a,file){
  const hasMemory=Boolean(shownDate||place);
  const hasCapture=Boolean(camera||exposure.length);
  const hasFile=basics.length>0;
+ const timeKindMarkup=shownDate&&timeKind!=='拍摄时间'?`<small id="signature-primary-kind">${esc(timeKind)}</small>`:'';
  const exposureMarkup=exposure.map(value=>`<span class="signature-exposure-token">${esc(value)}</span>`).join('');
  const fileMarkup=basics.map((value,index)=>`<span class="signature-file-token ${index===0&&dimensions?'signature-dimensions':index===1&&format?'signature-format-token':'signature-size-token'}">${esc(value)}</span>`).join('');
  const placeMarkup=place?`<span id="signature-place" class="signature-place" title="${esc(place)}">${esc(place)}</span>`:'';
@@ -789,11 +931,11 @@ function renderSignature(a,file){
  signature.innerHTML=`
   <div class="signature-v3 ${hasMemory?'has-memory':''} ${hasCapture?'has-capture':''} ${hasFile?'has-file':''}" data-has-memory="${hasMemory}" data-has-capture="${hasCapture}" data-has-file="${hasFile}">
    <span class="signature-seal-v3" aria-hidden="true">拾</span>
-   <div id="signature-primary" class="signature-memory"${hasMemory?'':' hidden'}>
-    <div class="signature-memory-main">
-     <strong id="signature-primary-value" class="signature-date"${shownDate?'':' hidden'}>${esc(shownDate)}</strong>
-     <small id="signature-primary-kind"${shownDate?'':' hidden'}>${esc(timeKind)}</small>
-    </div>
+    <div id="signature-primary" class="signature-memory"${hasMemory?'':' hidden'}>
+     <div class="signature-memory-main">
+      <strong id="signature-primary-value" class="signature-date"${shownDate?'':' hidden'}>${esc(shownDate)}</strong>
+      ${timeKindMarkup}
+     </div>
     ${placeMarkup}
    </div>
    <div id="signature-settings" class="signature-capture"${hasCapture?'':' hidden'}>
@@ -806,7 +948,7 @@ function renderSignature(a,file){
  signature.title=title;
 }
 function namedFaces(photo){return (photo&&photo.faces||[]).filter(f=>f.name&&!f.ignored);}
-function visibleFaces(photo){return (photo&&photo.faces||[]).filter(f=>!f.ignored);}
+function visibleFaces(photo){return (photo&&photo.faces||[]);}
 function viewerImageSrc(photo, file, id){
  const w=Number(photo&&photo.width)||0, h=Number(photo&&photo.height)||0;
  const format=String(photo&&photo.format||'').toUpperCase();
@@ -829,6 +971,7 @@ function faceBox(face){
  return {x1,y1,x2,y2,w:w||0,h:h||0,cx:(x1+x2)/2,cy:(y1+y2)/2,width:Math.max(1,x2-x1),height:Math.max(1,y2-y1)};
 }
 function faceLabelText(face, alias){
+  if(face.ignored) return '+';
   if(face.name) return alias&&face.alias?(face.name+' / '+face.alias):face.name;
   return '+';
 }
@@ -856,26 +999,25 @@ function clampFaceLabel(rect, layerW, layerH, pad=6){
   return rect;
 }
 function faceLabelCandidate(item, side, vertical, width, height, offset, gap=6){
-  if(vertical){
+  if(side==='left'||side==='right'){
     return {
       x:side==='left'?item.fx-width-gap:item.fx+item.fw+gap,
       y:item.fy+item.fh/2-height/2+offset,
-      w:width,h:height,side,btn:item.btn
+      w:width,h:height,side,offset,btn:item.btn
     };
   }
   const y=side==='top'?item.fy-height-gap:item.fy+item.fh+gap;
-  return {x:item.cx-width/2+offset,y,w:width,h:height,side,btn:item.btn};
+  return {x:item.cx-width/2+offset,y,w:width,h:height,side,offset,btn:item.btn};
 }
-function faceLabelOffsets(vertical,width,height,layerW,layerH){
-  const step=Math.max(12,Math.round((vertical?height:width)*.28));
-  const span=vertical?layerH:layerW;
+function faceLabelOffsets(side,width,height,layerW,layerH){
+  const sideAxis=side==='left'||side==='right';
+  const step=Math.max(12,Math.round((sideAxis?height:width)*.28));
+  const span=sideAxis?layerH:layerW;
   const offsets=[0];
   for(let distance=step;distance<=span;distance+=step)offsets.push(-distance,distance);
   return offsets;
 }
 function faceLabelSide(items, ox, imgW){
-  const forced=viewer.faceLabelPosition;
-  if(forced==='left'||forced==='right')return forced;
   const groupMin=Math.min(...items.map(item=>item.fx));
   const groupMax=Math.max(...items.map(item=>item.fx+item.fw));
   const leftSpace=Math.max(0,groupMin-ox);
@@ -884,6 +1026,14 @@ function faceLabelSide(items, ox, imgW){
   const leftMin=Math.min(...items.map(item=>item.fx-ox));
   const rightMin=Math.min(...items.map(item=>ox+imgW-item.fx-item.fw));
   return leftMin>=rightMin?'left':'right';
+}
+function faceLabelSides(items,ox,imgW,vertical){
+  const forced=viewer.faceLabelPosition;
+  if(forced==='left'||forced==='right')return [forced,forced==='left'?'right':'left'];
+  if(forced==='top'||forced==='bottom')return [forced,forced==='top'?'bottom':'top'];
+  if(!vertical)return ['bottom','top'];
+  const automatic=faceLabelSide(items,ox,imgW);
+  return [automatic,automatic==='left'?'right':'left'];
 }
 function layoutFaceNameButtons(layer, faces, alias){
   const img=$('#detail-img');
@@ -901,15 +1051,20 @@ function layoutFaceNameButtons(layer, faces, alias){
     const fy=oy+box.y1/box.h*imgH;
     const fw=box.width/box.w*imgW;
     const fh=box.height/box.h*imgH;
-    items.push({face, named:Boolean(face.name), label:faceLabelText(face,alias), fx, fy, fw, fh, cx:fx+fw/2, cy:fy+fh/2});
+    const passerby=Boolean(face.ignored);
+    items.push({face, passerby, named:!passerby&&Boolean(face.name), label:faceLabelText(face,alias), fx, fy, fw, fh, cx:fx+fw/2, cy:fy+fh/2});
   });
   items.sort((a,b)=>a.cy-b.cy||a.cx-b.cx);
-  layer.innerHTML=items.map(it=>`<button type="button" class="face-name${it.named?'':' unnamed'}" data-face-person="${it.face.person_id}"${it.named?'':' title="命名人物" aria-label="命名人物"'}>${esc(it.label)}</button>`).join('');
+  layer.innerHTML=items.map(it=>{
+    const hint=it.named?`${it.label}；点击管理这张脸`:(it.passerby?'路人；点击可重新命名':'命名人物');
+    return `<button type="button" class="face-name${it.named?'':' unnamed'}${it.passerby?' passerby':''}" data-face-id="${Number(it.face.id)||''}" data-face-person="${it.face.person_id}" title="${esc(hint)}" aria-label="${esc(hint)}">${esc(it.label)}</button>`;
+  }).join('')+'<svg class="face-hover-guide" aria-hidden="true"><path></path><circle r="2.6"></circle></svg><span class="face-hover-box" aria-hidden="true"></span>';
   const buttons=[...layer.querySelectorAll('.face-name')];
   const vertical=faceLabelsVertical();
   const placed=[];
   const gap=6;
-  const preferredSide=vertical?faceLabelSide(items,ox,imgW):'bottom';
+  const sides=faceLabelSides(items,ox,imgW,vertical);
+  const preferredSide=sides[0];
   const faceRects=items.map(item=>({x:item.fx,y:item.fy,w:item.fw,h:item.fh}));
   buttons.forEach((btn,i)=>{
     const it=items[i];
@@ -917,11 +1072,10 @@ function layoutFaceNameButtons(layer, faces, alias){
     if(it.named)applyFaceLabelProfile(btn,it.label);
     const w=Math.max(18, btn.offsetWidth);
     const h=Math.max(18, btn.offsetHeight);
-    const sides=vertical?[preferredSide,preferredSide==='left'?'right':'left']:[preferredSide,'top'];
-    const offsets=faceLabelOffsets(vertical,w,h,layerW,layerH);
+    const offsetsBySide=new Map(sides.map(side=>[side,faceLabelOffsets(side,w,h,layerW,layerH)]));
     const candidates=new Map();
     for(const side of sides){
-      for(const offset of offsets){
+      for(const offset of offsetsBySide.get(side)){
         const candidate=faceLabelCandidate(it,side,vertical,w,h,offset,gap);
         clampFaceLabel(candidate,layerW,layerH,4);
         const key=`${side}:${Math.round(candidate.x)}:${Math.round(candidate.y)}`;
@@ -933,18 +1087,22 @@ function layoutFaceNameButtons(layer, faces, alias){
       const labelRatios=placed.map(other=>rectOverlapRatio(candidate,other));
       const maxLabelRatio=labelRatios.length?Math.max(...labelRatios):0;
       const placedOverlap=placed.reduce((sum,other)=>sum+rectOverlapArea(candidate,other),0);
+      const faceRatios=faceRects.map((faceRect,faceIndex)=>faceIndex===i?0:rectOverlapRatio(candidate,faceRect));
+      const maxFaceRatio=Math.max(0,...faceRatios);
       const otherFaceOverlap=faceRects.reduce((sum,faceRect,faceIndex)=>sum+(faceIndex===i?0:rectOverlapArea(candidate,faceRect)),0);
       const hardLabel=maxLabelRatio>FACE_LABEL_OVERLAP_LIMIT?1:0;
-      const hardFace=otherFaceOverlap>0?1:0;
+      const hardFace=maxFaceRatio>FACE_LABEL_FACE_OVERLAP_LIMIT?1:0;
       const score=[
         hardLabel||hardFace?1:0,
         hardLabel,
         hardFace,
         maxLabelRatio,
-        otherFaceOverlap,
+        hardFace?maxFaceRatio:0,
         placedOverlap,
         candidate.side===preferredSide?0:1,
-        faceLabelDistance(candidate,it)
+        Math.abs(candidate.offset),
+        faceLabelDistance(candidate,it),
+        otherFaceOverlap
       ];
       if(!bestScore||compareFaceLabelScore(score,bestScore)<0){
         chosen=candidate;
@@ -954,7 +1112,7 @@ function layoutFaceNameButtons(layer, faces, alias){
     chosen=chosen||clampFaceLabel(faceLabelCandidate(it,sides[0],vertical,w,h,0,gap),layerW,layerH,4);
     placed.push(chosen);
     btn.classList.add(chosen.side);
-    if(!it.named)btn.setAttribute('title','命名人物');
+    if(!it.named)btn.setAttribute('title',it.passerby?'路人；点击可重新命名':'命名人物');
   });
   placed.forEach((rect,index)=>{
     const maxRatio=placed.reduce((max,other,otherIndex)=>otherIndex===index?max:Math.max(max,rectOverlapRatio(rect,other)),0);
@@ -962,6 +1120,45 @@ function layoutFaceNameButtons(layer, faces, alias){
     rect.btn.style.left=Math.round(rect.x)+'px';
     rect.btn.style.top=Math.round(rect.y)+'px';
   });
+}
+function faceForLabel(button){
+  const faceId=Number(button?.dataset.faceId);
+  return (state.detail?.faces||[]).find(face=>Number(face.id)===faceId)||null;
+}
+function showFaceGuide(button){
+  const layer=$('#face-name-layer'),img=$('#detail-img'),face=faceForLabel(button),box=faceBox(face);
+  const halo=layer?.querySelector('.face-hover-box'),guide=layer?.querySelector('.face-hover-guide');
+  if(!layer||!img||!button||!box||!halo||!guide)return;
+  const layerRect=layer.getBoundingClientRect(),imageRect=img.getBoundingClientRect(),labelRect=button.getBoundingClientRect();
+  const faceRect={
+    x:imageRect.left-layerRect.left+box.x1/box.w*imageRect.width,
+    y:imageRect.top-layerRect.top+box.y1/box.h*imageRect.height,
+    w:box.width/box.w*imageRect.width,
+    h:box.height/box.h*imageRect.height
+  };
+  const pad=4;
+  halo.style.left=Math.round(faceRect.x-pad)+'px';halo.style.top=Math.round(faceRect.y-pad)+'px';
+  halo.style.width=Math.round(faceRect.w+pad*2)+'px';halo.style.height=Math.round(faceRect.h+pad*2)+'px';
+  const label={x:labelRect.left-layerRect.left,y:labelRect.top-layerRect.top,w:labelRect.width,h:labelRect.height};
+  const lc={x:label.x+label.w/2,y:label.y+label.h/2},fc={x:faceRect.x+faceRect.w/2,y:faceRect.y+faceRect.h/2};
+  let start,end;
+  if(Math.abs(fc.x-lc.x)>=Math.abs(fc.y-lc.y)){
+    start={x:fc.x>=lc.x?label.x+label.w:label.x,y:lc.y};
+    end={x:fc.x>=lc.x?faceRect.x:faceRect.x+faceRect.w,y:Math.max(faceRect.y,Math.min(faceRect.y+faceRect.h,lc.y))};
+  }else{
+    start={x:lc.x,y:fc.y>=lc.y?label.y+label.h:label.y};
+    end={x:Math.max(faceRect.x,Math.min(faceRect.x+faceRect.w,lc.x)),y:fc.y>=lc.y?faceRect.y:faceRect.y+faceRect.h};
+  }
+  guide.setAttribute('viewBox',`0 0 ${layer.clientWidth} ${layer.clientHeight}`);
+  guide.querySelector('path').setAttribute('d',`M ${start.x.toFixed(1)} ${start.y.toFixed(1)} L ${end.x.toFixed(1)} ${end.y.toFixed(1)}`);
+  const dot=guide.querySelector('circle');dot.setAttribute('cx',end.x.toFixed(1));dot.setAttribute('cy',end.y.toFixed(1));
+  layer.querySelectorAll('.face-name.is-linked').forEach(item=>item.classList.remove('is-linked'));
+  button.classList.add('is-linked');layer.classList.add('is-linking');
+}
+function hideFaceGuide(force=false){
+  if(!force&&viewer.faceAction)return;
+  const layer=$('#face-name-layer');if(!layer)return;
+  layer.classList.remove('is-linking');layer.querySelectorAll('.face-name.is-linked').forEach(item=>item.classList.remove('is-linked'));
 }
 function renderFaceNames(photo){
  const layer=$('#face-name-layer'); if(!layer)return;
@@ -980,7 +1177,8 @@ function renderFaceNames(photo){
 }
 function zoomTo(scale){viewer.fit=false;viewer.scale=Math.max(.05,Math.min(4,scale));updateZoom();}
 async function displayPhoto(id){
- const ticket=renderPhoto.ticket+1;
+  closeFaceActionPopover();togglePhotoPeoplePopover(false);
+  const ticket=renderPhoto.ticket+1;
  setViewerLoading(true);
  if(viewer.loader){viewer.loader.onload=null;viewer.loader.onerror=null;viewer.loader.src='';}
  try{
@@ -1191,30 +1389,42 @@ $('#zoom-actual').addEventListener('click',()=>zoomTo(1));
 $('#detail-img').addEventListener('load',()=>{updateZoom(true);renderFaceNames(state.detail);});
 const faceLayer=$('#face-name-layer');
 faceLayer&&faceLayer.addEventListener('pointerdown',e=>{if(e.target.closest('[data-face-person]')){e.stopPropagation();drag=null;}});
+faceLayer&&faceLayer.addEventListener('pointerover',e=>{const button=e.target.closest('.face-name');if(button)showFaceGuide(button);});
+faceLayer&&faceLayer.addEventListener('pointerout',e=>{const button=e.target.closest('.face-name');if(button&&!button.contains(e.relatedTarget))hideFaceGuide();});
+faceLayer&&faceLayer.addEventListener('focusin',e=>{const button=e.target.closest('.face-name');if(button)showFaceGuide(button);});
+faceLayer&&faceLayer.addEventListener('focusout',e=>{const button=e.target.closest('.face-name');if(button&&!button.contains(e.relatedTarget))hideFaceGuide();});
 faceLayer&&faceLayer.addEventListener('click',e=>{
  const b=e.target.closest('[data-face-person]');
  if(!b)return;
  e.preventDefault();
  e.stopPropagation();
  outsidePhotoDown=false;
- const id=Number(b.dataset.facePerson);
- if(typeof openQuickName==='function') openQuickName(id);
+ const face=faceForLabel(b);
+ if(faceHasUsableName(face))openFaceActionPopover(b,face);
+ else if(typeof openQuickName==='function')openQuickName(Number(b.dataset.facePerson));
 });
 $('#toggle-face-names').addEventListener('click',()=>{viewer.faceNames=!viewer.faceNames;saveViewerPrefs();renderFaceNames(state.detail);});
 $('#toggle-face-alias').addEventListener('click',()=>{viewer.faceAlias=!viewer.faceAlias;saveViewerPrefs();renderFaceNames(state.detail);});
 $('#toggle-face-dir').addEventListener('click',()=>{viewer.faceVertical=!viewer.faceVertical;saveViewerPrefs();renderFaceNames(state.detail);if(!$('#face-style-popover')?.hidden)applyFaceStyle();});
 $('#face-style-button')?.addEventListener('click',e=>{e.stopPropagation();toggleFaceStylePopover();});
+$('#photo-people-manage')?.addEventListener('click',e=>{e.stopPropagation();togglePhotoPeoplePopover();});
+document.addEventListener('click',e=>{
+ if(!e.target.closest('#face-action-popover,.face-name'))closeFaceActionPopover();
+ if(!e.target.closest('#photo-people-popover,#photo-people-manage'))togglePhotoPeoplePopover(false);
+ if(!e.target.closest('#face-style-popover,#face-style-button'))toggleFaceStylePopover(false);
+});
 $('#detail-img').addEventListener('dblclick',()=>{if(viewer.fit)zoomTo(1);else{viewer.fit=true;updateZoom(true);}});
 function toggleInfo(){$('#detail-dialog').classList.toggle('hide-info');syncViewerTools();}
 $('#viewer-info').addEventListener('click',toggleInfo);
 $('#close-info').addEventListener('click',toggleInfo);
 $('#viewer-play').addEventListener('click',()=>{if(viewer.playing){stopSlides();syncViewerTools();return;}const current=Number.isFinite(viewer.absolute)?viewer.absolute:(viewer.offset||0)+(viewer.target||0);if(current>=(viewer.total||viewer.ids.length)-1){viewerMessage('已经是最后一张，请先返回前面的照片。');return;}viewer.playing=true;syncViewerTools();scheduleSlide();});
 $('#slide-delay').addEventListener('change',()=>{saveViewerPrefs();if(viewer.timer)scheduleSlide();});
-$('#detail-dialog').addEventListener('close',()=>{viewer.exit={photoId:Number(state.detail?.id)||0,absolute:Number(viewer.absolute),context:viewer.context?{...viewer.context}:null,fallbackScroll:viewer.returnScroll,openedPhotoId:Number(viewer.openedPhotoId)||0,openedAbsolute:Number(viewer.openedAbsolute),openedContext:viewer.openedContext?{...viewer.openedContext}:null,waterfallGeneration:viewer.openedWaterfallGeneration};clearTimeout(viewer.closingTimer);viewer.closingTimer=null;$('#detail-dialog').classList.remove('viewer-closing');stopSlides();toggleFaceStylePopover(false);viewer.generation++;viewer.queued=null;viewer.goal=null;viewer.sequencePromise=null;renderPhoto.ticket++;if(viewer.loader){viewer.loader.onload=null;viewer.loader.onerror=null;viewer.loader.src='';}if(document.fullscreenElement)document.exitFullscreen().catch(()=>{});});
+$('#detail-dialog').addEventListener('close',()=>{viewer.exit={photoId:Number(state.detail?.id)||0,absolute:Number(viewer.absolute),context:viewer.context?{...viewer.context}:null,fallbackScroll:viewer.returnScroll,openedPhotoId:Number(viewer.openedPhotoId)||0,openedAbsolute:Number(viewer.openedAbsolute),openedContext:viewer.openedContext?{...viewer.openedContext}:null,waterfallGeneration:viewer.openedWaterfallGeneration};clearTimeout(viewer.closingTimer);viewer.closingTimer=null;$('#detail-dialog').classList.remove('viewer-closing');stopSlides();toggleFaceStylePopover(false);togglePhotoPeoplePopover(false);closeFaceActionPopover();viewer.lastPasserbyBatch=null;viewer.generation++;viewer.queued=null;viewer.goal=null;viewer.sequencePromise=null;renderPhoto.ticket++;if(viewer.loader){viewer.loader.onload=null;viewer.loader.onerror=null;viewer.loader.src='';}if(document.fullscreenElement)document.exitFullscreen().catch(()=>{});});
 $('#detail-dialog').addEventListener('cancel',e=>{e.preventDefault();closePhotoViewer();});
 document.addEventListener('visibilitychange',()=>{if(document.hidden)stopSlides();});
 document.addEventListener('keydown',action(async e=>{
  if(!$('#detail-dialog').open||$$('dialog[open]').at(-1)?.id!=='detail-dialog'||e.target.closest('input,textarea,select,[contenteditable="true"]')||e.ctrlKey||e.altKey||e.metaKey)return;
+ if(e.key==='Escape'&&(!$('#face-action-popover')?.hidden||!$('#photo-people-popover')?.hidden||!$('#face-style-popover')?.hidden)){e.preventDefault();closeFaceActionPopover();togglePhotoPeoplePopover(false);toggleFaceStylePopover(false);return;}
  const directions={ArrowLeft:-1,ArrowUp:-1,ArrowRight:1,ArrowDown:1};
  if(e.key in directions){e.preventDefault();await movePhoto(directions[e.key]);}
  else if(e.key==='Home'||e.key==='End'){e.preventDefault();const total=viewer.total||viewer.ids.length;const current=Number.isFinite(viewer.absolute)?viewer.absolute:(viewer.offset||0)+(viewer.target||0);await movePhoto(e.key==='Home'?-current:total-1-current);}
@@ -1227,7 +1437,7 @@ new ResizeObserver(()=>{if($('#detail-dialog').open)updateZoom();}).observe(view
 // Remember where a gesture began: dragging a zoomed photo onto the background
 // must not close it. Buttons, links and the detail drawer keep their own actions.
 let outsidePhotoDown=false;
-const keepOpenSelector='#detail-img,button,a,input,textarea,select,.detail-info,.face-name-layer,.face-name,.viewer-tools,.viewer-arrow,.dialog-close,#photo-mat,#photo-signature,.face-style-popover';
+ const keepOpenSelector='#detail-img,button,a,input,textarea,select,.detail-info,.face-name-layer,.face-name,.viewer-tools,.viewer-arrow,.dialog-close,#photo-mat,#photo-signature,.face-style-popover,.people-manage-popover,.face-action-popover';
 $('#detail-dialog').addEventListener('pointerdown',e=>{
  outsidePhotoDown=e.button===0&&!e.target.closest(keepOpenSelector);
 });
