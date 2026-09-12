@@ -265,33 +265,79 @@ function togglePersonSelection(id, selected){id=Number(id);if(!id)return;const o
 function isPeopleSelecting(){return state.view==='people'&&Boolean(state.peopleMerging);}
 function rememberPersonLabel(person){if(!person||person.id==null)return;const id=String(person.id);const label=personLabel(person);state.personLabels=state.personLabels||{};state.personLabels[id]=label;window.__ourTimeRememberPersonLabel?.(id,label);}
 function setPeopleMerging(on){
-  const entering=Boolean(on)&&!state.peopleMerging;
-  const leaving=!Boolean(on)&&state.peopleMerging;
   state.peopleMerging=Boolean(on);
-  if(!state.peopleMerging)state.peopleSelected.clear();
-  if(leaving||entering){
-    const stream=state.peopleStream&&state.peopleStream.people;
-    const grid=$('#people-grid');
-    if(grid&&stream&&stream.items)grid.innerHTML=stream.items.map(p=>personCard(p,'people')).join('');
-  }else if(!state.peopleMerging){
+  if(state.peopleMerging){
+    $$('#people-grid .person-card').forEach(card=>{
+      if(card.querySelector('.person-check'))return;
+      const id=Number(card.dataset.person);
+      card.insertAdjacentHTML('afterbegin',`<label class="person-check"><input type="checkbox" data-select-person="${id}" ${state.peopleSelected.has(id)?'checked':''} aria-label="选择这个人"></label>`);
+    });
+  }else{
+    state.peopleSelected.clear();
     $$('#people-grid .person-card').forEach(card=>card.classList.remove('selected'));
-    $$('#people-grid [data-select-person]').forEach(box=>box.checked=false);
+    $$('#people-grid .person-check').forEach(check=>check.remove());
   }
   updatePeopleMerge();
 }
 function peopleQuery(extra={}){const q=new URLSearchParams({ignored:String(extra.ignored||0),offset:String(extra.offset||0),limit:String(extra.limit||48)});if(extra.q)q.set('q',extra.q);if(extra.ids)q.set('ids',extra.ids);if(extra.named)q.set('named','1');return '/api/people?'+q.toString();}
 function patchPersonInStream(id, patch){id=Number(id);const stream=state.peopleStream&&state.peopleStream.people;if(!stream||!stream.items)return null;const item=stream.items.find(p=>p.id===id);if(!item)return null;Object.assign(item,patch);return item;}
- function personCardById(id){const numeric=Number(id);if(!Number.isInteger(numeric)||numeric<1)return null;return document.querySelector(`#people-grid [data-person="${numeric}"]`);}
- function renderPersonCard(person){const card=personCardById(person.id);if(!card)return;const wrap=document.createElement('div');wrap.innerHTML=personCard(person,'people');const fresh=wrap.firstElementChild;if(!fresh)return;card.replaceWith(fresh);}
- function bumpPersonCard(id){const card=personCardById(id);if(!card)return;card.classList.add('named');if(state.view==='people')card.scrollIntoView({block:'nearest',behavior:'smooth'});}
- function removePersonFromLocalState(id){
-  id=Number(id);const stream=state.peopleStream&&state.peopleStream.people;const card=personCardById(id);
+ function personStreamKind(kind='people'){return kind==='passersby'?'passersby':'people';}
+ function personGridSelector(kind='people'){return personStreamKind(kind)==='passersby'?'#passersby-grid':'#people-grid';}
+ function personTotalSelector(kind='people'){return personStreamKind(kind)==='passersby'?'#passersby-total':'#people-total';}
+ function personCardById(id,kind='people'){const numeric=Number(id);if(!Number.isInteger(numeric)||numeric<1)return null;return document.querySelector(`${personGridSelector(kind)} [data-person="${numeric}"]`);}
+ function renderPersonCard(person,kind='people'){kind=personStreamKind(kind);const card=personCardById(person.id,kind);if(!card)return;const wrap=document.createElement('div');wrap.innerHTML=personCard(person,kind);const fresh=wrap.firstElementChild;if(!fresh)return;card.replaceWith(fresh);}
+ function bumpPersonCard(id){const card=personCardById(id);if(card)card.classList.add('named');}
+ function removePersonFromLocalState(id,kind='people'){
+  kind=personStreamKind(kind);id=Number(id);const stream=state.peopleStream&&state.peopleStream[kind];const card=personCardById(id,kind);
   if(card){card.classList.add('removing');card.remove();}
   if(!stream||!stream.items)return Boolean(card);
   const before=stream.items.length;stream.items=stream.items.filter(p=>Number(p.id)!==id);
-  if(stream.items.length!==before&&typeof stream.total==='number'&&stream.total>0)stream.total-=1;
-  const total=$('#people-total');if(total)total.textContent=fmt(stream.total)+' 个分组';
+  if(stream.items.length!==before){
+   if(typeof stream.total==='number'&&stream.total>0)stream.total-=1;
+   stream.offset=stream.items.length;
+   state[kind]=stream.items;
+  }
+  const total=$(personTotalSelector(kind));if(total)total.textContent=kind==='people'?(fmt(stream.total)+' 个分组'):(fmt(stream.total)+' 组路人');
   return Boolean(card)||stream.items.length!==before;
+ }
+ function appendPersonToLocalState(person,kind='people'){
+  if(!person||person.id==null)return null;
+  kind=personStreamKind(kind);
+  const stream=state.peopleStream&&state.peopleStream[kind];
+  if(!stream)return null;
+  stream.items=stream.items||[];
+  if(stream.items.some(p=>Number(p.id)===Number(person.id)))return person;
+  stream.items.push(person);
+  if(typeof stream.total==='number')stream.total+=1;
+  stream.offset=stream.items.length;
+  state[kind]=stream.items;
+  const grid=$(personGridSelector(kind));
+  if(grid){
+    const empty=grid.querySelector('.no-results');
+    if(empty)empty.remove();
+    grid.insertAdjacentHTML('beforeend', personCard(person,kind));
+  }
+  const total=$(personTotalSelector(kind));if(total)total.textContent=kind==='people'?(fmt(stream.total)+' 个分组'):(fmt(stream.total)+' 组路人');
+  if(kind==='people')updatePeopleMerge();
+  return person;
+ }
+ async function fetchPersonById(id,kind='people'){
+  kind=personStreamKind(kind);
+  const data=await api(peopleQuery({ignored:kind==='passersby'?1:0,limit:1,ids:String(id)}));
+  return (data.items||[])[0]||null;
+ }
+ async function refreshPersonInLocalState(id,kind='people'){
+  kind=personStreamKind(kind);
+  const person=await fetchPersonById(id,kind);
+  const stream=state.peopleStream&&state.peopleStream[kind];
+  if(!stream||!stream.items)return person;
+  if(!person){removePersonFromLocalState(id,kind);return null;}
+  const index=stream.items.findIndex(item=>Number(item.id)===Number(id));
+  if(index<0)return person;
+  stream.items[index]=person;
+  state[kind]=stream.items;
+  renderPersonCard(person,kind);
+  return person;
  }
  function normalizePersonText(value){return String(value??'').trim().replace(/ {2,}/g,' ');}
  function personNameMatchesUrl(name,alias,id){return '/api/people/matches?'+new URLSearchParams({name,alias,exclude_id:String(Number(id)||0)});}
@@ -315,6 +361,7 @@ function patchPersonInStream(id, patch){id=Number(id);const stream=state.peopleS
   await api('/api/people/'+source+'/merge',{method:'POST',body:JSON.stringify({target_id:target})});
   try{
    state.peopleSelected.delete(Number(source));removePersonFromLocalState(source);
+   await refreshPersonInLocalState(target);
    if(state.detail&&Array.isArray(state.detail.faces))state.detail.faces.forEach(face=>{if(Number(face.person_id)===Number(source)){face.person_id=Number(target);face.name=match.name;face.alias=match.alias||'';}});
    if(Number(state.personId)===Number(source)&&$('#person-dialog')?.open)await globalThis['openPerson'](Number(target));else applyNamedPersonToOpenPhoto(Number(target),match.name,match.alias||'');
    updatePeopleMerge();
@@ -368,7 +415,6 @@ async function rememberPersonName(id,name,alias){
   state.personDetail=Object.assign({},state.personDetail,{name,alias,confirmed:1,ignored:0});
   const title=$('#person-title'); if(title) title.textContent=personLabel(state.personDetail);
  }
- refreshStatus().catch(function(){});
 }
 function personCard(p,mode='people'){
   if(mode==='passersby')return `<button class="person-card" data-person="${p.id}"><img src="/api/face/${p.cover}" alt="路人缩略图" loading="lazy"><b>${esc(p.name||'路人')}</b><p>${p.photo_count} 张照片 · ${p.face_count} 张人脸</p><small>暂不识别，点开可恢复</small></button>`;
@@ -393,7 +439,13 @@ async function fetchPeoplePage(kind, reset=false, viewToken=null){
     if(total)total.textContent=kind==='people'?'':(fmt(stream.total)+' 组路人');
     if(grid){
       grid.classList.remove('is-switching');
-      grid.innerHTML=stream.items.length?stream.items.map(p=>personCard(p,kind)).join(''):`<div class="no-results" style="grid-column:1/-1">${kind==='people'?'还没有人物分组。到“扫描与入库”勾选人脸检测，扫描照片后即可核对和命名。':'还没有标为路人的面孔。'}</div>`;
+      const html=stream.items.length?stream.items.map(p=>personCard(p,kind)).join(''):`<div class="no-results" style="grid-column:1/-1">${kind==='people'?'还没有人物分组。到“扫描与入库”勾选人脸检测，扫描照片后即可核对和命名。':'还没有标为路人的面孔。'}</div>`;
+      if(reset) grid.innerHTML=html;
+      else {
+        const existing=new Set([...grid.querySelectorAll('[data-person]')].map(el=>el.dataset.person));
+        const added=stream.items.filter(p=>!existing.has(String(p.id)));
+        if(added.length) grid.insertAdjacentHTML('beforeend', added.map(p=>personCard(p,kind)).join(''));
+      }
     }
     if(status)status.textContent=stream.more?'向下滚动继续加载':(stream.items.length?'已显示全部':'');
     if(kind==='people')updatePeopleMerge();
@@ -641,11 +693,14 @@ $('#person-dialog').addEventListener('click',async e=>{
   const p=state.personDetail; if(!p)return;
   const ignored=!(p.ignored);
   const fid=ignoreFace.dataset.ignoreFace;
+  const sourceId=Number(p.id);
+  const sourceKind=p.ignored?'passersby':'people';
   ignoreFace.disabled=true;
   try{
     await api('/api/faces/'+fid+'/ignore',{method:'POST',body:JSON.stringify({ignored})});
-    if(ignored) await removePersonFaceLocally(fid);
-    else await openPerson(state.personId);
+    await removePersonFaceLocally(fid);
+    const remaining=await refreshPersonInLocalState(sourceId,sourceKind);
+    if(!remaining || !(state.personDetail&&state.personDetail.face_count)) $('#person-dialog').close();
   }catch(err){ toast(err.message||'这张没能标为路人', true); }
   finally{ ignoreFace.disabled=false; }
 });
@@ -691,14 +746,84 @@ $('#probe-objects').addEventListener('click',action(async()=>{const status=$('#o
 $('#start-objects')&&$('#start-objects').addEventListener('click',action(async()=>{await api('/api/objects/scan',{method:'POST',body:JSON.stringify({limit:200})});toast('object scan started');await loadObjects();}));
 $('#start-scan').addEventListener('click',action(async()=>{const roots=[...(state.scanRoots||[])];if(!roots.length)throw new Error('请先选择照片文件夹');if(state.scanSubmitting)return;const previousJobId=state.status?.job?.id;state.scanStartedThisVisit=true;state.scanShowCompletedResult=false;state.scanSubmitting=true;renderScanRoots();try{await api('/api/scan',{method:'POST',body:JSON.stringify({roots,with_faces:true,include_system:false,workers:1})});state.scanRoots=[];toast('开始扫描，已入库的照片会自动跳过');const status=await refreshStatus();if(status.job&&status.job.id!==previousJobId&&['completed','completed_with_errors','failed'].includes(status.job.status)){state.scanShowCompletedResult=true;renderScanStatus(status);} }finally{state.scanSubmitting=false;renderScanRoots();}}));$('#scan-view-all').addEventListener('click',action(()=>setView('timeline')));
 $('#person-form').addEventListener('submit',async e=>{e.preventDefault();const pid=state.personId;const submit=e.submitter||$('#person-form button[type="submit"]');if(submit)submit.disabled=true;try{const result=await rememberPersonName(pid,$('#person-name').value,$('#person-alias').value);if(result?.cancelled)return;if(!result?.merged){toast('人物名字已保存');if($('#person-dialog').open){const item=((state.peopleStream.people||{}).items||[]).find(p=>p.id===Number(pid));if(item){$('#person-title').textContent=personLabel(item);state.personDetail=Object.assign({},state.personDetail,item);}}}}catch(err){showNotice(err.message||'人物名字保存失败',true);}finally{if(submit)submit.disabled=false;}});
-$('#merge-person').addEventListener('click',async e=>{e.preventDefault();e.stopPropagation();const button=$('#merge-person');const target=Number($('#merge-target').value);if(!target){showNotice('请先在下拉框里选择要合并到的人',true);return;}if(target===Number(state.personId)){showNotice('不能合并到自己',true);return;}const source=Number(state.personId);if(button?.disabled)return;button.disabled=true;try{await api('/api/people/'+source+'/merge',{method:'POST',body:JSON.stringify({target_id:target})});try{state.peopleSelected.delete(source);removePersonFromLocalState(source);await openPerson(target);showNotice('人物分组已合并');}catch(uiError){showNotice('人物已合并，界面刷新未完成，请刷新页面',true);}refreshStatus().catch(()=>{});}catch(err){showNotice(err.message||'人物合并失败',true);}finally{button.disabled=false;}});
+$('#merge-person').addEventListener('click',async e=>{e.preventDefault();e.stopPropagation();const button=$('#merge-person');const target=Number($('#merge-target').value);if(!target){showNotice('请先在下拉框里选择要合并到的人',true);return;}if(target===Number(state.personId)){showNotice('不能合并到自己',true);return;}const source=Number(state.personId);if(button?.disabled)return;button.disabled=true;try{await api('/api/people/'+source+'/merge',{method:'POST',body:JSON.stringify({target_id:target})});try{state.peopleSelected.delete(source);removePersonFromLocalState(source);await refreshPersonInLocalState(target);await openPerson(target);showNotice('人物分组已合并');}catch(uiError){showNotice('人物已合并，界面刷新未完成，请刷新页面',true);}}catch(err){showNotice(err.message||'人物合并失败',true);}finally{button.disabled=false;}});
 $('#show-person-photos').addEventListener('click',action(async()=>{$('#person-dialog').close();const person=state.personDetail||{id:state.personId};rememberPersonLabel(person);state.person=String(state.personId);$('#person-filter').value=state.person;await setView('timeline');}));
-$('#ignore-person').addEventListener('click',action(async()=>{const ignored=!(state.personDetail&&state.personDetail.ignored);await api('/api/people/'+state.personId+'/ignore',{method:'POST',body:JSON.stringify({ignored})});toast(ignored?'这组已标为路人，不再参与识别':'已恢复为待识别');$('#person-dialog').close();await refreshStatus();if(ignored)await setView('passersby');else await setView('people');}));
+$('#ignore-person').addEventListener('click',action(async()=>{const ignored=!(state.personDetail&&state.personDetail.ignored);const id=Number(state.personId);const sourceKind=state.personDetail&&state.personDetail.ignored?'passersby':'people';await api('/api/people/'+id+'/ignore',{method:'POST',body:JSON.stringify({ignored})});toast(ignored?'这组已标为路人，不再参与识别':'已恢复为待识别');$('#person-dialog').close();removePersonFromLocalState(id,sourceKind);state.peopleSelected.delete(id);updatePeopleMerge();}));
 $('#people-merge-toggle')?.addEventListener('click',()=>setPeopleMerging(!state.peopleMerging));
 $('#clear-people-selection').addEventListener('click',()=>setPeopleMerging(false));
-$('#merge-selected-people').addEventListener('click',async()=>{const button=$('#merge-selected-people');if(button?.disabled)return;const ids=[...state.peopleSelected].map(Number);if(ids.length<2){showNotice('请至少选择两组同一人',true);return;}if(ids.length>100){showNotice('一次最多选择 100 个人物',true);return;}button.disabled=true;const done=[];const pending=ids.slice();let backendError=null;let target=null;try{target=await resolveMergeTarget(ids);if(!ids.includes(Number(target.id)))throw new Error('合并目标必须属于当前选择');for(const id of ids.filter(x=>x!==Number(target.id))){await api('/api/people/'+id+'/merge',{method:'POST',body:JSON.stringify({target_id:target.id})});done.push(id);pending.splice(pending.indexOf(id),1);}}catch(err){backendError=err;}if(backendError){const leftover=pending.filter(id=>!done.includes(id));const msg=done.length?('已合并 '+done.length+' 组，未完成：'+leftover.join('、')+'。'+backendError.message):backendError.message;showNotice(msg,true);toast(msg,true);}else if(done.length){toast('已合并到 '+personLabel(target));}if(done.length){try{for(const id of done){state.peopleSelected.delete(id);removePersonFromLocalState(id);}setPeopleMerging(false);await loadPeople();}catch(uiError){showNotice('人物已合并，界面刷新未完成，请刷新页面',true);}}button.disabled=false;refreshStatus().catch(()=>{});});
+$('#merge-selected-people').addEventListener('click',async()=>{const button=$('#merge-selected-people');if(button?.disabled)return;const ids=[...state.peopleSelected].map(Number);if(ids.length<2){showNotice('请至少选择两组同一人',true);return;}if(ids.length>100){showNotice('一次最多选择 100 个人物',true);return;}button.disabled=true;const done=[];const pending=ids.slice();let backendError=null;let target=null;try{target=await resolveMergeTarget(ids);if(!ids.includes(Number(target.id)))throw new Error('合并目标必须属于当前选择');for(const id of ids.filter(x=>x!==Number(target.id))){await api('/api/people/'+id+'/merge',{method:'POST',body:JSON.stringify({target_id:target.id})});done.push(id);pending.splice(pending.indexOf(id),1);}}catch(err){backendError=err;}if(backendError){const leftover=pending.filter(id=>!done.includes(id));const msg=done.length?('已合并 '+done.length+' 组，未完成：'+leftover.join('、')+'。'+backendError.message):backendError.message;showNotice(msg,true);toast(msg,true);}else if(done.length){toast('已合并到 '+personLabel(target));}if(done.length){try{for(const id of done){state.peopleSelected.delete(id);removePersonFromLocalState(id);}await refreshPersonInLocalState(target.id);setPeopleMerging(false);}catch(uiError){showNotice('人物已合并，界面刷新未完成，请刷新页面',true);}}button.disabled=false;});
 $('#backup-button').addEventListener('click',action(async()=>{const data=await api('/api/backup',{method:'POST'});toast('备份已保存：'+data.path);}));
-document.addEventListener('click',action(async e=>{const photo=e.target.closest('[data-photo]');if(photo){const id=Number(photo.dataset.photo);if(state.selecting){if(state.selected.has(id))state.selected.delete(id);else if(state.selected.size<1000)state.selected.add(id);else toast('一次最多选择 1000 张照片');streamSelection();}else await openPhoto(id,currentBrowseContext());}const ignorePersonCard=e.target.closest('[data-ignore-person]');if(ignorePersonCard){e.preventDefault();e.stopPropagation();const id=Number(ignorePersonCard.dataset.ignorePerson);ignorePersonCard.disabled=true;try{await api('/api/people/'+id+'/ignore',{method:'POST',body:JSON.stringify({ignored:true})});state.peopleSelected.delete(id);updatePeopleMerge();const card=ignorePersonCard.closest('.person-card');const next=card&&card.nextElementSibling;if(card){card.classList.add('removing');await new Promise(r=>setTimeout(r,180));card.remove();}if(state.peopleStream&&state.peopleStream.people){state.peopleStream.people.items=(state.peopleStream.people.items||[]).filter(p=>p.id!==id);if(typeof state.peopleStream.people.total==='number'&&state.peopleStream.people.total>0)state.peopleStream.people.total-=1;const total=$('#people-total');if(total)total.textContent=fmt(state.peopleStream.people.total)+' 个分组';}if(next)next.scrollIntoView({block:'nearest',behavior:'smooth'});refreshStatus().catch(()=>{});}catch(err){toast(err.message||'没能标为路人',true);}finally{ignorePersonCard.disabled=false;}return;}const peopleCard=e.target.closest('#people-grid .person-card');if(peopleCard){if(e.target.closest('[data-quick-name],[data-ignore-person]'))return;const hitCheck=e.target.closest('.person-check,[data-select-person]');if(hitCheck||isPeopleSelecting()){e.preventDefault();togglePersonSelection(peopleCard.dataset.person);return;}await openPerson(Number(peopleCard.dataset.person));return;}const openPersonBtn=e.target.closest('[data-open-person]');if(openPersonBtn){await openPerson(Number(openPersonBtn.dataset.openPerson));return;}const person=e.target.closest('[data-person]');if(person)await openPerson(Number(person.dataset.person));const facePhoto=e.target.closest('[data-face-photo]');if(facePhoto){$('#person-dialog').close();await openPhoto(Number(facePhoto.dataset.facePhoto),{q:'',filter:'all',person:String(state.personId),directory:'',sort:'date_desc'});}const split=e.target.closest('[data-split]');if(split){await api('/api/faces/'+split.dataset.split+'/split',{method:'POST'});toast('已移到新的待命名分组');await openPerson(state.personId);await refreshStatus();if(state.view==='people')await loadPeople();if(state.view==='passersby')await loadPassersby();}const year=e.target.closest('[data-year]');if(year){state.sort='date_desc';$('#sort-order').value=state.sort;await setView('year:'+year.dataset.year);return;}const group=e.target.closest('[data-group]');if(group){state.sort='date_desc';$('#sort-order').value=state.sort;await setView('group:'+group.dataset.group);return;}const place=e.target.closest('[data-place]');if(place){await setView('place:'+place.dataset.place);return;}const folder=e.target.closest('[data-folder]');if(folder)await openFolder(folder.dataset.folder);if(e.target.id==='banner-details')await setView('scan');if(e.target.id==='pause-scan'){await api('/api/scan/pause',{method:'POST'});await refreshStatus();}if(e.target.id==='resume-scan'){await api('/api/scan/'+state.status.job.id+'/resume',{method:'POST'});await refreshStatus();}}));
+document.addEventListener('click',action(async e=>{
+ const photo=e.target.closest('[data-photo]');
+ if(photo){
+  const id=Number(photo.dataset.photo);
+  if(state.selecting){
+   if(state.selected.has(id))state.selected.delete(id);
+   else if(state.selected.size<1000)state.selected.add(id);
+   else toast('一次最多选择 1000 张照片');
+   streamSelection();
+  }else await openPhoto(id,currentBrowseContext());
+ }
+ const ignorePersonCard=e.target.closest('[data-ignore-person]');
+ if(ignorePersonCard){
+  e.preventDefault();e.stopPropagation();
+  const id=Number(ignorePersonCard.dataset.ignorePerson);
+  ignorePersonCard.disabled=true;
+  try{
+   await api('/api/people/'+id+'/ignore',{method:'POST',body:JSON.stringify({ignored:true})});
+   state.peopleSelected.delete(id);
+   removePersonFromLocalState(id);
+   updatePeopleMerge();
+  }catch(err){toast(err.message||'没能标为路人',true);}
+  finally{ignorePersonCard.disabled=false;}
+  return;
+ }
+ const peopleCard=e.target.closest('#people-grid .person-card');
+ if(peopleCard){
+  if(e.target.closest('[data-quick-name],[data-ignore-person]'))return;
+  const hitCheck=e.target.closest('.person-check,[data-select-person]');
+  if(hitCheck||isPeopleSelecting()){
+   e.preventDefault();
+   togglePersonSelection(peopleCard.dataset.person);
+   return;
+  }
+  await openPerson(Number(peopleCard.dataset.person));
+  return;
+ }
+ const openPersonBtn=e.target.closest('[data-open-person]');
+ if(openPersonBtn){await openPerson(Number(openPersonBtn.dataset.openPerson));return;}
+ const person=e.target.closest('[data-person]');
+ if(person)await openPerson(Number(person.dataset.person));
+ const facePhoto=e.target.closest('[data-face-photo]');
+ if(facePhoto){
+  $('#person-dialog').close();
+  await openPhoto(Number(facePhoto.dataset.facePhoto),{q:'',filter:'all',person:String(state.personId),directory:'',sort:'date_desc'});
+ }
+ const split=e.target.closest('[data-split]');
+ if(split){
+  const sourceId=Number(state.personId);
+  const result=await api('/api/faces/'+split.dataset.split+'/split',{method:'POST'});
+  toast('已移到新的待命名分组');
+  await removePersonFaceLocally(split.dataset.split);
+  const remaining=await refreshPersonInLocalState(sourceId);
+  if(!remaining || !(state.personDetail&&state.personDetail.face_count))$('#person-dialog').close();
+  if(result&&result.person_id&&state.view==='people'){
+   const created=await fetchPersonById(result.person_id);
+   if(created)appendPersonToLocalState(created);
+  }
+ }
+ const year=e.target.closest('[data-year]');
+ if(year){state.sort='date_desc';$('#sort-order').value=state.sort;await setView('year:'+year.dataset.year);return;}
+ const group=e.target.closest('[data-group]');
+ if(group){state.sort='date_desc';$('#sort-order').value=state.sort;await setView('group:'+group.dataset.group);return;}
+ const place=e.target.closest('[data-place]');
+ if(place){await setView('place:'+place.dataset.place);return;}
+ const folder=e.target.closest('[data-folder]');
+ if(folder)await openFolder(folder.dataset.folder);
+ if(e.target.id==='banner-details')await setView('scan');
+ if(e.target.id==='pause-scan'){await api('/api/scan/pause',{method:'POST'});await refreshStatus();}
+ if(e.target.id==='resume-scan'){await api('/api/scan/'+state.status.job.id+'/resume',{method:'POST'});await refreshStatus();}
+}));
 document.addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&e.target.matches('[data-photo], [data-face-photo]')){e.preventDefault();e.target.click();}});
 
 

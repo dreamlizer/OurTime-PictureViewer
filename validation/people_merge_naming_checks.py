@@ -124,6 +124,8 @@ def main():
             check(target_detail['face_count'] == 2 and target_detail['photo_count'] == 2, '详情合并后 target 人脸和照片数量正确', results)
 
             open_people()
+            page.locator('#people-merge-toggle').click()
+            page.wait_for_selector('[data-select-person]')
             page.locator(f'[data-select-person="{target}"]').click()
             page.locator(f'[data-select-person="{batch_source}"]').click()
             page.wait_for_function("!document.querySelector('#merge-selected-people').disabled")
@@ -154,7 +156,7 @@ def main():
             page.wait_for_function(f"Array.from(document.querySelectorAll('#quick-merge-target option')).some(o => o.value === '{duplicate_target}')")
             page.select_option('#quick-merge-target', str(duplicate_target))
             page.locator('#quick-merge-submit').click()
-            page.wait_for_timeout(500)
+            page.wait_for_function("!document.querySelector('#quick-name-dialog').open")
             status, _ = fetch_json(URL + f'/api/people/{quick_section_source}')
             _, duplicate_detail = fetch_json(URL + f'/api/people/{duplicate_target}')
             check(status == 404, '快速命名合并区调用现有 merge 后 source 已删除', results)
