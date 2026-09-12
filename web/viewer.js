@@ -355,6 +355,12 @@ function browseContextKey(context={}){
 function sameBrowseContext(a,b){return browseContextKey(a)===browseContextKey(b);}
 function contextLabel(c){const person=state.people.find(p=>String(p.id)===c.person);const filter=c.filter||'';const heading=c.person?(person?.name||'人物 '+c.person):filter.startsWith('year:')?(filter.slice(5)==='unknown'?'时间未记录':filter.slice(5)+' 年'):filter.startsWith('group:')?(filter.slice(6)==='10plus'?'10人及以上':Number(filter.slice(6))+'人合影'):filter.startsWith('place:')?(filter.slice(6)==='unknown'?'地点未记录':filter.slice(6)):titles[filter]?.[0]||'照片';return [heading,c.directory?basename(c.directory):'',c.place?prettyPlace(c.place):'',c.date_from||c.date_to?((c.date_from||'')+(c.date_to&&c.date_to!==c.date_from?' ~ '+c.date_to:'')):'',c.q?'搜索：'+c.q:''].filter(Boolean).join(' · ');}
 function viewerMessage(text){$('#viewer-message').textContent=text;}
+function clearViewerImage(){
+ const img=$('#detail-img'),signature=$('#photo-signature'),faces=$('#face-name-layer');
+ if(img){img.removeAttribute('src');img.hidden=true;img.style.width='';img.style.height='';}
+ if(signature){signature.hidden=true;signature.replaceChildren();}
+ if(faces){faces.hidden=true;faces.replaceChildren();}
+}
 function setViewerLoading(loading){
  const dialog=$('#detail-dialog'),img=$('#detail-img'),signature=$('#photo-signature'),faces=$('#face-name-layer'),stage=document.querySelector('.viewer-stage');
  if(!dialog)return;
@@ -363,14 +369,19 @@ function setViewerLoading(loading){
  dialog.classList.toggle('is-loading',Boolean(loading));
  if(indicator)indicator.hidden=!loading;
  if(loading){
-  if(img && !img.getAttribute('src')) img.hidden=true;
+  clearViewerImage();
   if(signature){signature.hidden=true;signature.replaceChildren();}
   if(faces){faces.hidden=true;faces.replaceChildren();}
   viewerMessage('');
  }else{
-  if(img)img.hidden=false;
-  if(signature)signature.hidden=false;
+  if(img)img.hidden=!img.getAttribute('src');
+  if(signature)signature.hidden=!signature.childElementCount;
  }
+}
+function viewerImageFailed(message){
+ clearViewerImage();
+ setViewerLoading(false);
+ viewerMessage(message);
 }
 function waitViewerFrames(count=2){return new Promise(resolve=>{const next=()=>count--<=0?resolve():requestAnimationFrame(next);next();});}
 function stopSlides(){viewer.playing=false;clearTimeout(viewer.timer);viewer.timer=null;syncViewerTools();}
@@ -629,12 +640,12 @@ function renderFaceNames(photo){
 function zoomTo(scale){viewer.fit=false;viewer.scale=Math.max(.05,Math.min(4,scale));updateZoom();}
 async function displayPhoto(id){
  const ticket=renderPhoto.ticket+1;
- const keep=Boolean($('#detail-img')&&$('#detail-img').getAttribute('src')); setViewerLoading(!keep);
+ setViewerLoading(true);
  if(viewer.loader){viewer.loader.onload=null;viewer.loader.onerror=null;viewer.loader.src='';}
  try{
   if(!await renderPhoto(id))return false;
  }catch(err){
-  if(ticket===renderPhoto.ticket){viewerMessage(err.message||'照片资料读取失败');setViewerLoading(false);}
+  if(ticket===renderPhoto.ticket)viewerImageFailed(err.message||'照片资料读取失败');
   throw err;
  }
  if(ticket!==renderPhoto.ticket)return false;
@@ -669,11 +680,11 @@ async function displayPhoto(id){
    if(!src.includes('/api/preview/')){
     const fallback=new Image(); viewer.loader=fallback;
     fallback.onload=async()=>{try{if(typeof fallback.decode==='function')await fallback.decode();}catch(e){}await applySrc(fallback.src);resolve();};
-    fallback.onerror=()=>{if(ticket===renderPhoto.ticket){viewerMessage('这张图暂时无法显示');setViewerLoading(false);}resolve();};
+    fallback.onerror=()=>{if(ticket===renderPhoto.ticket)viewerImageFailed('这张图暂时无法显示');resolve();};
     fallback.src='/api/preview/'+id+'?v='+state.thumbRevision;
     return;
    }
-   if(ticket===renderPhoto.ticket){viewerMessage('这张图暂时无法显示');setViewerLoading(false);}
+   if(ticket===renderPhoto.ticket)viewerImageFailed('这张图暂时无法显示');
    resolve();
   };
   image.src=src;
@@ -695,10 +706,10 @@ async function openPhoto(id,context=null){
   const params=new URLSearchParams({...viewer.context,sequence:true,limit:String(viewer.window),around:String(id)});
   const result=await api('/api/photos?'+params);
   if(generation!==viewer.generation)return;
-  if(result.missing){viewerMessage('当前范围已变化，请刷新照片列表后再打开。');return;}
+  if(result.missing){viewerMessage('当前范围已变化，请刷新照片列表后再打开。');return false;}
   viewer.ids=result.ids||[]; viewer.offset=result.offset||0; viewer.total=result.total||viewer.ids.length; viewer.maxId=result.max_id||viewer.context.max_id;
  }
- if(!viewer.ids.includes(id)){viewerMessage('当前范围已变化，请刷新照片列表后再打开。');return;}
+ if(!viewer.ids.includes(id)){viewerMessage('当前范围已变化，请刷新照片列表后再打开。');return false;}
   viewer.index=viewer.target=viewer.ids.indexOf(id);
   viewer.absolute=(viewer.offset||0)+viewer.index;
   if(!alreadyOpen){
@@ -708,8 +719,9 @@ async function openPhoto(id,context=null){
    viewer.openedWaterfallGeneration=typeof waterfall==='object'?waterfall.generation:null;
   }
   viewer.goal=viewer.absolute;
- await displayPhoto(id);
+ const displayed=await displayPhoto(id);
  if(generation===viewer.generation)$('#image-viewport').focus({preventScroll:true});
+ return Boolean(displayed);
 }
 async function ensureViewerWindow(absolute, generation=viewer.generation){
  const total=viewer.total||viewer.ids.length;

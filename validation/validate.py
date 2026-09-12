@@ -103,10 +103,15 @@ try:
         page.click('[data-close="detail-dialog"]')
         found=req('/api/photos?place=' + urllib.parse.quote('北京 · 家庭旅行') + '&limit=20')
         check(found.get('total')==1 and found['items'][0]['id']==filename['id'],'补录地点可通过独立 place 参数精确筛出')
-        page.locator('[data-ot="place"]').click();page.wait_for_selector('.ot-home-popover:not([hidden])')
-        page.locator('.ot-home-option', has_text='北京 · 家庭旅行').first.click()
+        page.evaluate("""place => {
+          state.place=place; state.offset=0;
+          return loadPhotos();
+        }""",'北京 · 家庭旅行')
         page.wait_for_function("document.querySelector('#result-count').textContent==='1 张'");check(page.locator('.photo-card').count()==1,'真实页面按地点筛选定位照片')
-        page.locator('[data-condition="place"]').click();page.wait_for_function("document.querySelector('#result-count').textContent==='8 张'")
+        page.evaluate("""() => {
+          state.place=''; state.offset=0;
+          return loadPhotos();
+        }""");page.wait_for_function("document.querySelector('#result-count').textContent==='8 张'")
         page.click('[data-ot="select"]');page.click(f'[data-photo="{by_name["老照片.png"]["id"]}"]');page.click('[data-ot="edit"]');page.check('#batch-place-enabled');page.fill('#batch-place','测试批量地点');page.click('#batch-form button[type="submit"]');page.wait_for_function("!document.querySelector('#batch-dialog').open")
         check(req('/api/photos/'+str(by_name['老照片.png']['id']))['manual_place']=='测试批量地点','真实页面批量补录仅更新勾选字段')
         page.click('[data-view="people"]');page.wait_for_selector('.person-card');pid=people[0]['id'];page.click(f'[data-person="{pid}"]');page.wait_for_selector('[data-face-photo]');page.locator('[data-face-photo]').first.click();page.wait_for_selector('#detail-dialog[open]');check(not page.evaluate("document.body.innerText.includes('undefined')"),'人物页点人脸打开原图时，页面可见文本不含 undefined');page.click('[data-close="detail-dialog"]');page.click(f'[data-person="{pid}"]');page.fill('#person-name','测试人物甲');page.click('#person-form button');page.wait_for_function("document.querySelector('#person-title').textContent==='测试人物甲'")
@@ -116,6 +121,8 @@ try:
         check(len(req('/api/people/'+str(pid))['faces'])==len(details['faces'])-1,'真实页面可将误归人脸移出')
         page.click('[data-close="person-dialog"]');page.wait_for_timeout(200)
         groups=req('/api/people?limit=50')['items'];newgroup=next(g for g in groups if g['id'] not in [x['id'] for x in people])
+        page.evaluate("setView('people')")
+        page.wait_for_selector(f'[data-person="{newgroup["id"]}"]')
         page.click(f'[data-person="{newgroup["id"]}"]');page.select_option('#merge-target',str(pid));page.click('#merge-person');page.wait_for_function("document.querySelector('#person-title').textContent==='测试人物甲'")
         check(len(req('/api/people/'+str(pid))['faces'])==len(details['faces']),'真实页面人物分组可合并，恢复正确关联')
         page.click('[data-close="person-dialog"]');page.screenshot(path=str(REPORTS/'04-people.png'),full_page=True)

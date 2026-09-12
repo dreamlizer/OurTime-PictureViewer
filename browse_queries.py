@@ -78,6 +78,7 @@ def people_select_sql():
         "SELECT p.id,p.name,p.alias,p.confirmed,p.ignored,p.suggested_person_id,s.name suggested_name, "
         "count(f.id) face_count, count(DISTINCT f.asset_id) photo_count, min(f.id) cover "
         + "FROM people p JOIN faces f ON f.person_id=p.id "
+        + "JOIN assets a ON a.id=f.asset_id "
         + "LEFT JOIN people s ON s.id=p.suggested_person_id"
     )
 
@@ -86,8 +87,12 @@ def people_order_sql():
     return "p.confirmed DESC, photo_count DESC, p.id"
 
 
-def people_base_where(ignored, needle=None, named=0):
-    conditions = ["coalesce(p.ignored,0)=?", "EXISTS(SELECT 1 FROM faces f WHERE f.person_id=p.id)"]
+def people_base_where(ignored, needle=None, named=0, grouped=True):
+    active_person = (
+        "EXISTS(SELECT 1 FROM faces ef JOIN assets a ON a.id=ef.asset_id "
+        "WHERE ef.person_id=p.id AND " + ACTIVE_ASSET + ")"
+    )
+    conditions = ["coalesce(p.ignored,0)=?", ACTIVE_ASSET if grouped else active_person]
     values = [int(bool(ignored))]
     if named:
         conditions.append('p.confirmed=1')
@@ -107,6 +112,7 @@ def people_query(ignored=0, q='', offset=0, limit=48, ids='', named=0):
     named = int(bool(named))
     page_where, page_values = people_base_where(ignored, needle, named=named)
     extra_where, extra_values = people_base_where(ignored, None, named=named)
+    total_where, total_values = people_base_where(ignored, needle, named=named, grouped=False)
     select = people_select_sql()
     order_sql = people_order_sql()
     grouped_page = select + f" WHERE {' AND '.join(page_where)} GROUP BY p.id"
@@ -121,8 +127,8 @@ def people_query(ignored=0, q='', offset=0, limit=48, ids='', named=0):
         )
         extra_params = extra_values + selected
     return {
-        'total_sql': f"SELECT count(*) FROM people p WHERE {' AND '.join(page_where)}",
-        'total_params': page_values,
+        'total_sql': f"SELECT count(*) FROM people p WHERE {' AND '.join(total_where)}",
+        'total_params': total_values,
         'page_sql': grouped_page + ' ORDER BY ' + order_sql + ' LIMIT ? OFFSET ?',
         'page_params': page_values + [page_limit, page_offset],
         'extra_sql': extra_sql,

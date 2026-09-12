@@ -804,8 +804,9 @@ def status():
         stats['active_files']=c.execute('SELECT count(*) FROM files f JOIN assets a ON a.id=f.asset_id WHERE f.excluded=0 AND a.excluded=0').fetchone()[0]
         stats['excluded_assets']=c.execute('SELECT count(*) FROM assets a WHERE NOT ('+ACTIVE_ASSET+') AND EXISTS(SELECT 1 FROM files f WHERE f.asset_id=a.id)').fetchone()[0]
         stats['duplicates']=c.execute('SELECT coalesce(sum(n-1),0) FROM (SELECT count(*) n FROM files f JOIN assets a ON a.id=f.asset_id WHERE f.exists_now=1 AND f.excluded=0 AND a.excluded=0 GROUP BY asset_id HAVING n>1)').fetchone()[0]
-        stats['people']=c.execute('SELECT count(*) FROM people p WHERE coalesce(p.ignored,0)=0 AND EXISTS(SELECT 1 FROM faces WHERE person_id=p.id)').fetchone()[0]
-        stats['named_people']=c.execute('SELECT count(*) FROM people p WHERE confirmed=1 AND EXISTS(SELECT 1 FROM faces WHERE person_id=p.id)').fetchone()[0]
+        active_person='EXISTS(SELECT 1 FROM faces pf JOIN assets a ON a.id=pf.asset_id WHERE pf.person_id=p.id AND '+ACTIVE_ASSET+')'
+        stats['people']=c.execute('SELECT count(*) FROM people p WHERE coalesce(p.ignored,0)=0 AND '+active_person).fetchone()[0]
+        stats['named_people']=c.execute('SELECT count(*) FROM people p WHERE confirmed=1 AND coalesce(p.ignored,0)=0 AND '+active_person).fetchone()[0]
         stats['group_photos']=c.execute('''SELECT count(*) FROM (
             SELECT f.asset_id
             FROM faces f JOIN assets a ON a.id=f.asset_id
@@ -1255,7 +1256,8 @@ def people_matches(name:str='', alias:str='', exclude_id:int=0):
             '''SELECT p.id,p.name,p.alias,p.confirmed,p.ignored,
                       count(f.id) face_count,count(DISTINCT f.asset_id) photo_count,min(f.id) cover
                FROM people p JOIN faces f ON f.person_id=p.id
-               WHERE p.confirmed=1 AND coalesce(p.ignored,0)=0 AND p.id<>?
+               JOIN assets a ON a.id=f.asset_id
+               WHERE p.confirmed=1 AND coalesce(p.ignored,0)=0 AND p.id<>? AND '''+ACTIVE_ASSET+'''
                GROUP BY p.id ORDER BY photo_count DESC,p.id''',
             (int(exclude_id or 0),),
         ).fetchall()
@@ -1277,12 +1279,16 @@ def person_detail(pid:int, offset:int=0, limit:int=48):
     with db() as c:
         row=c.execute('SELECT * FROM people WHERE id=?',(pid,)).fetchone()
         if not row: raise HTTPException(404,'人物不存在')
-        face_count=c.execute('SELECT count(*) FROM faces WHERE person_id=?',(pid,)).fetchone()[0]
-        photo_count=c.execute('SELECT count(DISTINCT asset_id) FROM faces WHERE person_id=?',(pid,)).fetchone()[0]
-        cover=c.execute('SELECT min(id) FROM faces WHERE person_id=?',(pid,)).fetchone()[0]
+        active_faces='FROM faces f JOIN assets a ON a.id=f.asset_id WHERE f.person_id=? AND '+ACTIVE_ASSET
+        face_count=c.execute('SELECT count(*) '+active_faces,(pid,)).fetchone()[0]
+        photo_count=c.execute('SELECT count(DISTINCT f.asset_id) '+active_faces,(pid,)).fetchone()[0]
+        cover=c.execute('SELECT min(f.id) '+active_faces,(pid,)).fetchone()[0]
         page=min(max(limit,1),100)
         start=max(offset,0)
-        faces=[dict(x) for x in c.execute('SELECT id,asset_id,score,reviewed FROM faces WHERE person_id=? ORDER BY id LIMIT ? OFFSET ?',(pid,page,start))]
+        faces=[dict(x) for x in c.execute(
+            'SELECT f.id,f.asset_id,f.score,f.reviewed '+active_faces+' ORDER BY f.id LIMIT ? OFFSET ?',
+            (pid,page,start),
+        )]
     return {**dict(row),'faces':faces,'face_count':face_count,'photo_count':photo_count,'cover':cover,'offset':start,'limit':page,'more':start+len(faces)<face_count}
 
 class PersonEdit(BaseModel):
@@ -1328,11 +1334,15 @@ def merge_person(pid:int,body:MergeRequest):
 @app.post('/api/faces/{fid}/split')
 def split_face(fid:int):
     with db() as c:
-        row=c.execute('SELECT person_id FROM faces WHERE id=?',(fid,)).fetchone()
+        row=c.execute('SELECT person_id,ignored,reviewed FROM faces WHERE id=?',(fid,)).fetchone()
         if not row: raise HTTPException(404,'人脸不存在')
         pid=c.execute('INSERT INTO people DEFAULT VALUES').lastrowid
-        c.execute('UPDATE faces SET person_id=?,reviewed=0 WHERE id=?',(pid,fid))
-        c.execute('INSERT INTO edits(created_at,target,before_json,after_json) VALUES (?,?,?,?)',(now(),f'face:{fid}',json.dumps({'person_id':row[0]}),json.dumps({'person_id':pid})))
+        c.execute('UPDATE faces SET person_id=?,reviewed=0,ignored=0 WHERE id=?',(pid,fid))
+        c.execute('INSERT INTO edits(created_at,target,before_json,after_json) VALUES (?,?,?,?)',(
+            now(),f'face:{fid}',
+            json.dumps({'person_id':row['person_id'],'ignored':row['ignored'],'reviewed':row['reviewed']}),
+            json.dumps({'person_id':pid,'ignored':0,'reviewed':0}),
+        ))
     invalidate_face_index()
     return {'person_id':pid}
 
@@ -1344,9 +1354,17 @@ def ignore_person(pid:int,body:IgnoreRequest):
     with db() as c:
         row=c.execute('SELECT * FROM people WHERE id=?',(pid,)).fetchone()
         if not row: raise HTTPException(404,'人物不存在')
-        c.execute('UPDATE people SET ignored=?,confirmed=CASE WHEN ? THEN 0 ELSE confirmed END WHERE id=?',(int(body.ignored),int(body.ignored),pid))
-        c.execute('UPDATE faces SET ignored=? WHERE person_id=?',(int(body.ignored),pid))
-        c.execute('INSERT INTO edits(created_at,target,before_json,after_json) VALUES (?,?,?,?)',(now(),f'person:{pid}',json.dumps({'ignored':row['ignored'] if 'ignored' in row.keys() else 0}),json.dumps({'ignored':body.ignored})))
+        synthetic=not body.ignored and not int(row['confirmed'] or 0) and normalize_person_text(row['name'])=='路人'
+        if synthetic:
+            c.execute("UPDATE people SET ignored=0,name=NULL,alias='' WHERE id=?",(pid,))
+            c.execute('UPDATE faces SET ignored=0,reviewed=0 WHERE person_id=?',(pid,))
+        else:
+            c.execute('UPDATE people SET ignored=? WHERE id=?',(int(body.ignored),pid))
+            c.execute('UPDATE faces SET ignored=? WHERE person_id=?',(int(body.ignored),pid))
+        after=c.execute('SELECT * FROM people WHERE id=?',(pid,)).fetchone()
+        c.execute('INSERT INTO edits(created_at,target,before_json,after_json) VALUES (?,?,?,?)',(
+            now(),f'person:{pid}',json.dumps(dict(row),ensure_ascii=False),json.dumps(dict(after),ensure_ascii=False),
+        ))
     invalidate_face_index()
     return {'ok':True,'ignored':body.ignored}
 
