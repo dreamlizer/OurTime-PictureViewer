@@ -22,6 +22,12 @@ const TEA_FACE_FONT_OPTIONS=[
   {value:'liu-jian-mao-cao',label:'Liu Jian Mao Cao · 毛草'}
 ];
 const TEA_FACE_FONT_KEYS=new Set(TEA_FACE_FONT_OPTIONS.map(option=>option.value));
+const ACCENT_FACE_FONT_OPTIONS=[
+  {value:'zcool-xiaowei',label:'ZCOOL XiaoWei（默认）'},
+  {value:'noto-serif-sc',label:'Noto Serif SC · 思源宋体'},
+  {value:'zhi-mang-xing',label:'Zhi Mang Xing · 志莽行书'}
+];
+const ACCENT_FACE_FONT_KEYS=new Set(ACCENT_FACE_FONT_OPTIONS.map(option=>option.value));
 const GENERAL_FACE_FONT_OPTIONS=[
   {value:'sans',label:'黑体 / 无衬线'},
   {value:'serif',label:'宋体 / 衬线'},
@@ -68,14 +74,14 @@ const FACE_STYLE_PRESETS={
   },
   accent:{
     theme:'accent',
-    fontSize:13,
-    fontFamily:'serif',
-    textColor:'#fbf1e7',
-    backgroundColor:'#654740',
-    backgroundOpacity:.76,
-    radius:5,
-    paddingX:8,
-    paddingY:6,
+    fontSize:15,
+    fontFamily:'zcool-xiaowei',
+    textColor:'#f4e4cb',
+    backgroundColor:'#6f302c',
+    backgroundOpacity:.84,
+    radius:4,
+    paddingX:7,
+    paddingY:7,
     shadow:false
   }
 };
@@ -116,6 +122,10 @@ function initialFaceStyle(){
   const style={...FACE_STYLE_PRESETS[theme],...stored,theme};
   if(theme==='tea'&&!TEA_FACE_FONT_KEYS.has(style.fontFamily)){
     style.fontFamily=FACE_STYLE_PRESETS.tea.fontFamily;
+    delete style.customFontFamily;
+  }
+  if(theme==='accent'&&!ACCENT_FACE_FONT_KEYS.has(style.fontFamily)){
+    style.fontFamily=FACE_STYLE_PRESETS.accent.fontFamily;
     delete style.customFontFamily;
   }
   return style;
@@ -233,7 +243,7 @@ function buildFaceStylePopover(){
       <div class="face-style-group-title">样式</div>
       <label class="face-style-field"><span>风格</span><select id="face-theme"><option value="classic">默认</option><option value="ivory">素笺</option><option value="tea">茶棕</option><option value="accent">暗朱</option></select></label>
       <label class="face-style-field face-custom-control face-range-field"><span>字号</span><output id="face-font-size-value"></output><input id="face-font-size" type="range" min="10" max="22" step="1"></label>
-      <label class="face-style-field face-custom-control"><span>字体</span><select id="face-font-family" aria-describedby="face-font-note"><option value="sans">黑体 / 无衬线</option><option value="serif">宋体 / 衬线</option><option value="kai">楷体</option><option value="fangsong">仿宋</option><option value="other">其他…</option></select><small id="face-font-note" class="face-field-note"></small></label>
+      <label class="face-style-field face-custom-control"><span>字体</span><select id="face-font-family"><option value="sans">黑体 / 无衬线</option><option value="serif">宋体 / 衬线</option><option value="kai">楷体</option><option value="fangsong">仿宋</option><option value="other">其他…</option></select></label>
     </div>
     <div class="face-style-group">
       <div class="face-style-group-title">布局</div>
@@ -295,6 +305,9 @@ function faceFontStack(kind,customFamily){
   if(kind==='ma-shan-zheng')return '"Ma Shan Zheng","LXGW WenKai GB Screen","STKaiti","KaiTi",serif';
   if(kind==='long-cang')return '"Long Cang","LXGW WenKai GB Screen","STKaiti","KaiTi",serif';
   if(kind==='liu-jian-mao-cao')return '"Liu Jian Mao Cao","LXGW WenKai GB Screen","STKaiti","KaiTi",serif';
+  if(kind==='zcool-xiaowei')return '"ZCOOL XiaoWei","Noto Serif SC","STSong","SimSun",serif';
+  if(kind==='noto-serif-sc')return '"Noto Serif SC","Source Han Serif SC","STSong","SimSun",serif';
+  if(kind==='zhi-mang-xing')return '"Zhi Mang Xing","LXGW WenKai GB Screen","STKaiti","KaiTi",serif';
   if(kind==='sans')return '"Microsoft YaHei UI","Microsoft YaHei","PingFang SC","Noto Sans CJK SC",sans-serif';
   if(kind==='kai')return '"LXGW WenKai","STKaiti","Kaiti SC","KaiTi",serif';
   if(kind==='fangsong')return '"FangSong","STFangsong","FangSong_GB2312","Songti SC","STSong","SimSun",serif';
@@ -315,6 +328,11 @@ function syncFaceFontSelect(select,style,theme=style?.theme){
   if(theme==='tea'){
     setFaceFontOptions(select,TEA_FACE_FONT_OPTIONS,'tea');
     select.value=TEA_FACE_FONT_KEYS.has(style?.fontFamily)?style.fontFamily:FACE_STYLE_PRESETS.tea.fontFamily;
+    return;
+  }
+  if(theme==='accent'){
+    setFaceFontOptions(select,ACCENT_FACE_FONT_OPTIONS,'accent');
+    select.value=ACCENT_FACE_FONT_KEYS.has(style?.fontFamily)?style.fontFamily:FACE_STYLE_PRESETS.accent.fontFamily;
     return;
   }
   setFaceFontOptions(select,GENERAL_FACE_FONT_OPTIONS,'general');
@@ -497,6 +515,10 @@ function applyFaceStyle(){
     s.fontFamily=FACE_STYLE_PRESETS.tea.fontFamily;
     delete s.customFontFamily;
   }
+  if(theme==='accent'&&!ACCENT_FACE_FONT_KEYS.has(s.fontFamily)){
+    s.fontFamily=FACE_STYLE_PRESETS.accent.fontFamily;
+    delete s.customFontFamily;
+  }
   root.dataset.faceTheme=theme;
   root.dataset.unnamedMarker=FACE_UNNAMED_MARKERS.has(viewer.faceUnnamedMarker)?viewer.faceUnnamedMarker:'plus';
   const pop=$('#face-style-popover');
@@ -546,10 +568,17 @@ function applyFaceStyle(){
   }
   if($('#face-font-size-value'))$('#face-font-size-value').textContent=`${s.fontSize}px`;
   if($('#face-bg-opacity-value'))$('#face-bg-opacity-value').textContent=`${Math.round(s.backgroundOpacity*100)}%`;
-  if($('#face-font-note'))$('#face-font-note').textContent=theme==='tea'?'茶棕专用 · 三款本地毛笔字体':family?.disabled?'由当前主题固定':'可选择本机其他字体';
+  if(family){
+    family.title=theme==='tea'
+      ?'茶棕主题：三款本地毛笔字体'
+      :theme==='accent'
+        ?'暗朱主题：三款本地题签字体'
+        :family.disabled?'由当前主题固定':'可选择本机其他字体';
+  }
   if($('#face-style-preview-caption')){
     const themeName={classic:'默认',ivory:'素笺',tea:'茶棕',accent:'暗朱'}[theme]||'默认';
-    const fontName=theme==='tea'?family?.selectedOptions?.[0]?.textContent?.replace('（默认）','')?.split(' · ')[0]:'实际比例';
+    const themedFont=theme==='tea'||theme==='accent';
+    const fontName=themedFont?family?.selectedOptions?.[0]?.textContent?.replace('（默认）','')?.split(' · ')[0]:'实际比例';
     $('#face-style-preview-caption').textContent=`${themeName} · ${fontName||'实际比例'}`;
   }
   const preview=$('#face-style-preview-label');

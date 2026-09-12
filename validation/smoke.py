@@ -165,6 +165,14 @@ def main():
         "liu-jian-mao-cao",
     )):
         fail("茶棕主题没有固定接入三款毛笔字体或默认 Ma Shan Zheng")
+    if not all(value in viewer for value in (
+        "fontFamily:'zcool-xiaowei'",
+        "ACCENT_FACE_FONT_OPTIONS",
+        "zcool-xiaowei",
+        "noto-serif-sc",
+        "zhi-mang-xing",
+    )):
+        fail("暗朱主题没有固定接入三款题签字体或默认 ZCOOL XiaoWei")
     overrides = read(WEB / "viewer-overrides.css")
     if "prefers-reduced-motion:reduce" not in overrides:
         fail("呼吸绿点没有尊重系统减少动态效果设置")
@@ -200,6 +208,22 @@ def main():
         if ("/vendor/fonts/%s/%s" % (directory, filename)) not in overrides:
             fail("茶棕毛笔字体没有通过本地 @font-face 接入：%s" % filename)
     ok("茶棕主题内置三款毛笔字体及各自 OFL 授权")
+
+    accent_fonts = {
+        "zcool-xiaowei": "ZCOOLXiaoWei-Regular.ttf",
+        "noto-serif-sc": "NotoSerifSC-wght.ttf",
+        "zhi-mang-xing": "ZhiMangXing-Regular.ttf",
+    }
+    for directory, filename in accent_fonts.items():
+        path = WEB / "vendor" / "fonts" / directory / filename
+        license_file = path.with_name("OFL.txt")
+        if not path.is_file() or path.stat().st_size < 4_000_000:
+            fail("暗朱主题缺少完整题签字体：%s" % filename)
+        if not license_file.is_file() or "SIL OPEN FONT LICENSE" not in read(license_file):
+            fail("暗朱题签字体缺少 OFL 授权：%s" % filename)
+        if ("/vendor/fonts/%s/%s" % (directory, filename)) not in overrides:
+            fail("暗朱题签字体没有通过本地 @font-face 接入：%s" % filename)
+    ok("暗朱主题内置三款题签字体及各自 OFL 授权")
 
     for name, text in sources.items():
         bad = visible_undefined(text)

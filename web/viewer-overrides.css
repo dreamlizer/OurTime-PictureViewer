@@ -687,9 +687,9 @@
   right:68px;
   top:50%;
   transform:translateY(-50%);
-  width:312px;
-  max-height:calc(100dvh - 24px);
-  padding:18px;
+  width:304px;
+  max-height:calc(100dvh - 20px);
+  padding:14px;
   border:1px solid rgba(226,222,213,.96);
   border-radius:20px;
   background:
@@ -725,13 +725,13 @@
   display:flex;
   align-items:flex-start;
   justify-content:space-between;
-  gap:16px;
-  margin:0 0 14px;
+  gap:12px;
+  margin:0 0 9px;
 }
 #detail-dialog .face-style-head>div{display:grid;gap:2px}
 #detail-dialog .face-style-head b{
   font-family:var(--serif);
-  font-size:17px;
+  font-size:16px;
   font-weight:600;
   letter-spacing:.04em;
   color:#252b26;
@@ -739,8 +739,8 @@
 #detail-dialog .face-style-head span{font-size:10px;color:#6f7771;letter-spacing:.03em}
 #detail-dialog .face-style-head button{
   flex:0 0 auto;
-  width:32px;
-  height:32px;
+  width:30px;
+  height:30px;
   margin:-2px -2px 0 0;
   padding:0;
   border:1px solid transparent;
@@ -757,10 +757,10 @@
 }
 #detail-dialog .face-style-preview{
   position:relative;
-  height:126px;
+  height:94px;
   display:grid;
   place-items:center;
-  margin:0 0 14px;
+  margin:0 0 8px;
   border:1px solid #d9ddd6;
   border-radius:15px;
   background:
@@ -961,7 +961,7 @@
     0 3px 9px rgba(36,15,12,.2);
 }
 #detail-dialog .face-style-group{
-  margin-top:10px;
+  margin-top:7px;
   border:1px solid var(--face-ui-line);
   border-radius:13px;
   background:rgba(255,253,249,.82);
@@ -969,7 +969,7 @@
   overflow:hidden;
 }
 #detail-dialog .face-style-group-title{
-  padding:8px 11px 6px;
+  padding:5px 10px 3px;
   color:#6f756f;
   font-size:9.5px;
   font-weight:650;
@@ -978,11 +978,11 @@
 #detail-dialog .face-style-field{
   position:relative;
   display:grid;
-  grid-template-columns:88px minmax(0,1fr);
+  grid-template-columns:82px minmax(0,1fr);
   align-items:center;
-  min-height:45px;
+  min-height:40px;
   margin:0;
-  padding:6px 10px 6px 11px;
+  padding:4px 9px 4px 10px;
   border-top:1px solid #ebe9e2;
   color:#515b53;
 }
@@ -1003,9 +1003,9 @@
   width:100%;
 }
 #detail-dialog .face-style-popover select{
-  height:34px;
-  min-height:34px;
-  padding:5px 28px 5px 10px;
+  height:32px;
+  min-height:32px;
+  padding:4px 27px 4px 9px;
   border:1px solid #d9dcd5;
   border-radius:9px;
   background-color:#fff;
@@ -1022,15 +1022,18 @@
   box-shadow:0 0 0 3px color-mix(in srgb,var(--face-ui-accent) 16%,transparent);
 }
 #detail-dialog .face-range-field{
-  grid-template-columns:88px minmax(0,1fr) auto;
-  row-gap:3px;
-  min-height:58px;
+  grid-template-columns:82px minmax(0,1fr) 34px;
+  column-gap:8px;
+  min-height:40px;
 }
+#detail-dialog .face-range-field>span:first-child,
+#detail-dialog .face-range-field output,
+#detail-dialog .face-range-field input[type="range"]{grid-row:1}
 #detail-dialog .face-range-field output{grid-column:3}
 #detail-dialog .face-style-popover input[type="range"]{
   appearance:none;
   -webkit-appearance:none;
-  grid-column:1/-1;
+  grid-column:2;
   width:100%;
   height:18px;
   margin:0;
@@ -1085,9 +1088,9 @@
   display:flex;
   align-items:center;
   justify-content:space-between;
-  min-height:45px;
+  min-height:40px;
   margin:0;
-  padding:6px 10px 6px 11px;
+  padding:4px 9px 4px 10px;
   color:#59635b;
   font-size:12px;
   font-weight:500;
@@ -1096,8 +1099,8 @@
   border-left:1px solid #ebe9e2;
 }
 #detail-dialog .face-style-colors input[type="color"]{
-  width:32px;
-  height:28px;
+  width:30px;
+  height:26px;
   padding:2px;
   border:1px solid #d9dcd5;
   border-radius:7px;
@@ -1118,17 +1121,6 @@
   color:#6f7771;
   font-size:9.5px;
 }
-#detail-dialog .face-field-note{
-  grid-column:2;
-  margin-top:-2px;
-  color:#6f7771;
-  font-size:9.5px;
-  line-height:1.35;
-}
-#detail-dialog .face-style-field:has(.face-field-note:not(:empty)){
-  padding-top:7px;
-  padding-bottom:7px;
-}
 #detail-dialog .face-style-popover .is-disabled{
   opacity:.68;
   color:#858b85;
@@ -1143,9 +1135,9 @@
 }
 #detail-dialog .face-style-reset{
   width:100%;
-  min-height:38px;
-  margin-top:12px;
-  padding:8px 12px;
+  min-height:34px;
+  margin-top:8px;
+  padding:6px 12px;
   border:1px solid #d8d9d2;
   border-radius:10px;
   background:rgba(255,255,255,.48);
