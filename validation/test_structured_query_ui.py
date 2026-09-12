@@ -31,7 +31,12 @@ def main():
     assert 'rememberPersonLabel: rememberLabel' in ui
     assert '__ourTimeRememberPersonLabel' in init
     assert "app.state.personLabels" in init
-    assert "groupCount.textContent=fmt(data.total)+' 张'" in waterfall
+    assert 'function syncGroupResultCount' in app
+    assert 'syncGroupResultCount(view,{clear:true})' in app
+    assert 'syncGroupResultCount(state.view,{clear:true})' in app
+    assert 'syncGroupResultCount(state.view,{clear:true})' in waterfall
+    assert 'syncGroupResultCount(state.view,{total:data.total})' in waterfall
+    assert "const groupCount=$('#group-result-count')" not in waterfall
     print('STRUCTURED_QUERY_UI_OK')
     return 0
 

@@ -92,12 +92,7 @@ async function streamPage(index){
      const title=typeof groupTitle==='function'?groupTitle(state.view):['合影','合影'];
      pageTitle.textContent=title[1];
    }
-   const groupCount=$('#group-result-count');
-   if(groupCount){
-     const on=String(state.view||'').startsWith('group:');
-     groupCount.hidden=!on;
-     if(on) groupCount.textContent=fmt(data.total)+' 张';
-   }
+   if(typeof syncGroupResultCount==='function') syncGroupResultCount(state.view,{total:data.total});
    return page;
   }catch(e){if(e.name!=='AbortError'&&generation===waterfall.generation){waterfall.error=true;$('#stream-status').textContent='加载暂时失败，已显示的照片仍可查看';$('#stream-retry').hidden=false;toast(e.message,true);}return null;}
   finally{if(generation===waterfall.generation){waterfall.pending.delete(index);streamSchedule();}}
@@ -163,6 +158,7 @@ async function loadPhotos(){
  waterfall.query={q:state.q,filter:state.view,person:state.person,directory:state.directory,sort:state.sort,date_from:state.dateFrom||'',date_to:state.dateTo||'',place:state.place||''};
  waterfall.width=streamMetrics().width;waterfall.columns=streamMetrics().columns;state.offset=0;
  streamEntrance.disconnect();$('#photo-grid').replaceChildren();$('#photo-grid').style.height='0px';$('#stream-status').textContent='正在加载照片…';$('#stream-retry').hidden=true;$('#no-results').hidden=true;$('#empty').hidden=true;$('#result-count').textContent='加载中';
+ if(typeof syncGroupResultCount==='function') syncGroupResultCount(state.view,{clear:true});
  if(oldTop<0&&!$('#detail-dialog').open)scrollTo({top:scrollY+oldTop-24,behavior:'instant'});
  await streamPage(0);streamPaint();
 }
