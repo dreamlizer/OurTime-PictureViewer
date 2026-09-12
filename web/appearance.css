@@ -443,11 +443,26 @@ body.is-home-view .chrome-row {
   gap: 10px;
 }
 #people-view .people-search {
-  width: min(360px, 100%);
+  width: min(190px, 100%);
   margin: 0;
 }
 #people-view .people-search input {
   width: 100%;
+}
+.people-sort-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.people-sort-actions .secondary {
+  min-height: 36px;
+  color: var(--muted);
+}
+.people-sort-actions .secondary.is-active {
+  border-color: #91a99a;
+  background: #e4ede7;
+  color: var(--green);
+  box-shadow: inset 0 0 0 1px #c4d4ca;
 }
 #people-merge-bar,
 #batch-bar {

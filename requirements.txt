@@ -7,3 +7,4 @@ onnxruntime>=1.20,<2
 opencv-python-headless>=4.10,<5
 numpy>=1.26,<3
 defusedxml>=0.7,<1
+pypinyin>=0.55,<1

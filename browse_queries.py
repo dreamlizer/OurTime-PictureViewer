@@ -97,8 +97,22 @@ def people_select_sql():
     )
 
 
-def people_order_sql():
-    return "p.confirmed DESC, photo_count DESC, p.id"
+def people_order_sql(sort='photos'):
+    if sort == 'photos':
+        return "p.confirmed DESC, photo_count DESC, p.id"
+    if sort == 'name_asc':
+        return (
+            "p.confirmed DESC, "
+            "CASE WHEN p.confirmed=1 THEN coalesce(nullif(p.name,''),p.alias) END COLLATE PERSON_PINYIN ASC, "
+            "CASE WHEN p.confirmed=0 THEN photo_count END DESC, p.id"
+        )
+    if sort == 'name_desc':
+        return (
+            "p.confirmed DESC, "
+            "CASE WHEN p.confirmed=1 THEN coalesce(nullif(p.name,''),p.alias) END COLLATE PERSON_PINYIN DESC, "
+            "CASE WHEN p.confirmed=0 THEN photo_count END DESC, p.id"
+        )
+    raise ValueError('不支持的人物排序')
 
 
 def people_base_where(ignored, needle=None, named=0, grouped=True):
@@ -111,13 +125,17 @@ def people_base_where(ignored, needle=None, named=0, grouped=True):
     if named:
         conditions.append('p.confirmed=1')
     if needle:
-        conditions.append("(coalesce(p.name,'') LIKE ? OR coalesce(p.alias,'') LIKE ? OR CAST(p.id AS TEXT) LIKE ?)")
         like = '%' + needle + '%'
-        values.extend([like, like, like])
+        if named:
+            conditions.append("(coalesce(p.name,'') LIKE ? OR coalesce(p.alias,'') LIKE ?)")
+            values.extend([like, like])
+        else:
+            conditions.append("(coalesce(p.name,'') LIKE ? OR coalesce(p.alias,'') LIKE ? OR CAST(p.id AS TEXT) LIKE ?)")
+            values.extend([like, like, like])
     return conditions, values
 
 
-def people_query(ignored=0, q='', offset=0, limit=48, ids='', named=0):
+def people_query(ignored=0, q='', offset=0, limit=48, ids='', named=0, sort='photos'):
     ignored = int(bool(ignored))
     needle = (q or '').strip()
     selected = parse_id_list(ids, limit=100, label='人物编号')
@@ -128,7 +146,7 @@ def people_query(ignored=0, q='', offset=0, limit=48, ids='', named=0):
     extra_where, extra_values = people_base_where(ignored, None, named=named)
     total_where, total_values = people_base_where(ignored, needle, named=named, grouped=False)
     select = people_select_sql()
-    order_sql = people_order_sql()
+    order_sql = people_order_sql(sort)
     grouped_page = select + f" WHERE {' AND '.join(page_where)} GROUP BY p.id"
     grouped_extra = select + f" WHERE {' AND '.join(extra_where)} GROUP BY p.id"
     extra_sql = None
@@ -267,8 +285,8 @@ def ranked_from_sql(path_sql, where, order_sql):
 
 
 
-def fetch_people(conn, ignored=0, q='', offset=0, limit=48, ids='', named=0):
-    spec = people_query(ignored=ignored, q=q, offset=offset, limit=limit, ids=ids, named=named)
+def fetch_people(conn, ignored=0, q='', offset=0, limit=48, ids='', named=0, sort='photos'):
+    spec = people_query(ignored=ignored, q=q, offset=offset, limit=limit, ids=ids, named=named, sort=sort)
     total = conn.execute(spec['total_sql'], spec['total_params']).fetchone()[0]
     rows = [dict(r) for r in conn.execute(spec['page_sql'], spec['page_params']).fetchall()]
     seen = {row['id'] for row in rows}

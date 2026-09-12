@@ -33,7 +33,7 @@ from geo_labels import PlaceIndex
 from object_labels import classify_image, classify_images, model_ready, runtime_name as object_runtime, BATCH_SIZE
 from library_db import (
     ACTIVE_ASSET, ASSET_LIST_COLUMNS, init_schema, load_place_rules,
-    migrate_place_overrides, place_rules_version, upsert_place_rule,
+    migrate_place_overrides, place_rules_version, register_collations, upsert_place_rule,
 )
 from browse_queries import directory_predicate as directory_clause, fetch_people, fetch_photos
 
@@ -83,6 +83,7 @@ except ImportError:
 def db():
     conn = sqlite3.connect(DB, timeout=60)
     conn.row_factory = sqlite3.Row
+    register_collations(conn)
     conn.execute('PRAGMA foreign_keys=ON')
     conn.execute('PRAGMA busy_timeout=60000')
     conn.execute('PRAGMA journal_mode=WAL')
@@ -1236,10 +1237,10 @@ def edit_photos(body:EditRequest):
     return {'updated':len(ids)}
 
 @app.get('/api/people')
-def people(ignored:int=0, q:str='', offset:int=0, limit:int=48, ids:str='', named:int=0):
+def people(ignored:int=0, q:str='', offset:int=0, limit:int=48, ids:str='', named:int=0, sort:str='photos'):
     try:
         with db() as c:
-            result=fetch_people(c, ignored=ignored, q=q, offset=offset, limit=limit, ids=ids, named=named)
+            result=fetch_people(c, ignored=ignored, q=q, offset=offset, limit=limit, ids=ids, named=named, sort=sort)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     return {'total':result['total'],'items':result['items'],'offset':result['offset'],'limit':result['limit']}

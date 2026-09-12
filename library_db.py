@@ -3,13 +3,21 @@ from __future__ import annotations
 
 import hashlib
 import json
+from functools import lru_cache
 from datetime import datetime
 from pathlib import Path
+
+from pypinyin import lazy_pinyin
 
 ACTIVE_ASSET = (
     "a.excluded=0 AND EXISTS(SELECT 1 FROM files af WHERE af.asset_id=a.id AND af.excluded=0)"
 )
 EFFECTIVE_PLACE = "coalesce(nullif(a.manual_place, ''), a.place)"
+POLYPHONIC_SURNAMES = {
+    '曾': 'zeng', '单': 'shan', '解': 'xie', '仇': 'qiu', '区': 'ou',
+    '查': 'zha', '朴': 'piao', '乐': 'yue', '重': 'chong', '盖': 'ge',
+    '万俟': 'moqi', '尉迟': 'yuchi', '长孙': 'zhangsun',
+}
 ASSET_LIST_COLUMNS = """
 a.id, a.sha256, a.width, a.height, a.format, a.captured_at, a.date_source, a.date_precision,
 a.latitude, a.longitude, a.place, a.place_source, a.camera, a.category, a.error,
@@ -22,7 +30,28 @@ def now():
     return datetime.now().isoformat(timespec='seconds')
 
 
+@lru_cache(maxsize=8192)
+def person_pinyin_key(value):
+    text = str(value or '').strip()
+    if not text:
+        return ''
+    surname = next((part for part in ('万俟', '尉迟', '长孙') if text.startswith(part)), text[:1])
+    prefix = POLYPHONIC_SURNAMES.get(surname)
+    remainder = text[len(surname):] if prefix else text
+    spelling = ''.join(lazy_pinyin(remainder, errors=lambda chars: list(chars)))
+    return ((prefix or '') + spelling + '\0' + text).casefold()
+
+
+def register_collations(conn):
+    def compare(left, right):
+        a = person_pinyin_key(left)
+        b = person_pinyin_key(right)
+        return (a > b) - (a < b)
+    conn.create_collation('PERSON_PINYIN', compare)
+
+
 def init_schema(conn):
+    register_collations(conn)
     conn.execute('PRAGMA journal_mode=WAL')
     conn.execute('PRAGMA wal_autocheckpoint=2000')
     conn.execute('PRAGMA foreign_keys=ON')
