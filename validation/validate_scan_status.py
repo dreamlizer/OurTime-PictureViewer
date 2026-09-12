@@ -33,11 +33,11 @@ def main() -> int:
              if route.request.url.endswith("/api/scan") else route.continue_()))
         page.goto(URL, wait_until="domcontentloaded")
         page.wait_for_selector("#home-query-host .ot-home-ui", timeout=15000)
-        page.click('[data-view="scan"]')
+        page.click('#add-folder')
         page.wait_for_timeout(300)
         assert page.locator("#scan-progress").is_hidden()
         assert page.locator(".add-photos-card").is_visible()
-        assert not page.locator("#last-scan-details").get_attribute("open")
+        assert page.locator("#last-scan-details").count() == 0
 
         for status in ("running", "pausing", "paused"):
             current["job"] = job(status)
@@ -63,9 +63,9 @@ def main() -> int:
         page.evaluate("window.__ourTimeApp.refreshStatus?.()")
         page.wait_for_timeout(150)
         assert page.locator("#scan-progress").is_visible()
-        assert page.locator("#scan-progress-title").inner_text() == "扫描完成"
+        assert page.locator("#scan-progress-title").inner_text() == "照片已经添加"
         page.click('[data-view="timeline"]')
-        page.click('[data-view="scan"]')
+        page.click('#add-folder')
         page.wait_for_timeout(150)
         assert page.locator("#scan-progress").is_hidden()
         assert page.locator(".add-photos-card").is_visible()

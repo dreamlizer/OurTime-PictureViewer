@@ -60,6 +60,9 @@ FACE_RUNTIME = None
 FACE_INDEX = None
 FACE_INDEX_LOCK = threading.Lock()
 FACE_INDEX_GEN = 0
+FACE_GROUP_THRESHOLD = 0.50
+FACE_AUTO_MATCH_THRESHOLD = 0.68
+FACE_AUTO_MATCH_MARGIN = 0.08
 OBJECT_JOB={'status':'idle','processed':0,'limit':0,'tagged':0,'errors':0,'message':'','started_at':None,'finished_at':None}
 OBJECT_JOB_LOCK=threading.Lock()
 GEO = None
@@ -424,8 +427,43 @@ def invalidate_face_index():
         FACE_INDEX=None
         FACE_INDEX_GEN += 1
 
-def load_face_index():
+def build_face_index(known):
     import numpy as np
+    count=len(known)
+    dim=512
+    if known:
+        first=np.frombuffer(known[0]['embedding'],dtype=np.float32)
+        dim=int(first.shape[0])
+    capacity=max(count*2,1024)
+    vectors=np.zeros((capacity,dim),dtype=np.float32)
+    person_slots=np.zeros(capacity,dtype=np.int32)
+    person_slot_by_id={}
+    unique_person_ids=[]
+    person_states=[]
+    if known:
+        vectors[:count]=np.stack([np.frombuffer(r['embedding'],dtype=np.float32) for r in known])
+        for face_index,row in enumerate(known):
+            person_id=int(row['person_id'])
+            slot=person_slot_by_id.get(person_id)
+            if slot is None:
+                slot=len(unique_person_ids)
+                person_slot_by_id[person_id]=slot
+                unique_person_ids.append(person_id)
+                person_states.append('ignored' if row['ignored'] else 'confirmed' if row['confirmed'] else 'pending')
+            person_slots[face_index]=slot
+    return {
+        'vectors':vectors,
+        'size':count,
+        'person_ids':[int(r['person_id']) for r in known],
+        'confirmed':[bool(r['confirmed']) for r in known],
+        'ignored':[bool(r['ignored']) for r in known],
+        'person_slots':person_slots,
+        'person_slot_by_id':person_slot_by_id,
+        'unique_person_ids':unique_person_ids,
+        'person_states':person_states,
+    }
+
+def load_face_index():
     global FACE_INDEX
     attempts=0
     while True:
@@ -435,17 +473,14 @@ def load_face_index():
                 return FACE_INDEX
             generation=FACE_INDEX_GEN
         with db() as c:
-            known=c.execute('SELECT f.embedding,f.person_id,p.confirmed FROM faces f JOIN people p ON p.id=f.person_id WHERE coalesce(p.ignored,0)=0 AND coalesce(f.ignored,0)=0 ORDER BY f.id').fetchall()
-        count=len(known)
-        dim=512
-        if known:
-            first=np.frombuffer(known[0]['embedding'],dtype=np.float32)
-            dim=int(first.shape[0])
-        capacity=max(count*2,1024)
-        vectors=np.zeros((capacity,dim),dtype=np.float32)
-        if known:
-            vectors[:count]=np.stack([np.frombuffer(r['embedding'],dtype=np.float32) for r in known])
-        index={'vectors':vectors,'size':count,'person_ids':[r['person_id'] for r in known],'confirmed':[bool(r['confirmed']) for r in known]}
+            known=c.execute(
+                '''SELECT f.embedding,f.person_id,p.confirmed,p.ignored
+                   FROM faces f JOIN people p ON p.id=f.person_id
+                   WHERE f.embedding IS NOT NULL
+                     AND (coalesce(p.ignored,0)=1 OR coalesce(f.ignored,0)=0)
+                   ORDER BY f.id'''
+            ).fetchall()
+        index=build_face_index(known)
         with FACE_INDEX_LOCK:
             if generation==FACE_INDEX_GEN:
                 if FACE_INDEX is None:
@@ -456,7 +491,7 @@ def load_face_index():
         if attempts>=8:
             raise RuntimeError('人脸索引正在更新，请稍后重试')
 
-def remember_face(person_id,embedding,confirmed=False):
+def remember_face(person_id,embedding,confirmed=False,ignored=False):
     import numpy as np
     with FACE_INDEX_LOCK:
         if FACE_INDEX is None:
@@ -467,10 +502,52 @@ def remember_face(person_id,embedding,confirmed=False):
         if FACE_INDEX['size']>=len(FACE_INDEX['vectors']):
             extra=np.zeros_like(FACE_INDEX['vectors'])
             FACE_INDEX['vectors']=np.vstack([FACE_INDEX['vectors'],extra])
-        FACE_INDEX['vectors'][FACE_INDEX['size']]=vector
+            FACE_INDEX['person_slots']=np.concatenate([FACE_INDEX['person_slots'],np.zeros_like(FACE_INDEX['person_slots'])])
+        position=FACE_INDEX['size']
+        slot=FACE_INDEX['person_slot_by_id'].get(int(person_id))
+        state='ignored' if ignored else 'confirmed' if confirmed else 'pending'
+        if slot is None:
+            slot=len(FACE_INDEX['unique_person_ids'])
+            FACE_INDEX['person_slot_by_id'][int(person_id)]=slot
+            FACE_INDEX['unique_person_ids'].append(int(person_id))
+            FACE_INDEX['person_states'].append(state)
+        else:
+            FACE_INDEX['person_states'][slot]=state
+        FACE_INDEX['vectors'][position]=vector
+        FACE_INDEX['person_slots'][position]=slot
         FACE_INDEX['size']+=1
         FACE_INDEX['person_ids'].append(person_id)
         FACE_INDEX['confirmed'].append(bool(confirmed))
+        FACE_INDEX['ignored'].append(bool(ignored))
+
+def choose_face_person(index,embedding,used_people=None):
+    """Choose a conservative person-level route for one normalized embedding."""
+    import numpy as np
+    used={int(pid) for pid in (used_people or ())}
+    if not index or not index.get('size') or not index.get('unique_person_ids'):
+        return {'route':'new','person_id':None,'suggested_person_id':None,'best_score':None,'second_score':None,'margin':None}
+    emb=np.asarray(embedding,dtype=np.float32).reshape(-1)
+    similarities=index['vectors'][:index['size']]@emb
+    person_scores=np.full(len(index['unique_person_ids']),-np.inf,dtype=np.float32)
+    np.maximum.at(person_scores,index['person_slots'][:index['size']],similarities)
+    ranked=[int(slot) for slot in np.argsort(-person_scores)
+            if int(index['unique_person_ids'][int(slot)]) not in used]
+    if not ranked:
+        return {'route':'new','person_id':None,'suggested_person_id':None,'best_score':None,'second_score':None,'margin':None}
+    best_slot=ranked[0]
+    best_person=int(index['unique_person_ids'][best_slot])
+    best_score=float(person_scores[best_slot])
+    second_score=float(person_scores[ranked[1]]) if len(ranked)>1 else -1.0
+    margin=best_score-second_score
+    state=index['person_states'][best_slot]
+    base={'person_id':None,'suggested_person_id':None,'best_score':best_score,'second_score':second_score,'margin':margin}
+    if state in {'confirmed','ignored'} and best_score>=FACE_AUTO_MATCH_THRESHOLD and margin>=FACE_AUTO_MATCH_MARGIN:
+        return {**base,'route':state,'person_id':best_person}
+    if state=='confirmed' and best_score>=FACE_GROUP_THRESHOLD:
+        return {**base,'route':'suggested','suggested_person_id':best_person}
+    if state=='pending' and best_score>=FACE_GROUP_THRESHOLD:
+        return {**base,'route':'pending','person_id':best_person}
+    return {**base,'route':'new'}
 
 def process_faces(asset_id,path):
     import numpy as np
@@ -491,22 +568,13 @@ def process_faces(asset_id,path):
             if x2-x1<28 or y2-y1<28 or float(face.det_score)<0.65:
                 continue
             emb=np.asarray(face.normed_embedding,dtype=np.float32)
-            person_id=None; suggestion=None
-            if index['size']:
-                similarity=index['vectors'][:index['size']]@emb
-                best=int(np.argmax(similarity))
-                if float(similarity[best])>=0.50:
-                    matched=index['person_ids'][best]
-                    if index['confirmed'][best]:
-                        suggestion=matched
-                    else:
-                        person_id=matched
-            if person_id and person_id in used_people:
-                person_id=None
+            decision=choose_face_person(index,emb,used_people)
+            person_id=decision['person_id']
+            suggestion=decision['suggested_person_id']
             pad=int(max(x2-x1,y2-y1)*.25)
             crop=pic.crop((max(0,x1-pad),max(0,y1-pad),min(pic.width,x2+pad),min(pic.height,y2+pad)))
             crop.thumbnail((200,200))
-            staged.append({'emb':emb,'person_id':person_id,'suggestion':suggestion,'bbox':[x1,y1,x2,y2,pic.width,pic.height],'score':float(face.det_score),'crop':crop})
+            staged.append({'emb':emb,'person_id':person_id,'suggestion':suggestion,'route':decision['route'],'bbox':[x1,y1,x2,y2,pic.width,pic.height],'score':float(face.det_score),'crop':crop})
             if person_id:
                 used_people.add(person_id)
         created_people=[]
@@ -519,8 +587,10 @@ def process_faces(asset_id,path):
                         person_id=c.execute('INSERT INTO people(suggested_person_id) VALUES (?)',(item['suggestion'],)).lastrowid
                         created_people.append(person_id)
                         item['person_id']=person_id
-                    fid=c.execute('INSERT INTO faces(asset_id,person_id,bbox,embedding,score) VALUES (?,?,?,?,?)',
-                        (asset_id,person_id,json.dumps(item['bbox']),item['emb'].tobytes(),item['score'])).lastrowid
+                    reviewed=int(item['route'] in {'confirmed','ignored'})
+                    ignored=int(item['route']=='ignored')
+                    fid=c.execute('INSERT INTO faces(asset_id,person_id,bbox,embedding,score,reviewed,ignored) VALUES (?,?,?,?,?,?,?)',
+                        (asset_id,person_id,json.dumps(item['bbox']),item['emb'].tobytes(),item['score'],reviewed,ignored)).lastrowid
                     item['fid']=fid
                     crop_path=DATA/'faces'/f'{fid}.jpg'
                     created_crops.append(crop_path)
@@ -528,7 +598,11 @@ def process_faces(asset_id,path):
                     c.execute('UPDATE faces SET crop=? WHERE id=?',(f'{fid}.jpg',fid))
                 c.execute('UPDATE assets SET face_state=1,face_error=NULL WHERE id=?',(asset_id,))
             for item in staged:
-                remember_face(item['person_id'], item['emb'], confirmed=False)
+                remember_face(
+                    item['person_id'],item['emb'],
+                    confirmed=item['route']=='confirmed',
+                    ignored=item['route']=='ignored',
+                )
         except Exception:
             invalidate_face_index()
             for crop_path in created_crops:
@@ -753,12 +827,17 @@ class ScanRequest(BaseModel):
 
 def begin_scan(body):
     roots=[]
+    seen_roots=set()
     for raw in body.roots:
         p=Path(raw.strip().strip('"')).expanduser().resolve()
         if not p.is_dir(): raise HTTPException(400,f'目录不存在或无法读取：{p}')
         if p==DATA or DATA in p.parents: raise HTTPException(400,'不能扫描资料库自己的缓存目录')
         if str(p).startswith('\\\\'): raise HTTPException(400,'第一版只扫描本机磁盘目录')
-        if str(p) not in roots: roots.append(str(p))
+        resolved=str(p)
+        key=os.path.normcase(resolved)
+        if key not in seen_roots:
+            seen_roots.add(key)
+            roots.append(resolved)
     if not SCAN_LOCK.acquire(blocking=False): raise HTTPException(409,'已有扫描正在运行，请先暂停或等它完成')
     STOP.clear(); jid=uuid.uuid4().hex
     with STATUS_CACHE_LOCK:
@@ -926,9 +1005,14 @@ def drives():
     return {'roots':roots}
 
 @app.get('/api/folders')
-def folders(path:str=''):
+def folders(path:str='',scope:str='browse'):
+    if scope not in {'browse','scan'}:
+        raise HTTPException(400,'未知的目录选择用途')
     if not path:
-        return {'path':'','parent':None,'items':[{'name':p,'path':p} for p in drives()['roots'] if str(p).upper().startswith('I:')]}
+        roots=drives()['roots']
+        if scope=='browse':
+            roots=[p for p in roots if str(p).upper().startswith('I:')]
+        return {'path':'','parent':None,'scope':scope,'items':[{'name':p,'path':p} for p in roots]}
     p=Path(path).expanduser().resolve()
     if not p.is_dir(): raise HTTPException(400,'文件夹不存在或无法访问')
     if str(p).startswith('\\\\'): raise HTTPException(400,'第一版只浏览本机目录')
@@ -936,11 +1020,13 @@ def folders(path:str=''):
         items=[]
         for child in p.iterdir():
             try:
-                if child.is_dir() and not child.is_symlink() and not getattr(child.stat(),'st_file_attributes',0)&0x400:
+                if (child.is_dir() and not child.is_symlink()
+                    and not getattr(child.stat(),'st_file_attributes',0)&0x400
+                    and not (scope=='scan' and child.resolve()==DATA)):
                     items.append({'name':child.name,'path':str(child)})
             except OSError:
                 continue
-        return {'path':str(p),'parent':str(p.parent) if p.parent!=p else '', 'items':sorted(items,key=lambda x:x['name'].lower())}
+        return {'path':str(p),'parent':str(p.parent) if p.parent!=p else '', 'scope':scope,'items':sorted(items,key=lambda x:x['name'].lower())}
     except OSError as e: raise HTTPException(400,str(e))
 
 def asset_dict(row):
@@ -1312,7 +1398,7 @@ def name_person(pid:int,body:PersonEdit):
         old=c.execute('SELECT * FROM people WHERE id=?',(pid,)).fetchone()
         if not old: raise HTTPException(404,'人物不存在')
         c.execute('UPDATE people SET name=?,alias=?,confirmed=1,ignored=0,suggested_person_id=NULL WHERE id=?',(name,alias,pid))
-        c.execute('UPDATE faces SET reviewed=1 WHERE person_id=?',(pid,))
+        c.execute('UPDATE faces SET reviewed=1,ignored=0 WHERE person_id=?',(pid,))
         c.execute('INSERT INTO edits(created_at,target,before_json,after_json) VALUES (?,?,?,?)',(now(),f'person:{pid}',json.dumps(dict(old),ensure_ascii=False),json.dumps({'name':name,'alias':alias},ensure_ascii=False)))
     invalidate_face_index()
     return {'ok':True}
@@ -1400,6 +1486,7 @@ def mark_photo_passersby(aid:int,body:PhotoPassersbyRequest):
                 '''SELECT DISTINCT p.id
                    FROM faces f JOIN people p ON p.id=f.person_id
                    WHERE f.asset_id=? AND coalesce(p.ignored,0)=0
+                     AND coalesce(trim(p.alias),'')=''
                      AND (coalesce(trim(p.name),'')='' OR trim(p.name) IN ('待核对','命名'))''',
                 (aid,),
             ).fetchall()

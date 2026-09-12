@@ -88,6 +88,7 @@ def main():
     app = read(WEB / "app.js")
     viewer = read(WEB / "viewer.js")
     viewer_overrides = read(WEB / "viewer-overrides.css")
+    backend = read(ROOT / "app.py")
     waterfall = read(WEB / "waterfall.js")
     sources = {"app.js": app, "viewer.js": viewer, "viewer-overrides.css": viewer_overrides, "waterfall.js": waterfall, "index.html": html}
 
@@ -157,6 +158,16 @@ def main():
         or "face-name.unnamed.passerby" not in viewer_overrides
     ):
         fail("照片快捷命名缺少路人操作，或路人淡色加号显示规则缺失")
+    if not all(value in viewer for value in (
+        '<option value="top">优先上方</option>',
+        '<option value="bottom">优先下方</option>',
+        'data-face-id=',
+        'face-hover-guide',
+        'face-action-popover',
+        'photo-people-popover',
+        '/passersby`,',
+    )) or "@app.post('/api/photos/{aid}/passersby')" not in backend:
+        fail("照片人物缺少上下标签位置、悬停指向、单张纠错或批量路人能力")
     if not all(path in viewer for path in (
         "/api/face-label-bg/1.png",
         "/api/face-label-bg/2.png",
@@ -187,7 +198,7 @@ def main():
     overrides = read(WEB / "viewer-overrides.css")
     if "prefers-reduced-motion:reduce" not in overrides:
         fail("呼吸绿点没有尊重系统减少动态效果设置")
-    ok("默认主题、图片标签、本机字体、待命名标记和防碰撞机制已接入")
+    ok("默认主题、图片标签、人物指向与纠错、批量路人和防碰撞机制已接入")
 
     font_path = WEB / "vendor" / "fonts" / "lxgw-wenkai-screen" / "LXGWWenKaiGBScreen.ttf"
     license_path = font_path.with_name("OFL.txt")
@@ -259,6 +270,27 @@ def main():
     if 'id="merge-person"' in html and 'id="merge-person" class' in html and 'type="button" id="merge-person"' not in html:
         fail("合并按钮缺少 type=button，详情页点击可能被表单吞掉")
     ok("人物详情合并按钮是 type=button")
+    if not all(value in html for value in (
+        'id="scan-folder-picker"',
+        'id="scan-root-list"',
+        'id="scan-add-folder"',
+        'id="start-scan"',
+        'id="scan-view-errors"',
+        '添加并扫描',
+    )) or 'id="last-scan-details"' in html:
+        fail("添加照片页未收口为多目录极简流程，或仍显示最近一次扫描")
+    if "state.folderTarget==='scan'?'scan':'browse'" not in app or "await openAddPhotos(path)" not in app:
+        fail("添加照片目录选择与文件夹页扫描入口尚未按用途统一")
+    if not all(value in backend for value in (
+        "FACE_GROUP_THRESHOLD = 0.50",
+        "FACE_AUTO_MATCH_THRESHOLD = 0.68",
+        "FACE_AUTO_MATCH_MARGIN = 0.08",
+        "def choose_face_person(",
+        "'ignored' if row['ignored'] else 'confirmed'",
+        "UPDATE faces SET reviewed=1,ignored=0",
+    )):
+        fail("人脸自动分流缺少人物级阈值、路人状态或恢复闭环")
+    ok("添加照片入口和保守人脸自动分流合同已接入")
 
     live = {}
     try:

@@ -1451,8 +1451,10 @@
   #detail-dialog #zoom-level{width:32px}
   #detail-dialog .viewer-arrow.right{right:55px}
   #detail-dialog:not(.hide-info) .viewer-tools{right:8px;opacity:.18;pointer-events:none}
-  #detail-dialog:not(.hide-info) .face-style-popover{right:55px}
+  #detail-dialog:not(.hide-info) .face-style-popover,
+  #detail-dialog:not(.hide-info) .people-manage-popover{right:55px}
   #detail-dialog .face-style-popover{right:55px;width:292px}
+  #detail-dialog .people-manage-popover{right:55px}
 }
 /* Photo-width modes stay active even on a wide desktop viewport. */
 #detail-dialog[data-signature-mode="medium"] .signature-v3{
@@ -1530,7 +1532,8 @@
 #detail-dialog[data-signature-mode="narrow"] .signature-v3.has-memory.has-capture:not(.has-file) .signature-seal-v3{grid-row:1 / -1}
 
 @media(max-width:979px){
-  #detail-dialog .face-style-popover{left:12px;right:58px;width:auto;top:auto;bottom:12px;transform:none}
+  #detail-dialog .face-style-popover,
+  #detail-dialog .people-manage-popover{left:12px;right:58px;width:auto;top:auto;bottom:12px;transform:none}
   .local-font-card{padding:16px}
   .local-font-preview{grid-template-columns:68px 1fr;gap:12px}
   #local-font-list{height:180px}

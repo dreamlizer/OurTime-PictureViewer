@@ -1,0 +1,224 @@
+"""Isolated API and browser regression for photo-level people interactions."""
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import shutil
+import sqlite3
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+from PIL import Image
+from playwright.sync_api import sync_playwright
+
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from library_db import init_schema
+
+
+RUN = ROOT / "validation" / "work" / ("photo-people-" + time.strftime("%Y%m%d-%H%M%S"))
+DATA = RUN / "data"
+PHOTOS = RUN / "photos"
+URL = "http://127.0.0.1:8793"
+REPORT = ROOT / "validation" / "reports" / "photo-people-interactions.json"
+checks: list[str] = []
+
+
+def check(value: bool, message: str) -> None:
+    if not value:
+        raise AssertionError(message)
+    checks.append(message)
+    print("PASS", message, flush=True)
+
+
+def req(path: str, body=None, method: str | None = None):
+    request = urllib.request.Request(
+        URL + path,
+        data=None if body is None else json.dumps(body).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method=method,
+    )
+    with urllib.request.urlopen(request, timeout=20) as response:
+        return json.load(response)
+
+
+def add_asset(conn: sqlite3.Connection, aid: int) -> None:
+    path = PHOTOS / f"合影-{aid}.jpg"
+    Image.new("RGB", (1000, 700), (105 + aid * 12, 91, 72)).save(path)
+    sha = hashlib.sha256(path.read_bytes()).hexdigest()
+    conn.execute(
+        """INSERT INTO assets(id,sha256,width,height,format,metadata,captured_at,date_source,
+                              date_precision,category,created_at,face_state)
+           VALUES(?,?,?,?,?,'{}',?,'EXIF','日','照片',?,1)""",
+        (aid, sha, 1000, 700, "JPEG", f"2026-09-{aid:02}T12:00:00", "2026-09-13T12:00:00"),
+    )
+    conn.execute(
+        """INSERT INTO files(asset_id,path,size,mtime_ns,modified_at,exists_now,excluded)
+           VALUES(?,?,?,?,?,1,0)""",
+        (aid, str(path), path.stat().st_size, path.stat().st_mtime_ns, "2026-09-13T12:00:00"),
+    )
+
+
+def add_person(conn: sqlite3.Connection, pid: int, name, confirmed: int, ignored: int, face_specs, alias="") -> None:
+    conn.execute("INSERT INTO people(id,name,alias,confirmed,ignored) VALUES(?,?,?,?,?)", (pid, name, alias, confirmed, ignored))
+    for fid, aid, bbox in face_specs:
+        conn.execute(
+            """INSERT INTO faces(id,asset_id,person_id,bbox,embedding,score,reviewed,ignored)
+               VALUES(?,?,?,?,?,0.96,?,?)""",
+            (fid, aid, pid, json.dumps([*bbox, 1000, 700]), b"\0" * 2048, confirmed, ignored),
+        )
+
+
+def seed() -> None:
+    DATA.mkdir(parents=True)
+    PHOTOS.mkdir(parents=True)
+    with sqlite3.connect(DATA / "library.sqlite3") as conn:
+        init_schema(conn)
+        add_asset(conn, 1)
+        add_asset(conn, 2)
+        add_person(conn, 1, "郑婷", 1, 0, [(101, 1, (180, 180, 270, 300)), (102, 2, (280, 180, 370, 300))])
+        add_person(conn, 2, None, 0, 0, [(201, 1, (400, 170, 490, 295)), (202, 2, (480, 180, 570, 300))])
+        add_person(conn, 3, "", 0, 0, [(301, 1, (610, 175, 700, 300))])
+        add_person(conn, 4, "路人", 0, 1, [(401, 1, (770, 180, 860, 305))])
+        add_person(conn, 5, "", 0, 0, [(501, 1, (510, 390, 600, 515))], alias="邻居")
+        conn.commit()
+    (DATA / "faces").mkdir()
+    (DATA / "thumbs").mkdir()
+    for fid in (101, 102, 201, 202, 301, 401, 501):
+        Image.new("RGB", (100, 120), "#859889").save(DATA / "faces" / f"{fid}.jpg")
+
+
+def person_state(pid: int):
+    with sqlite3.connect(DATA / "library.sqlite3") as conn:
+        return conn.execute("SELECT name,confirmed,ignored FROM people WHERE id=?", (pid,)).fetchone()
+
+
+def face_state(fid: int):
+    with sqlite3.connect(DATA / "library.sqlite3") as conn:
+        return conn.execute("SELECT person_id,ignored FROM faces WHERE id=?", (fid,)).fetchone()
+
+
+def main() -> int:
+    seed()
+    env = {**os.environ, "PHOTO_LIBRARY_DATA": str(DATA), "PHOTO_WEB_ROOT": str(ROOT / "web")}
+    log_path = RUN / "server.log"
+    log = log_path.open("w", encoding="utf-8")
+    process = subprocess.Popen(
+        [sys.executable, str(ROOT / "app.py"), "--port", "8793"],
+        env=env,
+        stdout=log,
+        stderr=log,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    result = {"passed": False, "checks": checks, "run": str(RUN)}
+    try:
+        for _ in range(160):
+            try:
+                req("/api/status")
+                break
+            except (OSError, urllib.error.URLError):
+                time.sleep(0.1)
+        else:
+            log.flush()
+            raise RuntimeError("隔离服务未启动\n" + log_path.read_text(encoding="utf-8", errors="replace"))
+
+        marked = req("/api/photos/1/passersby", {"ignored": True}, "POST")
+        check(set(marked["person_ids"]) == {2, 3}, "批量接口只选中当前照片里仍未命名的人物")
+        check(person_state(1)[2] == 0 and person_state(4)[2] == 1 and person_state(5)[2] == 0, "批量接口保留已命名、已有别名人物和原有路人")
+        check(face_state(202)[1] == 1, "批量归入路人沿用人物组语义并同步同组其他照片")
+        restored = req("/api/photos/1/passersby", {"ignored": False, "person_ids": marked["person_ids"]}, "POST")
+        check(set(restored["person_ids"]) == {2, 3} and face_state(202)[1] == 0, "批量操作可按本次人物清单完整撤销")
+
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 1440, "height": 920}, device_scale_factor=1)
+            errors = []
+            page.on("pageerror", lambda error: errors.append(str(error)))
+            page.goto(URL, wait_until="domcontentloaded")
+            page.evaluate("openPhoto(1,{q:'',filter:'all',person:'',directory:'',sort:'date_desc'})")
+            page.wait_for_selector("#detail-dialog[open]")
+            page.wait_for_function("document.querySelector('#detail-img').naturalWidth>0")
+            page.wait_for_selector('#face-name-layer [data-face-id="101"]')
+
+            auto_side = page.locator('[data-face-id="101"]').evaluate("element => [...element.classList].find(x=>['left','right','top','bottom'].includes(x))")
+            check(auto_side in {"left", "right"}, "竖排标签的原有自动算法仍选择左右侧")
+            page.click("#face-style-button")
+            page.wait_for_selector("#face-style-popover:not([hidden])")
+            page.select_option("#face-label-position", "top")
+            page.wait_for_function("document.querySelector('[data-face-id=\"101\"]').classList.contains('top')")
+            top_geometry = page.locator('[data-face-id="101"]').evaluate(
+                """element => {const face=state.detail.faces.find(x=>x.id===101),box=faceBox(face),img=document.querySelector('#detail-img').getBoundingClientRect(),layer=document.querySelector('#face-name-layer').getBoundingClientRect(),label=element.getBoundingClientRect();const faceTop=img.top+box.y1/box.h*img.height;return label.bottom<=faceTop+1;}"""
+            )
+            check(top_geometry, "“优先上方”把标签放到人脸上方")
+            page.select_option("#face-label-position", "bottom")
+            page.wait_for_function("document.querySelector('[data-face-id=\"101\"]').classList.contains('bottom')")
+            bottom_geometry = page.locator('[data-face-id="101"]').evaluate(
+                """element => {const face=state.detail.faces.find(x=>x.id===101),box=faceBox(face),img=document.querySelector('#detail-img').getBoundingClientRect(),label=element.getBoundingClientRect();const faceBottom=img.top+(box.y1+box.height)/box.h*img.height;return label.top>=faceBottom-1;}"""
+            )
+            check(bottom_geometry, "“优先下方”把标签放到人脸下方")
+            page.select_option("#face-label-position", "auto")
+
+            named = page.locator('[data-face-id="101"]')
+            named.hover()
+            check(page.locator("#face-name-layer").evaluate("element => element.classList.contains('is-linking')"), "悬停姓名标签会进入人物指向状态")
+            page.wait_for_function("Number(getComputedStyle(document.querySelector('.face-hover-box')).opacity)>.9")
+            check(page.locator(".face-hover-box").evaluate("element => Number(getComputedStyle(element).opacity) > .9"), "人物指向状态显示对应脸框")
+            check(bool(page.locator(".face-hover-guide path").get_attribute("d")), "人物标签与脸框之间显示引导线")
+            page.screenshot(path=str(RUN / "face-hover-guide.png"), full_page=False)
+
+            named.click()
+            check(page.locator("#face-action-popover").is_visible(), "点击已命名标签会打开单张纠错卡")
+            page.screenshot(path=str(RUN / "face-action-popover.png"), full_page=False)
+            page.click("#face-action-split")
+            page.wait_for_function("document.querySelector('[data-face-id=\"101\"]').classList.contains('unnamed')")
+            split_person = face_state(101)[0]
+            check(split_person != 1 and face_state(102)[0] == 1, "单张认错移出只拆出当前脸，其他照片仍属于原人物")
+
+            page.click("#photo-people-manage")
+            check(page.locator("#photo-people-popover").is_visible(), "大图页工具栏提供本照片人物整理入口")
+            page.click("#photo-passersby-start")
+            copy = page.locator("#photo-passersby-copy").inner_text()
+            check("保留 1 位已命名人物" in copy and "3 位待命名者" in copy, "批量确认明确说明保留与处理人数")
+            page.click("#photo-passersby-confirm-button")
+            page.wait_for_function("!document.querySelector('#photo-passersby-undo').hidden")
+            check(page.locator("#photo-passersby-undo").is_visible(), "批量处理完成后立即提供撤销入口")
+            page.click("#photo-passersby-undo")
+            page.wait_for_function("document.querySelector('#photo-passersby-undo').hidden")
+            check(face_state(101)[1] == 0, "界面撤销真实恢复本次批量处理的人物")
+            page.screenshot(path=str(RUN / "photo-people-interactions.png"), full_page=False)
+            page.set_viewport_size({"width": 390, "height": 844})
+            compact_box = page.locator("#photo-people-popover").bounding_box()
+            check(
+                bool(compact_box and compact_box["x"] >= 0 and compact_box["x"] + compact_box["width"] <= 390),
+                "390px 窄屏下人物整理卡完整留在可视区",
+            )
+            check(not errors, "真实浏览器交互没有 JavaScript 错误")
+            browser.close()
+
+        result["passed"] = True
+        REPORT.parent.mkdir(parents=True, exist_ok=True)
+        REPORT.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(json.dumps({"passed": True, "checks": len(checks), "run": str(RUN)}, ensure_ascii=False))
+        return 0
+    finally:
+        result["checks"] = checks
+        if not result["passed"]:
+            REPORT.parent.mkdir(parents=True, exist_ok=True)
+            REPORT.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+        process.terminate()
+        try:
+            process.wait(timeout=20)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=10)
+        log.close()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

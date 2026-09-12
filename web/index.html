@@ -88,20 +88,20 @@
   <div class="add-photos-card panel">
     <div class="panel-number">添加照片</div>
     <h2>把照片文件夹交给拾光</h2>
-    <p class="muted">选择一个或多个本地文件夹，会包含其中的子文件夹。原照片保持原位。</p>
+    <p class="muted">选择一个或多个本地文件夹，会自动包含子文件夹，并读取照片信息和识别人脸。原照片保持原位。</p>
     <button type="button" id="scan-folder-picker" class="folder-picker-card"><span class="folder-picker-icon" aria-hidden="true">＋</span><span><b>选择照片文件夹</b><small>打开本机目录选择器，不会立即开始扫描</small></span></button>
     <div id="scan-root-list" class="scan-root-list" hidden></div>
     <button type="button" id="scan-add-folder" class="text-button scan-add-folder" hidden>＋ 再添加一个文件夹</button>
-    <button type="button" id="start-scan" class="primary add-photos-submit" disabled>开始扫描</button>
+    <button type="button" id="start-scan" class="primary add-photos-submit" disabled>添加并扫描</button>
     <p id="scan-empty-hint" class="footnote">至少选择一个文件夹后才能开始。</p>
     <div id="scan-legacy-controls" hidden aria-hidden="true"><textarea id="scan-roots"></textarea><select id="scan-workers"><option value="1" selected>1</option></select><input id="with-faces" type="checkbox" checked><input id="include-system" type="checkbox"><button id="choose-folder" type="button"></button><button id="all-drives" type="button"></button><button id="probe-objects" type="button"></button><span id="worker-hint"></span><span id="object-probe-status"></span></div>
   </div>
   <section id="scan-progress" class="panel scan-progress" hidden>
     <div class="section-heading"><h2 id="scan-progress-title">正在扫描照片</h2><span id="job-status"></span></div>
     <div class="scan-progress-summary"><span>已检查 <b id="scan-checked">0</b></span><span>新读取 <b id="scan-added">0</b></span><span>读取问题 <b id="scan-errors-count">0</b></span></div>
-    <p id="scan-current" class="muted"></p><div id="job-actions" class="inline-actions"></div><button type="button" id="scan-view-all" class="primary small" hidden>查看全部照片</button>
+    <p id="scan-current" class="muted"></p><div id="job-actions" class="inline-actions"></div><div class="inline-actions scan-result-actions"><button type="button" id="scan-view-all" class="primary small" hidden>查看全部照片</button><button type="button" id="scan-view-errors" class="secondary small" hidden>查看读取问题</button></div>
   </section>
-  <details id="last-scan-details" class="panel scan-history"><summary>最近一次扫描</summary><div id="job-details" class="muted">还没有扫描任务。</div><details id="error-details"><summary id="error-summary">读取问题</summary><div id="scan-errors"></div></details><div id="capabilities" class="capabilities" hidden></div></details>
+  <div id="scan-legacy-status" hidden aria-hidden="true"><div id="job-details"></div><div id="error-details"><span id="error-summary"></span><div id="scan-errors"></div></div><div id="capabilities"></div></div>
 </section>
  <footer>拾光 <span>·</span> 一张照片，一份可以慢慢补全的记忆。<span class="footer-right">照片与人物信息保存在本机</span></footer>
 </main>

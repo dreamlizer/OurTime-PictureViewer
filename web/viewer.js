@@ -299,7 +299,8 @@ function buildFaceStylePopover(){
 }
 function faceHasUsableName(face){
   const name=String(face?.name||'').trim();
-  return !face?.ignored&&Boolean(name)&&!['待核对','命名','路人'].includes(name);
+  const alias=String(face?.alias||'').trim();
+  return !face?.ignored&&(Boolean(alias)||(Boolean(name)&&!['待核对','命名','路人'].includes(name)));
 }
 function photoPeopleSummary(){
   const unique=new Map();
@@ -418,7 +419,11 @@ function openFaceActionPopover(button,face){
   showFaceGuide(button);
   requestAnimationFrame(()=>{
     const rect=button.getBoundingClientRect(),width=pop.offsetWidth,height=pop.offsetHeight,pad=12;
-    const left=rect.right+10+width<=innerWidth-pad?rect.right+10:rect.left-width-10;
+    const sourceBox=faceBox(face),imageRect=$('#detail-img').getBoundingClientRect();
+    const faceCenter=sourceBox?imageRect.left+(sourceBox.x1+sourceBox.width/2)/sourceBox.w*imageRect.width:rect.left;
+    const preferLeft=faceCenter>=rect.left+rect.width/2;
+    let left=preferLeft?rect.left-width-10:rect.right+10;
+    if(left<pad||left+width>innerWidth-pad)left=preferLeft?rect.right+10:rect.left-width-10;
     pop.style.left=Math.round(Math.max(pad,Math.min(innerWidth-width-pad,left)))+'px';
     pop.style.top=Math.round(Math.max(pad,Math.min(innerHeight-height-pad,rect.top+rect.height/2-height/2)))+'px';
   });
@@ -1411,7 +1416,7 @@ $('#photo-people-manage')?.addEventListener('click',e=>{e.stopPropagation();togg
 document.addEventListener('click',e=>{
  if(!e.target.closest('#face-action-popover,.face-name'))closeFaceActionPopover();
  if(!e.target.closest('#photo-people-popover,#photo-people-manage'))togglePhotoPeoplePopover(false);
- if(!e.target.closest('#face-style-popover,#face-style-button'))toggleFaceStylePopover(false);
+ if(!e.target.closest('#face-style-popover,#face-style-button,#local-font-dialog'))toggleFaceStylePopover(false);
 });
 $('#detail-img').addEventListener('dblclick',()=>{if(viewer.fit)zoomTo(1);else{viewer.fit=true;updateZoom(true);}});
 function toggleInfo(){$('#detail-dialog').classList.toggle('hide-info');syncViewerTools();}

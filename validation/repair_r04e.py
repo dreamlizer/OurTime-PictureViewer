@@ -24,20 +24,20 @@ def assert_loaded_index_ok(index, people, source, keep, ignore):
     refs = list(index["person_ids"])
     ignored_ids = {pid for pid, row in people.items() if row.get("ignored")}
     missing = [pid for pid in refs if pid not in people]
-    ignored_in_index = [pid for pid in refs if pid in ignored_ids]
+    ignored_missing = [pid for pid in ignored_ids if pid not in refs]
     source_gone = source not in people
-    ok = (not missing) and (not ignored_in_index) and source_gone
-    return ok, {"refs": refs, "missing": missing, "ignored_in_index": ignored_in_index, "source_gone": source_gone}
+    ok = (not missing) and (not ignored_missing) and source_gone
+    return ok, {"refs": refs, "missing": missing, "ignored_missing": ignored_missing, "source_gone": source_gone}
 
 
 def prove_assertion_fails_on_stale_index():
     people = {1: {"name": "Keep", "ignored": 0}, 3: {"name": "IgnoreMe", "ignored": 1}}
-    stale = {"person_ids": [1, 2, 3]}
+    stale = {"person_ids": [1, 2]}
     ok, detail = assert_loaded_index_ok(stale, people, source=2, keep=1, ignore=3)
     if ok:
         raise AssertionError("stale index should fail")
-    if not detail["missing"] or 3 not in detail["ignored_in_index"]:
-        raise AssertionError("negative case did not catch missing/ignored refs: %s" % detail)
+    if not detail["missing"] or 3 not in detail["ignored_missing"]:
+        raise AssertionError("negative case did not catch missing refs or absent passerby: %s" % detail)
     return detail
 
 def main():
@@ -111,7 +111,7 @@ def main():
         fk = list(c.execute('PRAGMA foreign_key_check'))
         integ = c.execute('PRAGMA integrity_check').fetchone()[0]
     ok_index, detail = assert_loaded_index_ok(index, people, source, keep, ignore)
-    refs = detail['refs']; missing=detail['missing']; ignored_in_index=detail['ignored_in_index']; source_gone=detail['source_gone']
+    refs = detail['refs']; missing=detail['missing']; ignored_missing=detail['ignored_missing']; source_gone=detail['source_gone']
     payload = {
         'verified_at': datetime.now().astimezone().isoformat(timespec='seconds'),
         'data_dir': status['capabilities']['data_dir'],
@@ -121,16 +121,16 @@ def main():
         'people': {str(k): {'name': v.get('name'), 'ignored': v.get('ignored')} for k, v in people.items()},
         'index_person_ids': refs,
         'missing_refs': missing,
-        'ignored_in_index': ignored_in_index,
+        'ignored_missing_from_index': ignored_missing,
         'source_gone': source_gone,
         'fk': fk,
         'integrity': integ,
-        'passed': barrier['merged'].status_code == 200 and barrier['ignored'].status_code == 200 and not missing and not ignored_in_index and source_gone and integ == 'ok' and fk == [] and barrier['error'] is None,
+        'passed': barrier['merged'].status_code == 200 and barrier['ignored'].status_code == 200 and not missing and not ignored_missing and source_gone and integ == 'ok' and fk == [] and barrier['error'] is None,
     }
     negative = prove_assertion_fails_on_stale_index()
     payload['negative_stale_index'] = negative
     (OUT / 'r04e.json').write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=str), encoding='utf-8')
-    print(json.dumps({k: payload[k] for k in ['passed', 'merge_status', 'ignore_status', 'missing_refs', 'ignored_in_index', 'source_gone', 'integrity', 'loader_error', 'index_person_ids']}, ensure_ascii=False, indent=2))
+    print(json.dumps({k: payload[k] for k in ['passed', 'merge_status', 'ignore_status', 'missing_refs', 'ignored_missing_from_index', 'source_gone', 'integrity', 'loader_error', 'index_person_ids']}, ensure_ascii=False, indent=2))
     sys.exit(0 if payload['passed'] else 1)
 
 
