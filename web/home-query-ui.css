@@ -216,9 +216,16 @@ body.is-subpage .masthead .stats { display: none; }
   padding: 14px 14px 12px; background: #fcfdfb; border: 1px solid var(--ot-line);
   border-radius: 12px; box-shadow: 0 16px 40px rgb(24 45 35 / 16%);
 }
-.ot-home-pop-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
-.ot-home-pop-header strong { font-size: 14px; font-weight: 650; }
-.ot-home-option-list { display: flex; flex-direction: column; gap: 4px; max-height: 320px; overflow: auto; }
+ .ot-home-pop-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+ .ot-home-pop-header strong { font-size: 14px; font-weight: 650; }
+ .ot-home-popover .ot-home-close {
+   display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto;
+   min-height: 32px; min-width: 52px; padding: 4px 10px; margin: 0;
+   background: #fff; color: var(--ot-text); border: 1px solid var(--ot-line); border-radius: 8px;
+   font-size: 13px; font-weight: 600; cursor: pointer;
+ }
+ .ot-home-popover .ot-home-close:hover { background: var(--ot-soft); }
+ .ot-home-option-list { display: flex; flex-direction: column; gap: 4px; max-height: 320px; overflow: auto; }
 .ot-home-option {
   display: flex; align-items: center; gap: 8px; width: 100%; min-height: 36px;
   padding: 6px 8px; margin: 0; border: 0; border-radius: 8px; background: transparent;

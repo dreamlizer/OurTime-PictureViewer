@@ -39,8 +39,8 @@ def main() -> int:
 
         def delay_route(route):
             url = route.request.url
-            if '/api/folders' in url or '/api/groups' in url or '/api/people?' in url or '/api/places?' in url or '/api/timeline' in url or '/api/photos?' in url:
-                time.sleep(0.22)
+            if any(token in url for token in ('/api/folders', '/api/groups', '/api/people?', '/api/places?', '/api/timeline', '/api/photos?', '/api/exclusions')):
+                time.sleep(0.4)
             route.continue_()
 
         page.route('**/api/**', delay_route)
@@ -73,7 +73,9 @@ def main() -> int:
         )
         page.wait_for_timeout(900)
         shown = page.evaluate('window.__ourTimeApp && window.__ourTimeApp.state.folderPath')
-        check(shown == last_path, 'fast folder A/B/C ends on last directory')
+        current = page.locator('#folders-list').get_attribute('data-current-path')
+        check(shown == last_path, 'fast folder A/B/C state ends on last directory')
+        check(current == last_path, 'fast folder A/B/C DOM ends on last directory')
         page.screenshot(path=str(REPORT / 'fast-folders.png'), full_page=True)
 
         page.locator('[data-view="people"]').click()
@@ -84,9 +86,9 @@ def main() -> int:
         page.wait_for_selector('#groups-view:not([hidden])', timeout=15000)
         page.locator('[data-view="people"]').click()
         page.wait_for_selector('#people-view:not([hidden])', timeout=15000)
-        switching = page.locator('#people-grid').evaluate("el => el.classList.contains('is-switching') || el.innerHTML === '' || true")
         page.wait_for_timeout(500)
         check(page.locator('#people-view').is_visible(), 'people view visible after re-entry')
+        check(not page.locator('#people-grid').evaluate("el => el.classList.contains('is-switching')"), 'people grid not left switching after re-entry')
         page.screenshot(path=str(REPORT / 'people-reenter.png'), full_page=True)
 
         page.locator('[data-view="places"]').click()
@@ -104,25 +106,46 @@ def main() -> int:
         page.wait_for_selector('#photo-grid', timeout=15000)
         before_h = page.locator('#photo-grid').evaluate('el => el.getBoundingClientRect().height')
         page.locator('[data-ot="sort"]').select_option('date_asc')
-        page.wait_for_timeout(80)
-        updating = page.locator('#photo-grid').evaluate("el => el.classList.contains('is-updating') || el.style.minHeight")
-        page.wait_for_timeout(700)
+        page.wait_for_function("() => { const el=document.querySelector('#photo-grid'); return el && el.classList.contains('is-updating') && parseFloat(el.style.minHeight||'0')>0; }", timeout=4000)
+        page.wait_for_function("() => { const el=document.querySelector('#photo-grid'); return el && !el.classList.contains('is-updating') && !el.style.minHeight; }", timeout=15000)
         after_h = page.locator('#photo-grid').evaluate('el => el.getBoundingClientRect().height')
-        check(before_h >= 0 and after_h >= 0, 'photo grid remains measurable during refresh')
+        check(after_h >= 0, 'photo grid remains measurable after refresh')
+        check(page.locator('#photo-grid').evaluate("el => el.style.minHeight === ''"), 'photo grid min-height cleared after refresh')
 
         page.locator('.photo-card').first.click()
         page.wait_for_selector('#detail-dialog[open]', timeout=15000)
         for _ in range(10):
             page.keyboard.press('ArrowRight')
-        page.wait_for_timeout(400)
-        hidden_mat = page.locator('#photo-mat').evaluate("el => getComputedStyle(el).visibility === 'hidden' && getComputedStyle(el).opacity === '0'")
-        check(not hidden_mat, 'viewer does not hide photo-mat into a black frame while loading')
+            sample = page.locator('#photo-mat').evaluate("el => ({v:getComputedStyle(el).visibility, o:Number(getComputedStyle(el).opacity)})")
+            check(sample['v'] != 'hidden', 'viewer photo-mat stays visible while paging')
+            check(sample['o'] > 0.2, 'viewer photo-mat does not drop to a black frame')
+            page.wait_for_timeout(20)
         page.keyboard.press('Escape')
         page.wait_for_timeout(200)
+
+        page.locator('[data-view="places"]').click()
+        page.wait_for_selector('#places-view:not([hidden])', timeout=15000)
+        page.evaluate("() => window.__ourTimeApp.setView('place:北京')")
+        page.wait_for_function("() => String(window.__ourTimeApp && window.__ourTimeApp.state.view || '').startsWith('place:')", timeout=15000)
+        check(page.locator('#library-view').is_visible(), 'place detail shows library view')
+        check(not page.locator('#places-view').is_visible(), 'place detail hides places overview')
+        check(page.evaluate("() => document.querySelector('#library-view') && document.querySelector('#library-view').classList.contains('is-ready')"), 'place detail transition uses library panel')
+
+        page.locator('#organize-nav summary').click()
+        page.locator('[data-view="excluded"]').click()
+        page.wait_for_timeout(50)
+        page.locator('[data-view="people"]').click()
+        page.wait_for_timeout(700)
+        check(current_view(page) == 'people', 'excluded then people ends on people')
+        check(page.locator('#page-title').inner_text() == '人物档案', 'excluded race does not keep excluded title')
+        check(page.locator('#people-view').is_visible(), 'people view wins over delayed exclusions')
+        check(not page.locator('#library-view').is_visible(), 'library view stays hidden after excluded race')
+        check(page.locator('#exclusion-panel').is_hidden(), 'exclusion panel hidden after leaving excluded')
 
         page.locator('#organize-nav summary').click()
         page.wait_for_timeout(160)
         check(page.locator('#organize-nav').evaluate('el => el.open') is True, 'organize menu opens')
+        check(page.locator('#organize-nav .details-body').count() == 1, 'organize menu has animated body')
         page.locator('#organize-nav summary').click()
         page.wait_for_timeout(160)
 

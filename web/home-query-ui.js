@@ -181,11 +181,11 @@
       if (sameQuery(before.query, query)) return true;
       return runAction(signal => adapter.applyQuery(Object.freeze(query), context(before, signal)));
     }
-    function closePopover(force) {
-      if (busy && !force) return;
-      openKind = '';
-      if (peopleController) peopleController.abort();
-      if (placeController) placeController.abort();
+     function closePopover(force) {
+      if (destroyed) return;
+       openKind = '';
+       if (peopleController) peopleController.abort();
+       if (placeController) placeController.abort();
       peopleController = null; placeController = null;
       popover.hidden = true; popover.replaceChildren();
       if (lastFocus && lastFocus.isConnected && !destroyed) lastFocus.focus({ preventScroll: true });
@@ -200,10 +200,10 @@
       const box = popover.getBoundingClientRect();
       if (box.bottom > window.innerHeight - 12) popover.style.top = Math.max(12, rect.top - box.height - 8) + 'px';
     }
-    function setPopover(kind, anchor, html) {
-      openKind = kind; lastFocus = document.activeElement;
-      popover.innerHTML = html; positionPopover(anchor);
-    }
+     function setPopover(kind, anchor, html) {
+       openKind = kind; lastFocus = document.activeElement;
+       popover.innerHTML = html; positionPopover(anchor);
+     }
     async function loadPeople(q) {
       if (peopleController) peopleController.abort();
       peopleController = new window.AbortController();
@@ -241,7 +241,7 @@
       await applyQuery({ ...s.query, person: next.join(',') }); renderPeople();
     }
     function openPerson(anchor) {
-      setPopover('person', anchor, '<header class="ot-home-pop-header"><strong>人物</strong><button data-ot="close" class="ot-home-icon-button" type="button" aria-label="关闭">' + ICONS.close + '</button></header>'
+      setPopover('person', anchor, '<header class="ot-home-pop-header"><strong>人物</strong><button data-ot="close" class="ot-home-close" type="button" aria-label="关闭筛选">关闭</button></header>'
         + '<label class="ot-home-label"><input data-ot="people-search" type="search" placeholder="搜索姓名或别名" autocomplete="off"></label>'
         + '<div data-ot="people-list" class="ot-home-option-list"></div><p data-ot="people-status" class="ot-home-help"></p>');
       listen(popover.querySelector('[data-ot="close"]'), 'click', () => closePopover());
@@ -292,7 +292,7 @@
     async function openTime(anchor) {
       const s = snapshot();
       timeYear = /^\d{4}-\d{2}/.test(s.query.dateFrom) ? s.query.dateFrom.slice(0, 4) : '';
-      setPopover('time', anchor, '<header class="ot-home-pop-header"><strong>时间</strong><button data-ot="close" class="ot-home-icon-button" type="button" aria-label="关闭">' + ICONS.close + '</button></header><div data-ot="time-list" class="ot-home-option-list"></div>');
+      setPopover('time', anchor, '<header class="ot-home-pop-header"><strong>时间</strong><button data-ot="close" class="ot-home-close" type="button" aria-label="关闭筛选">关闭</button></header><div data-ot="time-list" class="ot-home-option-list"></div>');
       listen(popover.querySelector('[data-ot="close"]'), 'click', () => closePopover());
       listen(popover.querySelector('[data-ot="time-list"]'), 'click', event => {
         const button = event.target.closest('[data-time]'); if (button) void applyTime(button.dataset.time);
@@ -325,7 +325,7 @@
       } catch (error) { if (error.name !== 'AbortError') report(error); }
     }
     function openPlace(anchor) {
-      setPopover('place', anchor, '<header class="ot-home-pop-header"><strong>地点</strong><button data-ot="close" class="ot-home-icon-button" type="button" aria-label="关闭">' + ICONS.close + '</button></header>'
+      setPopover('place', anchor, '<header class="ot-home-pop-header"><strong>地点</strong><button data-ot="close" class="ot-home-close" type="button" aria-label="关闭筛选">关闭</button></header>'
         + '<label class="ot-home-label"><input data-ot="place-search" type="search" placeholder="搜索已有地点" autocomplete="off"></label>'
         + '<div data-ot="place-list" class="ot-home-option-list"></div>');
       listen(popover.querySelector('[data-ot="close"]'), 'click', () => closePopover());

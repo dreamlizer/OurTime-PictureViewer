@@ -29,6 +29,14 @@ def main():
     assert 'body.is-people-view .view-chrome .toolbar > .section-heading { display: none; }' in css
     assert 'resolvePersonLabel' in ui
     assert 'rememberPersonLabel: rememberLabel' in ui
+    assert 'data-ot="close"' in ui
+    assert "if (destroyed) return;" in ui
+    assert '.ot-home-popover .ot-home-close' in css
+    assert "if(view==='places')return $('#places-view');" in app
+    assert "String(view).startsWith('place:'))return $('#places-view')" not in app
+    assert 'function folderNormalize(' in app
+    assert "list.dataset.currentPath=current;" in app
+    assert 'async function loadExclusionRules(viewToken=null)' in app
     assert '__ourTimeRememberPersonLabel' in init
     assert "app.state.personLabels" in init
     assert 'function syncGroupResultCount' in app

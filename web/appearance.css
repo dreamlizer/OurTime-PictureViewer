@@ -692,5 +692,17 @@ dialog::backdrop { background: #162b2466; backdrop-filter: blur(4px); }
 .folder-card.is-active { outline: 2px solid var(--green); }
 dialog.dialog-enter { opacity: 0; transform: scale(.985); }
 dialog.dialog-open { opacity: 1; transform: none; transition: opacity 140ms ease, transform 140ms ease; }
-.nav-organize, .maintain-menu { transition: opacity 120ms ease; }
-.nav-organize[open], .maintain-menu[open] { opacity: 1; }
+.nav-organize { display: grid; grid-template-rows: auto 0fr; transition: grid-template-rows 130ms ease; }
+.nav-organize[open] { grid-template-rows: auto 1fr; }
+.nav-organize > .details-body {
+  min-height: 0; overflow: hidden;
+  opacity: 0; transition: opacity 130ms ease;
+}
+.nav-organize[open] > .details-body { opacity: 1; }
+.maintain-panel {
+  opacity: 0; transform: translateY(4px);
+  pointer-events: none; transition: opacity 130ms ease, transform 130ms ease;
+}
+.maintain-menu[open] .maintain-panel {
+  opacity: 1; transform: none; pointer-events: auto;
+}

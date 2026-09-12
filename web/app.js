@@ -26,7 +26,7 @@ function viewPanel(view=state.view){
   if(view==='people')return $('#people-view');
   if(view==='passersby')return $('#passersby-view');
   if(view==='folders')return $('#folders-view');
-  if(view==='places'||String(view).startsWith('place:'))return $('#places-view');
+  if(view==='places')return $('#places-view');
   if(view==='groups')return $('#groups-view');
   if(view==='years')return $('#timeline-view');
   if(view==='scan')return $('#scan-view');
@@ -65,6 +65,51 @@ function groupTitle(view=state.view){if(String(view).startsWith('group:')){const
 function timelineTitle(view=state.view){if(String(view).startsWith('year:')){const year=view.slice(5);return ['全部照片',year==='unknown'?'时间未记录':year+' 年'];}return ['全部照片','最新的照片在前面。'];}
 function folderDrive(path){const raw=String(path||''); const m=raw.match(/^[A-Za-z]:/); return m?m[0].toUpperCase():'';}
 const FOLDER_ONLY_DRIVE='I:';
+function folderSep(){return String.fromCharCode(92);}
+function isFolderSlash(ch){return ch==='/' || ch===folderSep();}
+function folderNormalize(path){
+  const raw=String(path||'').trim();
+  if(!raw)return '';
+  const sep=folderSep();
+  let value='';
+  for(let i=0;i<raw.length;i++){
+    const ch=raw[i];
+    if(isFolderSlash(ch)){
+      if(!value.endsWith(sep)) value+=sep;
+    }else value+=ch;
+  }
+  if(/^[A-Za-z]:$/.test(value) || (/^[A-Za-z]:$/.test(value.replace(sep,'')) && value.length<=3 && isFolderSlash(value.slice(-1)))){
+    return value[0].toUpperCase()+':'+sep;
+  }
+  if(/^[A-Za-z]:/.test(value)) value=value[0].toUpperCase()+value.slice(1);
+  if(!(/^[A-Za-z]:$/.test(value) || (value.length===3 && /^[A-Za-z]:/.test(value) && isFolderSlash(value[2])))){
+    while(value.length>3 && isFolderSlash(value.slice(-1))) value=value.slice(0,-1);
+  }
+  return value;
+}
+function folderParts(path){
+  const current=folderNormalize(path);
+  if(!current)return [];
+  const parts=[]; let buf='';
+  for(let i=0;i<current.length;i++){
+    const ch=current[i];
+    if(isFolderSlash(ch)){
+      if(buf){parts.push(buf); buf='';}
+    }else buf+=ch;
+  }
+  if(buf) parts.push(buf);
+  return parts;
+}
+function folderKey(path){return folderNormalize(path).toLowerCase();}
+function folderParent(path){
+  const current=folderNormalize(path);
+  if(!current)return '';
+  if(current.length<=3 && /^[A-Za-z]:/.test(current)) return '';
+  const parts=folderParts(current);
+  if(parts.length<=1) return parts[0] ? parts[0]+folderSep() : '';
+  const drive=parts[0].endsWith(':')?parts[0]+folderSep():parts[0];
+  return parts.length===2 ? drive : drive+parts.slice(1,-1).join(folderSep());
+}
 function resetPhotoStream(){waterfall.abort?.abort();waterfall.abort=new AbortController();waterfall.generation++;waterfall.pending.clear();waterfall.cache.clear();waterfall.heights=[];waterfall.total=0;waterfall.maxId=0;waterfall.error=false;waterfall.query=null;streamEntrance.disconnect();$('#photo-grid').replaceChildren();$('#photo-grid').style.height='0px';$('#stream-status').textContent='正在加载照片…';$('#stream-retry').hidden=true;$('#no-results').hidden=true;$('#empty').hidden=true;$('#result-count').textContent='加载中';syncGroupResultCount(state.view,{clear:true});}
 function currentPlaceName(){return String(state.view||'').startsWith('place:')?state.view.slice(6):'';}
 function updatePlaceRefine(){
@@ -126,12 +171,13 @@ async function loadFolderBrowser(path, viewToken=null){
       api('/api/exclusions', {signal:nav.abort.signal})
     ]);
     if(ticket!==nav.generation)return;
+    if(viewToken && !isCurrentView(viewToken, 'folders')) return;
     nav.cache[next]={data,ex};
     nav.parent=data.parent||'';
-    const excluded=new Set((ex.roots||[]).map(r=>(r.path||'').replace(/[/]+$/,'').toLowerCase()));
-    const current=(data.path||'').replace(/[/]+$/,'');
-    const parts=current?current.split(/[/]+/).filter(Boolean):[];
-    const depth=current?parts.length:0;
+    const excluded=new Set((ex.roots||[]).map(r=>folderKey(r.path||'')));
+    const current=folderNormalize(data.path||'');
+    const parts=folderParts(current);
+    const depth=parts.length;
     const up=$('#folders-up'); if(up) up.hidden=!data.path;
     const trail=$('#folders-trail');
     if(trail){
@@ -159,8 +205,9 @@ async function loadFolderBrowser(path, viewToken=null){
       return;
     }
     list.dataset.depth=String(Math.min(depth,3));
+    list.dataset.currentPath=current;
     list.innerHTML=items.map(item=>{
-      const key=(item.path||'').replace(/[/]+$/,'').toLowerCase();
+      const key=folderKey(item.path||'');
       const on=!excluded.has(key) && ![...excluded].some(r=>key===r || key.startsWith(r+slash) || key.startsWith(r+'/'));
       const kind=depth===0?'drive':(depth===1?'folder':(depth===2?'sub':'deep'));
       const label=depth===0?'I 盘':item.name;
@@ -176,7 +223,7 @@ async function loadFolderBrowser(path, viewToken=null){
 async function toggleFolderInclusion(path, include){
   if(include){
     const data=await api('/api/exclusions');
-    const hit=(data.roots||[]).find(r=>(r.path||'').replace(/[\/]+$/,'').toLowerCase()===(path||'').replace(/[\/]+$/,'').toLowerCase());
+    const hit=(data.roots||[]).find(r=>folderKey(r.path||'')===folderKey(path||''));
     if(hit) await api('/api/exclusions/roots/'+hit.id,{method:'DELETE'});
     toast('已重新纳入浏览');
   }else{
@@ -208,7 +255,7 @@ function syncGroupResultCount(view=state.view, {clear=false, total=null}={}){
   el.textContent=fmt(total)+' 张';
   el.hidden=false;
 }
-async function setView(view){if(view==='all')view='timeline';const previousView=state.view;if(previousView==='scan'&&view!=='scan'){state.scanStartedThisVisit=false;state.scanShowCompletedResult=false;}if(view==='scan'&&previousView!=='scan'){state.scanStartedThisVisit=false;state.scanShowCompletedResult=false;}const leavingHome=previousView==='timeline'||String(previousView).startsWith('group:');const enteringHome=view==='timeline'||String(view).startsWith('group:');if(leavingHome&&!enteringHome){state.q='';state.person='';state.directory='';state.place='';state.dateFrom='';state.dateTo='';}if(['people','passersby','scan','places','years','groups','objects'].includes(view)||String(view).startsWith('year:')||String(view).startsWith('place:')||String(view).startsWith('group:'))resetPhotoStream();state.view=view;const viewToken=beginViewChange(view);$('#exclusion-panel').hidden=view!=='excluded';if(view==='excluded')await loadExclusionRules();state.offset=0;state.selected.clear();state.selecting=false;if(view!=='people')setPeopleMerging(false);updateBatch();$$('.nav[data-view]').forEach(el=>el.classList.toggle('active',el.dataset.view===view||(el.dataset.view==='timeline'&&isTimelineView(view))||(el.dataset.view==='places'&&String(view).startsWith('place:'))||(el.dataset.view==='groups'&&isGroupView(view))));const title=titles[view]||(isTimelineView(view)?timelineTitle(view):isGroupView(view)?groupTitle(view):String(view).startsWith('place:')?['按地点',view.slice(6)]:[view,view]);const isGroupDetail=String(view).startsWith('group:');$('#breadcrumb').textContent=title[0];$('#page-title').textContent=currentPageTitle(view,title[1]);const groupsBack=$('#groups-back');if(groupsBack)groupsBack.hidden=!isGroupDetail;syncGroupResultCount(view,{clear:true});const hideLibrary=['people','passersby','scan','years','places','groups','folders'].includes(view) && !isGroupDetail;$('#library-view').hidden=hideLibrary;$('#people-view').hidden=view!=='people';$('#passersby-view').hidden=view!=='passersby';$('#timeline-view').hidden=view!=='years';$('#places-view').hidden=view!=='places';$('#groups-view').hidden=view!=='groups';$('#objects-view').hidden=view!=='objects';$('#scan-view').hidden=view!=='scan';const foldersView=$('#folders-view');if(foldersView)foldersView.hidden=view!=='folders';$('#collection-title').textContent=title[0];updateChrome();updateTimelineTools();updatePlaceRefine();const panel=viewPanel(view);preparePanel(panel);try{if(view==='people'){state.peopleSelected.clear();setPeopleMerging(false);await loadPeople(viewToken);}else if(view==='passersby')await loadPassersby(viewToken);else if(view==='years')await loadTimeline(viewToken);else if(view==='places')await loadPlaces(true,viewToken);else if(view==='groups')await loadGroups(viewToken);else if(view==='objects'){await setView('timeline');return;}else if(view==='folders')await loadFolderBrowser(state.folderPath||'',viewToken);else if(view==='scan'){renderScanRoots();await refreshStatus();}else {if((isTimelineView(view)||String(view).startsWith('group:'))&&!['date_asc','date_desc'].includes(state.sort)){state.sort='date_desc';$('#sort-order').value=state.sort;}await loadPhotos();refreshStatus();}if(isCurrentView(viewToken,view))revealPanel(panel,viewToken);}catch(err){if(!(err&&err.name==='AbortError'))throw err;}}
+async function setView(view){if(view==='all')view='timeline';const previousView=state.view;if(previousView==='scan'&&view!=='scan'){state.scanStartedThisVisit=false;state.scanShowCompletedResult=false;}if(view==='scan'&&previousView!=='scan'){state.scanStartedThisVisit=false;state.scanShowCompletedResult=false;}const leavingHome=previousView==='timeline'||String(previousView).startsWith('group:');const enteringHome=view==='timeline'||String(view).startsWith('group:');if(leavingHome&&!enteringHome){state.q='';state.person='';state.directory='';state.place='';state.dateFrom='';state.dateTo='';}if(['people','passersby','scan','places','years','groups','objects'].includes(view)||String(view).startsWith('year:')||String(view).startsWith('place:')||String(view).startsWith('group:'))resetPhotoStream();state.view=view;const viewToken=beginViewChange(view);$('#exclusion-panel').hidden=view!=='excluded';if(view==='excluded')await loadExclusionRules(viewToken);if(!isCurrentView(viewToken, view))return;state.offset=0;state.selected.clear();state.selecting=false;if(view!=='people')setPeopleMerging(false);updateBatch();$$('.nav[data-view]').forEach(el=>el.classList.toggle('active',el.dataset.view===view||(el.dataset.view==='timeline'&&isTimelineView(view))||(el.dataset.view==='places'&&String(view).startsWith('place:'))||(el.dataset.view==='groups'&&isGroupView(view))));const title=titles[view]||(isTimelineView(view)?timelineTitle(view):isGroupView(view)?groupTitle(view):String(view).startsWith('place:')?['按地点',view.slice(6)]:[view,view]);const isGroupDetail=String(view).startsWith('group:');$('#breadcrumb').textContent=title[0];$('#page-title').textContent=currentPageTitle(view,title[1]);const groupsBack=$('#groups-back');if(groupsBack)groupsBack.hidden=!isGroupDetail;syncGroupResultCount(view,{clear:true});const hideLibrary=['people','passersby','scan','years','places','groups','folders'].includes(view) && !isGroupDetail;$('#library-view').hidden=hideLibrary;$('#people-view').hidden=view!=='people';$('#passersby-view').hidden=view!=='passersby';$('#timeline-view').hidden=view!=='years';$('#places-view').hidden=view!=='places';$('#groups-view').hidden=view!=='groups';$('#objects-view').hidden=view!=='objects';$('#scan-view').hidden=view!=='scan';const foldersView=$('#folders-view');if(foldersView)foldersView.hidden=view!=='folders';$('#collection-title').textContent=title[0];updateChrome();updateTimelineTools();updatePlaceRefine();const panel=viewPanel(view);preparePanel(panel);try{if(view==='people'){state.peopleSelected.clear();setPeopleMerging(false);await loadPeople(viewToken);}else if(view==='passersby')await loadPassersby(viewToken);else if(view==='years')await loadTimeline(viewToken);else if(view==='places')await loadPlaces(true,viewToken);else if(view==='groups')await loadGroups(viewToken);else if(view==='objects'){await setView('timeline');return;}else if(view==='folders')await loadFolderBrowser(state.folderPath||'',viewToken);else if(view==='scan'){renderScanRoots();await refreshStatus();}else {if((isTimelineView(view)||String(view).startsWith('group:'))&&!['date_asc','date_desc'].includes(state.sort)){state.sort='date_desc';$('#sort-order').value=state.sort;}await loadPhotos();refreshStatus();}if(isCurrentView(viewToken,view))revealPanel(panel,viewToken);}catch(err){if(!(err&&err.name==='AbortError'))throw err;}}
 
 async function refreshStatus(){const previous=state.status;const data=await api('/api/status',{timeoutMs:15000});const previousActive=Boolean(previous?.job&&['running','pausing','paused'].includes(previous.job.status));const terminal=Boolean(data.job&&['completed','completed_with_errors','failed'].includes(data.job.status));if(state.view==='scan'&&state.scanStartedThisVisit&&previousActive&&terminal)state.scanShowCompletedResult=true;state.status=data;const s=data.stats;setText('#s-assets',fmt(s.assets));setText('#nav-count',fmt(s.assets));setText('#excluded-count',fmt(s.excluded_assets));if(typeof s.group_photos==='number'&&Number.isFinite(s.group_photos))setText('#groups-count',fmt(s.group_photos));state.connectionNotice=false;setText('#s-people',fmt(s.people));setText('#people-count',fmt(s.people));setText('#s-uncertain',fmt(s.uncertain_dates));setText('#s-duplicates',fmt(s.duplicates));const j=data.job;renderScanStatus(data);const active=j&&['running','pausing'].includes(j.status);const running=$('#running-dot'); if(running) running.className=active?'active':'';setDisabled('#start-scan',Boolean(active)||!state.scanRoots.length||state.scanSubmitting);setHidden('#job-banner',!active);setHtml('#job-banner',active?`<span>● ${statuses[j.status]} · 本轮已检查 ${fmt(j.processed)} 个文件 · ${j.workers} 路 · 新资料读取 ${data.metadata_per_second} 张/秒</span><button class="text-button" id="banner-details">查看进度 →</button>`:'');setText('#job-status',j?statuses[j.status]:'');if(j){setHtml('#job-details',`<div>${esc(JSON.parse(j.roots).join('；'))}</div><div class="job-metrics"><span><b>${fmt(j.discovered)}</b>本轮发现文件</span><span><b>${fmt(j.processed)}</b>本轮已检查</span><span><b>${fmt(j.metadata_reads)}</b>新读取元数据</span><span><b>${fmt(j.skipped)}</b>已完成直接跳过</span><span><b>${fmt(j.errors)}</b>读取问题</span></div><p>${esc(j.message||'正在扫描；已完成文件会快速跳过。')} · ${j.workers} 路处理 · 近一分钟新资料读取 ${data.metadata_per_second} 张/秒 · 略过 ${fmt(j.auxiliary)} 个辅助文件</p><div class="path-line">${esc(j.current_path)}</div>`);setHtml('#job-actions',active?'<button class="secondary" id="pause-scan">暂停扫描</button>':`<button class="secondary" id="resume-scan">${j.status==='paused'?'继续扫描':'按此范围重新扫描'}</button>`);}setHidden('#error-details',!data.errors.length);setText('#error-summary',`读取问题：共 ${fmt(j?.errors)} 项，显示最近 ${data.errors.length} 项`);setHtml('#scan-errors',data.errors.map(e=>`<div class="error-row"><b>${esc(e.stage)}</b><div>${esc(e.path)}</div><div>${esc(readableError(e.message))}</div><details><summary>原始诊断（技术信息）</summary><pre>${esc(e.message)}</pre></details></div>`).join(''));const cap=data.capabilities;setHtml('#capabilities',`人脸模型：${cap.face_model?'已找到 · '+(cap.face_runtime||'处理器')+' 运行':'未找到'}<br>HEIC / HEIF：${cap.heif?'可读取':'尚未安装解码组件，遇到时会记录问题'}<br>扩展元数据：${cap.exiftool?'已就绪 · 常驻进程':'仅基础读取器'}<br>离线地名：${cap.geo?'中文及海外地名数据已就绪':'未找到，保留 GPS 原始坐标'}<br>资料库：${esc(cap.data_dir)}`);if(previousActive&&!active&&terminal){toast(j.message||'扫描结束');if(state.view==='people')await loadPeople();else if(state.view==='passersby')await loadPassersby();else if(!['scan'].includes(state.view))await loadPhotos();}if(j&&!state.scanPrefilled){$('#scan-roots').value=JSON.parse(j.roots).join('\n');$('#scan-workers').value=String(j.workers);state.scanPrefilled=true;}return data;}
 function personLabel(p){if(p.ignored)return p.name||'路人';return p.alias?(p.name||('待命名 '+p.id))+' / '+p.alias:(p.name||('待命名 '+p.id));}
@@ -656,8 +703,9 @@ document.addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&e.tar
 
 
 function bytes(n){return n>=1024*1024?(n/1024/1024).toFixed(1)+' MB':Math.round(n/1024)+' KB';}
-async function loadExclusionRules(){
- const data=await api('/api/exclusions');
+async function loadExclusionRules(viewToken=null){
+ const data=await api('/api/exclusions', viewToken && viewToken.signal ? {signal:viewToken.signal} : {});
+ if(viewToken && !isCurrentView(viewToken, 'excluded')) return;
  $('#excluded-rules').innerHTML=data.roots.length?data.roots.map(r=>`<div class="exclusion-rule"><span>${esc(r.path)}<small>含全部子目录 · ${esc(r.created_at)}</small></span><button class="secondary small" data-restore-root="${r.id}">恢复目录</button></div>`).join(''):'<p class="footnote">还没有目录排除规则。下方显示已排除的档案；缩略图已释放。</p>';
 }
 async function exclusionDialog(ids=null,path=null){

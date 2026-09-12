@@ -154,13 +154,39 @@ function streamPaint(){
 async function loadPhotos(){
  const oldTop=$('#photo-grid').getBoundingClientRect().top;
  waterfall.abort?.abort();waterfall.abort=new AbortController();waterfall.generation++;
- waterfall.pending.clear();waterfall.cache.clear();waterfall.heights=[];waterfall.total=0;waterfall.maxId=0;waterfall.error=false;
+ const ticket=waterfall.generation;
+ const previous={
+  cache:waterfall.cache,
+  heights:waterfall.heights.slice(),
+  total:waterfall.total,
+  maxId:waterfall.maxId,
+  query:waterfall.query
+ };
+ waterfall.pending.clear();waterfall.cache=new Map();waterfall.heights=[];waterfall.total=0;waterfall.maxId=0;waterfall.error=false;
  waterfall.query={q:state.q,filter:state.view,person:state.person,directory:state.directory,sort:state.sort,date_from:state.dateFrom||'',date_to:state.dateTo||'',place:state.place||''};
  waterfall.width=streamMetrics().width;waterfall.columns=streamMetrics().columns;state.offset=0;
  const grid=$('#photo-grid');const keepHeight=Math.max(grid.offsetHeight||0,window.innerHeight*0.45);waterfall.seenPhotos=new Set();streamEntrance.disconnect();grid.classList.add('is-updating');grid.style.minHeight=keepHeight+'px';$('#stream-status').textContent='正在加载照片…';$('#stream-retry').hidden=true;$('#no-results').hidden=true;$('#empty').hidden=true;$('#result-count').textContent='加载中';
  if(typeof syncGroupResultCount==='function') syncGroupResultCount(state.view,{clear:true});
  if(oldTop<0&&!$('#detail-dialog').open)scrollTo({top:scrollY+oldTop-24,behavior:'instant'});
- await streamPage(0);const g=$('#photo-grid');if(g){g.replaceChildren();g.style.height='0px';g.classList.remove('is-updating');}streamPaint();
+ const first=await streamPage(0);
+ if(ticket!==waterfall.generation)return;
+ const g=$('#photo-grid');
+ if(!g)return;
+ if(first){
+  g.replaceChildren();
+  g.style.height='0px';
+  streamPaint();
+  g.style.minHeight='';
+  g.classList.remove('is-updating');
+ }else{
+  waterfall.cache=previous.cache;
+  waterfall.heights=previous.heights;
+  waterfall.total=previous.total;
+  waterfall.maxId=previous.maxId;
+  waterfall.query=previous.query;
+  g.classList.remove('is-updating');
+  g.style.minHeight='';
+ }
 }
 window.addEventListener('scroll',streamScroll,{passive:true});
 new ResizeObserver(()=>streamSchedule()).observe($('#photo-grid'));
