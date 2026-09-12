@@ -34,12 +34,17 @@ def main() -> int:
     REPORT.mkdir(parents=True, exist_ok=True)
     errors: list[str] = []
     list_requests: list[str] = []
+    name_patches: list[str] = []
     fake_cover = {"id": 1}
 
     def route_api(route: Route) -> None:
         request = route.request
         parsed = urlparse(request.url)
         query = parse_qs(parsed.query)
+        if request.method == "PATCH" and parsed.path.startswith("/api/people/"):
+            name_patches.append(parsed.path)
+            route.fulfill(status=200, content_type="application/json", body='{"ok":true}')
+            return
         if request.method == "POST" and parsed.path.endswith("/ignore"):
             route.fulfill(status=200, content_type="application/json", body='{"ok":true,"ignored":true}')
             return
@@ -87,8 +92,12 @@ def main() -> int:
 
         def open_people() -> None:
             page.goto(URL + "/?people-local-test=1", wait_until="domcontentloaded")
+            page.wait_for_selector("#library-view.is-ready", timeout=30000)
             page.locator('[data-view="people"]').click()
-            page.wait_for_selector("#people-view:not([hidden]) #people-grid .person-card", timeout=20000)
+            page.wait_for_function(
+                "state.view==='people' && !state.peopleStream.people.loading && document.querySelectorAll('#people-grid .person-card').length>=3",
+                timeout=30000,
+            )
             page.wait_for_timeout(250)
 
         open_people()
@@ -176,9 +185,77 @@ def main() -> int:
         )
         check(len(list_requests) == before_requests, "合并模式切换不重新请求人物列表")
 
+        for _ in range(8):
+            if page.locator("#people-grid .person-card.person-unnamed").count():
+                break
+            previous = page.locator("#people-grid .person-card").count()
+            page.evaluate("scrollTo(0,document.documentElement.scrollHeight)")
+            page.wait_for_function(
+                "(n)=>document.querySelectorAll('#people-grid .person-card').length>n || !state.peopleStream.people.more",
+                arg=previous,
+                timeout=30000,
+            )
+        unnamed = page.locator("#people-grid .person-card.person-unnamed").first
+        check(unnamed.count() == 1, "人物列表已加载到待命名区域")
+        source_id = int(unnamed.get_attribute("data-person"))
+        unnamed.scroll_into_view_if_needed()
+        page.wait_for_timeout(100)
+        before_scroll = page.evaluate("scrollY")
+        before_cards = page.locator("#people-grid .person-card").count()
+        before_requests = len(list_requests)
+        unnamed.locator(".person-open").click()
+        page.wait_for_selector("#person-dialog[open]", timeout=15000)
+        fake_name = f"滚动位置回归测试-{source_id}"
+        page.locator("#person-name").fill(fake_name)
+        page.locator('#person-form button[type="submit"]').click()
+        page.wait_for_function(
+            "(name)=>document.querySelector('#person-save-state').textContent === `已标记为：${name}`",
+            arg=fake_name,
+        )
+        page.wait_for_timeout(200)
+        after_save_scroll = page.evaluate("scrollY")
+        check(len(name_patches) == 1, "命名写请求已被浏览器拦截，没有修改正式资料库")
+        naming_requests = list_requests[before_requests:]
+        check(
+            not any(
+                parse_qs(urlparse(url).query).get("offset", ["0"]) == ["0"]
+                and parse_qs(urlparse(url).query).get("limit") == ["48"]
+                for url in naming_requests
+            ),
+            "确认姓名后不从第一页重新请求整个人物列表",
+        )
+        check(page.locator("#people-grid .person-card").count() >= before_cards, "确认姓名后不清空或截断已加载人物")
+        check(
+            page.locator(f'#people-grid [data-person="{source_id}"]').evaluate(
+                "(card)=>card.classList.contains('person-named')"
+            ),
+            "刚命名的人物卡片立即切换为已命名状态",
+        )
+        check(
+            page.evaluate(
+                """id => {
+                    const card=document.querySelector(`#people-grid [data-person="${id}"]`);
+                    const divider=document.querySelector('#people-grid .people-section-divider');
+                    return Boolean(card&&divider&&(card.compareDocumentPosition(divider)&Node.DOCUMENT_POSITION_FOLLOWING));
+                }""",
+                source_id,
+            ),
+            "刚命名的人物卡片移动到待命名分界之前",
+        )
+        check(before_scroll > 500 and abs(after_save_scroll - before_scroll) < 5, "确认姓名后人物页保持原滚动位置")
+        page.locator('[data-close="person-dialog"]').click()
+        page.wait_for_function("!document.querySelector('#person-dialog').open")
+        page.wait_for_timeout(100)
+        check(abs(page.evaluate("scrollY") - before_scroll) < 5, "关闭人物详情后仍停留在原浏览位置")
+        page.screenshot(path=str(REPORT / "name-keeps-scroll.png"), full_page=False)
+
         page.reload(wait_until="domcontentloaded")
+        page.wait_for_selector("#library-view.is-ready", timeout=30000)
         page.locator('[data-view="people"]').click()
-        page.wait_for_selector("#people-grid .person-card", timeout=20000)
+        page.wait_for_function(
+            "state.view==='people' && !state.peopleStream.people.loading && document.querySelectorAll('#people-grid .person-card').length>=3",
+            timeout=30000,
+        )
         page.wait_for_timeout(250)
         split_ids = page.locator("#people-grid .person-card").evaluate_all(
             "cards => cards.map(card => Number(card.dataset.person))"
@@ -203,24 +280,26 @@ def main() -> int:
             "cards => cards.map(card => Number(card.dataset.person))"
         )
         check(after_split_ids == split_ids + [FAKE_PERSON_ID], "移出的人物分组只追加到列表末尾")
-        check(
-            page.evaluate(
-                """ids => ids.slice(1).every(id =>
-                    window.__peopleNodeMap.get(id) ===
-                    document.querySelector(`#people-grid [data-person="${id}"]`)
-                )""",
-                split_ids,
-            ),
-            "移出单张脸不会重建或重排其他人物卡片",
+        rebuilt_after_split = page.evaluate(
+            """ids => ids.slice(1).filter(id =>
+                window.__peopleNodeMap.get(id) !==
+                document.querySelector(`#people-grid [data-person="${id}"]`)
+            )""",
+            split_ids,
         )
+        check(not rebuilt_after_split, f"移出单张脸不会重建或重排其他人物卡片：{rebuilt_after_split}")
         check(page.locator("#person-dialog").evaluate("dialog => dialog.open"), "移出后人物详情保持打开")
         check(page.locator("#person-dialog [data-face-id]").count() == before_face_count - 1, "详情中只移除当前人脸")
         check(len(list_requests) == before_requests, "移出后不重新请求整个人物列表")
         page.screenshot(path=str(REPORT / "split-appended.png"), full_page=True)
 
         page.reload(wait_until="domcontentloaded")
+        page.wait_for_selector("#library-view.is-ready", timeout=30000)
         page.locator('[data-view="people"]').click()
-        page.wait_for_selector("#people-grid .person-card", timeout=20000)
+        page.wait_for_function(
+            "state.view==='people' && !state.peopleStream.people.loading && document.querySelectorAll('#people-grid .person-card').length>=3",
+            timeout=30000,
+        )
         page.wait_for_timeout(250)
         ignore_ids = page.locator("#people-grid .person-card").evaluate_all(
             "cards => cards.map(card => Number(card.dataset.person))"

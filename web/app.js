@@ -300,6 +300,27 @@ function patchPersonInStream(id, patch){id=Number(id);const stream=state.peopleS
  function queueNamedPeopleCountRefresh(){clearTimeout(namedPeopleCountTimer);namedPeopleCountTimer=setTimeout(()=>refreshNamedPeopleCount().catch(()=>{}),120);}
  function personCardById(id,kind='people'){const numeric=Number(id);if(!Number.isInteger(numeric)||numeric<1)return null;return document.querySelector(`${personGridSelector(kind)} [data-person="${numeric}"]`);}
  function renderPersonCard(person,kind='people'){kind=personStreamKind(kind);const card=personCardById(person.id,kind);if(!card)return;const wrap=document.createElement('div');wrap.innerHTML=personCard(person,kind);const fresh=wrap.firstElementChild;if(!fresh)return;card.replaceWith(fresh);}
+ function comparePeopleOrder(a,b){return Number(isNamedPerson(b))-Number(isNamedPerson(a))||(Number(b.photo_count)||0)-(Number(a.photo_count)||0)||(Number(a.id)||0)-(Number(b.id)||0);}
+ function placePersonCardInOrder(id,keepScroll=scrollY){
+  id=Number(id);const stream=state.peopleStream&&state.peopleStream.people;const grid=$('#people-grid');
+  if(!stream||!stream.items||!grid)return;
+  const oldIndex=stream.items.findIndex(person=>Number(person.id)===id);const card=personCardById(id);
+  if(oldIndex<0||!card)return;
+  const person=stream.items.splice(oldIndex,1)[0];
+  let newIndex=stream.items.findIndex(other=>comparePeopleOrder(person,other)<0);
+  if(newIndex<0)newIndex=stream.items.length;
+  stream.items.splice(newIndex,0,person);state.people=stream.items;
+  const next=stream.items[newIndex+1];const divider=grid.querySelector('.people-section-divider');
+  let before=next?personCardById(next.id):null;
+  if(isNamedPerson(person)&&(!next||!isNamedPerson(next))&&divider)before=divider;
+  grid.insertBefore(card,before);
+  const firstUnnamed=stream.items.find(other=>!isNamedPerson(other));
+  const firstUnnamedCard=firstUnnamed?personCardById(firstUnnamed.id):null;
+  if(divider&&firstUnnamedCard)grid.insertBefore(divider,firstUnnamedCard);
+  else if(divider&&!firstUnnamed&&!stream.more)divider.remove();
+  scrollTo({top:keepScroll,behavior:'instant'});
+  requestAnimationFrame(()=>scrollTo({top:keepScroll,behavior:'instant'}));
+ }
  function bumpPersonCard(id){const card=personCardById(id);if(card)card.classList.add('named');}
  function removePersonFromLocalState(id,kind='people'){
   kind=personStreamKind(kind);id=Number(id);const stream=state.peopleStream&&state.peopleStream[kind];const card=personCardById(id,kind);
@@ -401,6 +422,7 @@ function applyNamedPersonToOpenPhoto(id,name,alias){
  }
 }
 async function rememberPersonName(id,name,alias){
+ const peopleScroll=scrollY;
  name=normalizePersonText(name);
  alias=normalizePersonText(alias);
  const matches=await api(personNameMatchesUrl(name,alias,id));
@@ -423,7 +445,7 @@ async function rememberPersonName(id,name,alias){
    if(idx>=0)state.peopleStream.people.items[idx]=item;
   }
  }
- if(item)renderPersonCard(item);
+ if(item){renderPersonCard(item);placePersonCardInOrder(id,peopleScroll);}
  bumpPersonCard(id);
  applyNamedPersonToOpenPhoto(id,name,alias);
  if(state.personDetail && Number(state.personDetail.id)===Number(id)){
@@ -431,7 +453,6 @@ async function rememberPersonName(id,name,alias){
   const title=$('#person-title'); if(title) title.textContent=personLabel(state.personDetail);
  }
  queueNamedPeopleCountRefresh();
- if(state.view==='people')await loadPeople();
 }
 function isNamedPerson(p){return Boolean(p&&p.name&&p.name!=='待核对'&&p.confirmed);}
 function personCard(p,mode='people'){
