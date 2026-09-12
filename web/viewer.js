@@ -3,16 +3,55 @@
 // adaptive photo metadata strip. 2026-09-11.
 
 const VIEWER_PREFS_KEY='ourtime.viewer.preferences.v2';
+const FACE_STYLE_PRESETS={
+  ink:{
+    fontSize:14,
+    fontFamily:'kai',
+    textColor:'#f6efe2',
+    backgroundColor:'#1b201c',
+    backgroundOpacity:.48,
+    radius:10,
+    paddingX:8,
+    paddingY:6,
+    shadow:true
+  },
+  paper:{
+    fontSize:14,
+    fontFamily:'fangsong',
+    textColor:'#332d25',
+    backgroundColor:'#eee3cc',
+    backgroundOpacity:.94,
+    radius:0,
+    paddingX:8,
+    paddingY:7,
+    shadow:false
+  },
+  tea:{
+    fontSize:14,
+    fontFamily:'serif',
+    textColor:'#f5ead6',
+    backgroundColor:'#443329',
+    backgroundOpacity:.80,
+    radius:4,
+    paddingX:8,
+    paddingY:7,
+    shadow:true
+  },
+  cinnabar:{
+    fontSize:14,
+    fontFamily:'kai',
+    textColor:'#faead4',
+    backgroundColor:'#753f34',
+    backgroundOpacity:.88,
+    radius:4,
+    paddingX:8,
+    paddingY:7,
+    shadow:true
+  }
+};
 const DEFAULT_FACE_STYLE={
-  fontSize:13,
-  fontFamily:'serif',
-  textColor:'#f6f1e6',
-  backgroundColor:'#141812',
-  backgroundOpacity:.38,
-  radius:4,
-  paddingX:7,
-  paddingY:5,
-  shadow:true
+  theme:'ink',
+  ...FACE_STYLE_PRESETS.ink
 };
 function readViewerPrefs(){
   try{
@@ -121,8 +160,9 @@ function buildFaceStylePopover(){
   pop.innerHTML=`
     <div class="face-style-head"><b>人名标签</b><button type="button" id="face-style-close" aria-label="关闭">×</button></div>
     <div class="face-style-preview"><span id="face-style-preview-label">示例姓名</span></div>
+    <label>风格 <select id="face-theme"><option value="ink">烟墨玻璃</option><option value="paper">宣纸雅笺</option><option value="tea">茶褐书签</option><option value="cinnabar">朱砂印签</option></select></label>
     <label>字号 <output id="face-font-size-value"></output><input id="face-font-size" type="range" min="10" max="22" step="1"></label>
-    <label>字体 <select id="face-font-family"><option value="sans">黑体 / 无衬线</option><option value="serif">宋体 / 衬线</option><option value="kai">楷体</option></select></label>
+    <label>字体 <select id="face-font-family"><option value="sans">黑体 / 无衬线</option><option value="serif">宋体 / 衬线</option><option value="kai">楷体</option><option value="fangsong">仿宋</option></select></label>
     <label>标签位置 <select id="face-label-position"><option value="auto">自动</option><option value="left">优先左侧</option><option value="right">优先右侧</option></select></label>
     <div class="face-style-colors"><label>文字<input id="face-text-color" type="color"></label><label>底色<input id="face-bg-color" type="color"></label></div>
     <label>底色透明度 <output id="face-bg-opacity-value"></output><input id="face-bg-opacity" type="range" min="0" max="90" step="1"></label>
@@ -133,6 +173,7 @@ function buildFaceStylePopover(){
 
   const bind=(id,event,fn)=>{const el=$(id);if(el)el.addEventListener(event,fn);};
   bind('#face-style-close','click',()=>toggleFaceStylePopover(false));
+  bind('#face-theme','change',e=>applyFacePreset(e.target.value));
   bind('#face-font-size','input',e=>updateFaceStyle({fontSize:Number(e.target.value)}));
   bind('#face-font-family','change',e=>updateFaceStyle({fontFamily:e.target.value}));
   bind('#face-label-position','change',e=>{viewer.faceLabelPosition=e.target.value;saveViewerPrefs();if(state.detail)renderFaceNames(state.detail);});
@@ -144,14 +185,27 @@ function buildFaceStylePopover(){
   bind('#face-style-reset','click',()=>{viewer.faceStyle={...DEFAULT_FACE_STYLE};viewer.faceLabelPosition='auto';applyFaceStyle();saveViewerPrefs();if(state.detail)renderFaceNames(state.detail);});
   applyFaceStyle();
 }
+function applyFacePreset(name){
+  const valid=Object.prototype.hasOwnProperty.call(FACE_STYLE_PRESETS,name);
+  const theme=valid?name:'ink';
+  viewer.faceStyle={theme,...FACE_STYLE_PRESETS[theme]};
+  applyFaceStyle();
+  saveViewerPrefs();
+  if(state.detail)requestAnimationFrame(()=>renderFaceNames(state.detail));
+}
 function faceFontStack(kind){
   if(kind==='sans')return '"Microsoft YaHei UI","Microsoft YaHei","PingFang SC","Noto Sans CJK SC",sans-serif';
-  if(kind==='kai')return '"KaiTi","STKaiti","Kaiti SC",serif';
+  if(kind==='kai')return '"KaiTi","STKaiti","Kaiti SC","FZKai-Z03","SimKai",serif';
+  if(kind==='fangsong')return '"FangSong","STFangsong","FangSong_GB2312","Songti SC","STSong","SimSun",serif';
   return '"Iowan Old Style","Palatino Linotype","STSong","SimSun",serif';
 }
 function applyFaceStyle(){
   const root=$('#detail-dialog')||document.documentElement;
   const s=viewer.faceStyle||DEFAULT_FACE_STYLE;
+  const theme=Object.prototype.hasOwnProperty.call(FACE_STYLE_PRESETS,s.theme)?s.theme:'ink';
+  root.dataset.faceTheme=theme;
+  const pop=$('#face-style-popover');
+  if(pop)pop.dataset.faceTheme=theme;
   root.style.setProperty('--face-font-size',`${s.fontSize}px`);
   root.style.setProperty('--face-font-family',faceFontStack(s.fontFamily));
   root.style.setProperty('--face-text-color',s.textColor);
@@ -163,7 +217,8 @@ function applyFaceStyle(){
   root.style.setProperty('--face-padding-y',`${s.paddingY}px`);
   root.style.setProperty('--face-shadow',s.shadow?'0 1px 10px rgba(0,0,0,.65)':'none');
 
-  const fontSize=$('#face-font-size'),family=$('#face-font-family'),position=$('#face-label-position'),text=$('#face-text-color'),bg=$('#face-bg-color'),op=$('#face-bg-opacity'),radius=$('#face-radius'),shadow=$('#face-shadow');
+  const themeSelect=$('#face-theme'),fontSize=$('#face-font-size'),family=$('#face-font-family'),position=$('#face-label-position'),text=$('#face-text-color'),bg=$('#face-bg-color'),op=$('#face-bg-opacity'),radius=$('#face-radius'),shadow=$('#face-shadow');
+  if(themeSelect)themeSelect.value=theme;
   if(fontSize)fontSize.value=String(s.fontSize);
   if(family)family.value=s.fontFamily;
   if(position)position.value=viewer.faceLabelPosition;

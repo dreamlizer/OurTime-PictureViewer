@@ -4,9 +4,16 @@ $dataRoot = Join-Path $projectRoot 'data'
 New-Item -ItemType Directory -Path $dataRoot -Force | Out-Null
 $port = 8765
 $serverUrl = "http://127.0.0.1:$port"
+function Test-OurTimePage {
+    try {
+        $response = Invoke-WebRequest -Uri "$serverUrl/" -UseBasicParsing -TimeoutSec 2
+        return $response.StatusCode -eq 200
+    } catch {
+        return $false
+    }
+}
 try {
-    $running = Invoke-RestMethod "$serverUrl/api/status" -TimeoutSec 2
-    if ($running.capabilities.data_dir -eq $dataRoot) {
+    if (Test-OurTimePage) {
         if ($env:PHOTO_NO_BROWSER -ne '1') { Start-Process $serverUrl }
         exit 0
     }
@@ -26,15 +33,13 @@ $stdoutLog = Join-Path $dataRoot 'server.log'
 $stderrLog = Join-Path $dataRoot 'server-error.log'
 $process = Start-Process -FilePath $pythonExe -ArgumentList @('"' + $appPath + '"', '--port', "$port") -WorkingDirectory $projectRoot -WindowStyle Hidden -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog -PassThru
 $process.Id | Set-Content -LiteralPath (Join-Path $dataRoot 'server.pid') -Encoding ASCII
-for ($attempt=0; $attempt -lt 40; $attempt++) {
+Write-Output "Waiting for $serverUrl ..."
+for ($attempt=0; $attempt -lt 45; $attempt++) {
     Start-Sleep -Milliseconds 500
-    try {
-        $result = Invoke-RestMethod "$serverUrl/api/status" -TimeoutSec 2
-        if ($result.capabilities.data_dir -eq $dataRoot) {
-            if ($env:PHOTO_NO_BROWSER -ne '1') { Start-Process $serverUrl }
-            exit 0
-        }
-    } catch {}
+    if (Test-OurTimePage) {
+        if ($env:PHOTO_NO_BROWSER -ne '1') { Start-Process $serverUrl }
+        exit 0
+    }
     if ($process.HasExited) { break }
 }
 throw "启动失败，请查看 $stderrLog"
