@@ -109,7 +109,11 @@ def init_schema(conn):
             'auxiliary': 'INTEGER NOT NULL DEFAULT 0',
             'metadata_reads': 'INTEGER NOT NULL DEFAULT 0',
         },
-        'people': {'alias': "TEXT NOT NULL DEFAULT ''", 'ignored': 'INTEGER NOT NULL DEFAULT 0'},
+        'people': {
+            'alias': "TEXT NOT NULL DEFAULT ''",
+            'ignored': 'INTEGER NOT NULL DEFAULT 0',
+            'cover_face_id': 'INTEGER',
+        },
         'faces': {'ignored': 'INTEGER NOT NULL DEFAULT 0'},
     }
     for table, columns in migrations.items():

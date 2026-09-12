@@ -89,8 +89,9 @@ PHOTO_DATE_END_SQL = (
 
 def people_select_sql():
     return (
-        "SELECT p.id,p.name,p.alias,p.confirmed,p.ignored,p.suggested_person_id,s.name suggested_name, "
-        "count(f.id) face_count, count(DISTINCT f.asset_id) photo_count, min(f.id) cover "
+        "SELECT p.id,p.name,p.alias,p.confirmed,p.ignored,p.suggested_person_id,p.cover_face_id,s.name suggested_name, "
+        "count(f.id) face_count, count(DISTINCT f.asset_id) photo_count, "
+        "coalesce(max(CASE WHEN f.id=p.cover_face_id THEN f.id END),min(f.id)) cover "
         + "FROM people p JOIN faces f ON f.person_id=p.id "
         + "JOIN assets a ON a.id=f.asset_id "
         + "LEFT JOIN people s ON s.id=p.suggested_person_id"

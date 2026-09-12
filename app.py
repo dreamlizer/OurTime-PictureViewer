@@ -1258,7 +1258,8 @@ def people_matches(name:str='', alias:str='', exclude_id:int=0):
     with db() as c:
         rows=c.execute(
             '''SELECT p.id,p.name,p.alias,p.confirmed,p.ignored,
-                      count(f.id) face_count,count(DISTINCT f.asset_id) photo_count,min(f.id) cover
+                      count(f.id) face_count,count(DISTINCT f.asset_id) photo_count,
+                      coalesce(max(CASE WHEN f.id=p.cover_face_id THEN f.id END),min(f.id)) cover
                FROM people p JOIN faces f ON f.person_id=p.id
                JOIN assets a ON a.id=f.asset_id
                WHERE p.confirmed=1 AND coalesce(p.ignored,0)=0 AND p.id<>? AND '''+ACTIVE_ASSET+'''
@@ -1286,7 +1287,10 @@ def person_detail(pid:int, offset:int=0, limit:int=48):
         active_faces='FROM faces f JOIN assets a ON a.id=f.asset_id WHERE f.person_id=? AND '+ACTIVE_ASSET
         face_count=c.execute('SELECT count(*) '+active_faces,(pid,)).fetchone()[0]
         photo_count=c.execute('SELECT count(DISTINCT f.asset_id) '+active_faces,(pid,)).fetchone()[0]
-        cover=c.execute('SELECT min(f.id) '+active_faces,(pid,)).fetchone()[0]
+        cover=c.execute(
+            'SELECT coalesce(max(CASE WHEN f.id=? THEN f.id END),min(f.id)) '+active_faces,
+            (row['cover_face_id'],pid),
+        ).fetchone()[0]
         page=min(max(limit,1),100)
         start=max(offset,0)
         faces=[dict(x) for x in c.execute(
@@ -1313,6 +1317,31 @@ def name_person(pid:int,body:PersonEdit):
     invalidate_face_index()
     return {'ok':True}
 
+class PersonCoverEdit(BaseModel):
+    face_id:int
+
+@app.put('/api/people/{pid}/cover')
+def set_person_cover(pid:int,body:PersonCoverEdit):
+    with db() as c:
+        person=c.execute('SELECT * FROM people WHERE id=?',(pid,)).fetchone()
+        if not person: raise HTTPException(404,'人物不存在')
+        if not int(person['confirmed'] or 0) or int(person['ignored'] or 0) or not normalize_person_text(person['name']):
+            raise HTTPException(400,'请先给人物确认姓名，再选择首页头像')
+        face=c.execute(
+            'SELECT f.id FROM faces f JOIN assets a ON a.id=f.asset_id '
+            'WHERE f.id=? AND f.person_id=? AND coalesce(f.ignored,0)=0 AND '+ACTIVE_ASSET,
+            (body.face_id,pid),
+        ).fetchone()
+        if not face: raise HTTPException(400,'这张人脸不属于当前人物，或照片已不在资料库中')
+        before=person['cover_face_id']
+        c.execute('UPDATE people SET cover_face_id=? WHERE id=?',(body.face_id,pid))
+        c.execute('INSERT INTO edits(created_at,target,before_json,after_json) VALUES (?,?,?,?)',(
+            now(),f'person:{pid}:cover',
+            json.dumps({'cover_face_id':before},ensure_ascii=False),
+            json.dumps({'cover_face_id':body.face_id},ensure_ascii=False),
+        ))
+    return {'ok':True,'cover':body.face_id}
+
 class MergeRequest(BaseModel):
     target_id:int
 
@@ -1329,6 +1358,8 @@ def merge_person(pid:int,body:MergeRequest):
         if target_ignored and not source_ignored:
             raise HTTPException(400,'请先把路人组恢复为可识别，再合并到日常人物')
         c.execute('UPDATE faces SET person_id=?,reviewed=?,ignored=? WHERE person_id=?',(body.target_id,target['confirmed'],target_ignored,pid))
+        if target['cover_face_id'] is None and source['cover_face_id'] is not None:
+            c.execute('UPDATE people SET cover_face_id=? WHERE id=?',(source['cover_face_id'],body.target_id))
         c.execute('UPDATE people SET suggested_person_id=? WHERE suggested_person_id=?',(body.target_id,pid))
         c.execute('DELETE FROM people WHERE id=?',(pid,))
         c.execute('INSERT INTO edits(created_at,target,before_json,after_json) VALUES (?,?,?,?)',(now(),f'person:{pid}',json.dumps({'person':dict(source),'face_count':old_count},ensure_ascii=False),json.dumps({'merged_into':body.target_id,'moved_faces':old_count})))
@@ -1342,6 +1373,7 @@ def split_face(fid:int):
         if not row: raise HTTPException(404,'人脸不存在')
         pid=c.execute('INSERT INTO people DEFAULT VALUES').lastrowid
         c.execute('UPDATE faces SET person_id=?,reviewed=0,ignored=0 WHERE id=?',(pid,fid))
+        c.execute('UPDATE people SET cover_face_id=NULL WHERE id=? AND cover_face_id=?',(row['person_id'],fid))
         c.execute('INSERT INTO edits(created_at,target,before_json,after_json) VALUES (?,?,?,?)',(
             now(),f'face:{fid}',
             json.dumps({'person_id':row['person_id'],'ignored':row['ignored'],'reviewed':row['reviewed']}),
@@ -1381,6 +1413,7 @@ def ignore_face(fid:int,body:IgnoreRequest):
         if body.ignored:
             pid=c.execute('INSERT INTO people(name,ignored) VALUES (?,1)',('路人',)).lastrowid
             c.execute('UPDATE faces SET person_id=?,ignored=1,reviewed=1 WHERE id=?',(pid,fid))
+            c.execute('UPDATE people SET cover_face_id=NULL WHERE id=? AND cover_face_id=?',(old_person,fid))
             leftover=c.execute('SELECT count(*) FROM faces WHERE person_id=?',(old_person,)).fetchone()[0]
             if leftover==0:
                 c.execute('UPDATE people SET suggested_person_id=NULL WHERE suggested_person_id=?',(old_person,))
@@ -1389,6 +1422,7 @@ def ignore_face(fid:int,body:IgnoreRequest):
         else:
             pid=c.execute('INSERT INTO people DEFAULT VALUES').lastrowid
             c.execute('UPDATE faces SET person_id=?,ignored=0,reviewed=0 WHERE id=?',(pid,fid))
+            c.execute('UPDATE people SET cover_face_id=NULL WHERE id=? AND cover_face_id=?',(old_person,fid))
             leftover=c.execute('SELECT count(*) FROM faces WHERE person_id=?',(old_person,)).fetchone()[0]
             if leftover==0:
                 c.execute('UPDATE people SET suggested_person_id=NULL WHERE suggested_person_id=?',(old_person,))

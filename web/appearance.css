@@ -189,6 +189,8 @@ input:disabled, select:disabled, textarea:disabled { background-color: #e9eeea; 
 #places-view .toolbar > .muted, #groups-view .toolbar > .muted, #objects-view .toolbar > .muted {
   order: 2; flex-basis: 100%; margin: 0; color: var(--muted); line-height: 1.6;
 }
+.people-list-actions { display: flex; align-items: center; gap: 8px; }
+#people-jump-pending[aria-pressed="true"] { background: #e1e9e2; border-color: #aabdaf; color: #315342; }
 .people-grid { grid-template-columns: repeat(auto-fill, minmax(152px, 1fr)); gap: 20px 16px; align-items: stretch; }
 .person-card { width: auto; min-width: 0; padding: 22px 12px 11px; border: 1px solid var(--line); border-radius: 12px; background: #fff; color: var(--ink); }
 .person-card.person-named { background: #e3e8df; border-color: #c9d2c8; }
@@ -211,6 +213,7 @@ input:disabled, select:disabled, textarea:disabled { background-color: #e9eeea; 
   padding: 17px 4px 9px;
   border-top: 1px solid #cbd3c9;
   color: #536054;
+  scroll-margin-top: 136px;
 }
 .people-section-divider span { font: 500 16px/1.4 var(--sans); }
 .people-section-divider small { color: var(--muted); font-size: 11px; }
@@ -374,10 +377,37 @@ dialog::backdrop { background: #162b2466; backdrop-filter: blur(4px); }
 .merge-row select { min-width: 0; width: 160px; max-width: 180px; }
 #merge-person, #show-person-photos, #ignore-person { white-space: nowrap; }
 .person-faces { grid-template-columns: repeat(auto-fill,minmax(135px,1fr)); gap: 20px 14px; }
-.face-item { min-width: 0; }
+.face-item { position: relative; min-width: 0; }
 .face-item img { border-radius: 8px; background: #e9eeea; }
 .face-item button { font-size: 12px; line-height: 1.5; min-height: 32px; padding: 5px; white-space: normal; border-radius: 6px; }
 .face-item button[data-split] { color: var(--danger); }
+.face-item .person-cover-button {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  z-index: 2;
+  width: 28px;
+  min-height: 28px;
+  height: 28px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 1px solid #ffffff73;
+  border-radius: 50%;
+  background: #25392f70;
+  color: #f4f7f2d9;
+  box-shadow: 0 1px 7px #17251f1f;
+  opacity: .72;
+}
+.face-item .person-cover-button svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.7; }
+.face-item .person-cover-button:hover,
+.face-item .person-cover-button:focus-visible { background: #29483a; color: #fff; opacity: 1; }
+.face-item .person-cover-button.is-cover {
+  background: #f2eee1e8;
+  border-color: #fff8df;
+  color: #7d6135;
+  opacity: .94;
+}
 .folder-current { background: #edf3ef; border-radius: 7px; padding: 12px; font-size: 13px; }
 .folder-list { border: 1px solid var(--line); border-radius: 8px; }
 .folder-list button { min-height: 42px; padding: 10px 12px; font-size: 13px; overflow-wrap: anywhere; }

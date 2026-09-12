@@ -1,6 +1,6 @@
 const $=s=>document.querySelector(s);
 const $$=s=>[...document.querySelectorAll(s)];
-const state={view:'timeline',q:'',person:'',place:'',dateFrom:'',dateTo:'',offset:0,total:0,items:[],people:[],passersby:[],selected:new Set(),peopleSelected:new Set(),peopleMerging:false,peopleSort:'photos',personLabels:{},selecting:false,detail:null,personId:null,status:null,folder:null,directory:'',sort:'date_desc',maxId:0,folderTarget:'scan',scanRoots:[],scanSubmitting:false,scanStartedThisVisit:false,scanShowCompletedResult:false,viewGeneration:0,viewAbort:null,folderNav:{generation:0,abort:null,parent:'',cache:{}},placeGeneration:0,placeAbort:null,groupsGeneration:0,timelineGeneration:0,personOpenToken:0,exclusion:null,thumbRevision:0,peopleStream:{people:{items:[],offset:0,total:0,more:true,loading:false,q:'',generation:0},passersby:{items:[],offset:0,total:0,more:true,loading:false,q:'',generation:0}}};
+const state={view:'timeline',q:'',person:'',place:'',dateFrom:'',dateTo:'',offset:0,total:0,items:[],people:[],passersby:[],selected:new Set(),peopleSelected:new Set(),peopleMerging:false,peoplePendingOnly:false,peopleSort:'photos',personLabels:{},selecting:false,detail:null,personId:null,status:null,folder:null,directory:'',sort:'date_desc',maxId:0,folderTarget:'scan',scanRoots:[],scanSubmitting:false,scanStartedThisVisit:false,scanShowCompletedResult:false,viewGeneration:0,viewAbort:null,folderNav:{generation:0,abort:null,parent:'',cache:{}},placeGeneration:0,placeAbort:null,groupsGeneration:0,timelineGeneration:0,personOpenToken:0,exclusion:null,thumbRevision:0,peopleStream:{people:{items:[],offset:0,baseOffset:0,total:0,more:true,loading:false,q:'',generation:0},passersby:{items:[],offset:0,baseOffset:0,total:0,more:true,loading:false,q:'',generation:0}}};
 const titles={all:['全部照片','全部照片'],folders:['文件夹','只看 I 盘。'],people:['人物档案','人物档案'],passersby:['路人','先不识别，以后还能找回来。'],timeline:['全部照片','全部照片'],years:['按年份查看','点某一年，只看那一年。'],places:['按地点','记得那是在哪里。'],objects:['物体','照片里有什么。'],groups:['合影','合影'],uncertain:['待确认时间','给记忆一个时间。'],no_place:['待补充地点','记得那是在哪里吗？'],duplicates:['重复副本','一张照片，多个来处。'],screenshots:['截图与小图','日常的片段，也有位置。'],errors:['读取问题','把未完成的部分看清楚。'],missing:['原文件缺失','寻找照片现在的位置。'],scan:['添加照片','添加照片'],excluded:['已排除','留下值得保存的记忆。']};
 const statuses={running:'正在扫描',pausing:'正在暂停',paused:'已暂停',completed:'已完成',completed_with_errors:'完成，有读取问题',failed:'扫描失败'};
 function setText(sel,value){const el=$(sel); if(el) el.textContent=value;}
@@ -316,6 +316,11 @@ function patchPersonInStream(id, patch){id=Number(id);const stream=state.peopleS
   name.classList.toggle('is-active',!byPhotos);name.setAttribute('aria-pressed',String(!byPhotos));
   name.textContent=state.peopleSort==='name_desc'?'姓名 Z→A':'姓名 A→Z';
  }
+ function syncPeoplePendingButton(){
+  const button=$('#people-jump-pending');if(!button)return;
+  button.textContent=state.peoplePendingOnly?'全部人物':'待命名';
+  button.setAttribute('aria-pressed',String(Boolean(state.peoplePendingOnly)));
+ }
  function placePersonCardInOrder(id,keepScroll=scrollY){
   id=Number(id);const stream=state.peopleStream&&state.peopleStream.people;const grid=$('#people-grid');
   if(!stream||!stream.items||!grid)return;
@@ -337,14 +342,15 @@ function patchPersonInStream(id, patch){id=Number(id);const stream=state.peopleS
   requestAnimationFrame(()=>scrollTo({top:keepScroll,behavior:'instant'}));
  }
  function bumpPersonCard(id){const card=personCardById(id);if(card)card.classList.add('named');}
- function removePersonFromLocalState(id,kind='people'){
+ function removePersonFromLocalState(id,kind='people',preserveTotal=false){
   kind=personStreamKind(kind);id=Number(id);const stream=state.peopleStream&&state.peopleStream[kind];const card=personCardById(id,kind);
   if(card){card.classList.add('removing');card.remove();}
   if(!stream||!stream.items)return Boolean(card);
   const before=stream.items.length;stream.items=stream.items.filter(p=>Number(p.id)!==id);
   if(stream.items.length!==before){
-   if(typeof stream.total==='number'&&stream.total>0)stream.total-=1;
-   stream.offset=stream.items.length;
+   if(preserveTotal&&kind==='people'&&state.peoplePendingOnly)stream.baseOffset=(stream.baseOffset||0)+1;
+   else if(!preserveTotal&&typeof stream.total==='number'&&stream.total>0)stream.total-=1;
+   stream.offset=(stream.baseOffset||0)+stream.items.length;
    state[kind]=stream.items;
   }
   const total=$(personTotalSelector(kind));if(total)total.textContent=kind==='people'?(fmt(stream.total)+' 个分组'):(fmt(stream.total)+' 组路人');
@@ -360,7 +366,7 @@ function patchPersonInStream(id, patch){id=Number(id);const stream=state.peopleS
   if(stream.items.some(p=>Number(p.id)===Number(person.id)))return person;
   stream.items.push(person);
   if(typeof stream.total==='number')stream.total+=1;
-  stream.offset=stream.items.length;
+  stream.offset=(stream.baseOffset||0)+stream.items.length;
   state[kind]=stream.items;
   const grid=$(personGridSelector(kind));
   if(grid){
@@ -460,12 +466,18 @@ async function rememberPersonName(id,name,alias){
    if(idx>=0)state.peopleStream.people.items[idx]=item;
   }
  }
- if(item){renderPersonCard(item);placePersonCardInOrder(id,peopleScroll);}
+ if(item){
+  if(state.peoplePendingOnly)removePersonFromLocalState(id,'people',true);
+  else {renderPersonCard(item);placePersonCardInOrder(id,peopleScroll);}
+ }
  bumpPersonCard(id);
  applyNamedPersonToOpenPhoto(id,name,alias);
  if(state.personDetail && Number(state.personDetail.id)===Number(id)){
   state.personDetail=Object.assign({},state.personDetail,{name,alias,confirmed:1,ignored:0});
   const title=$('#person-title'); if(title) title.textContent=personLabel(state.personDetail);
+  const body=$('.person-body'),top=body?body.scrollTop:0;
+  renderPersonFaces(true);
+  if(body)body.scrollTop=top;
  }
  queueNamedPeopleCountRefresh();
 }
@@ -487,24 +499,24 @@ function peopleCardsHtml(items,kind='people',includeDivider=true){
     return divider+personCard(p,kind);
   }).join('');
 }
-async function fetchPeoplePage(kind, reset=false, viewToken=null){
+async function fetchPeoplePage(kind, reset=false, viewToken=null, startOffset=null){
   const stream=state.peopleStream[kind];
   if((stream.loading&&!reset)||(!reset&&!stream.more))return;
-  if(reset){stream.offset=0;stream.items=[];stream.more=true;const grid=$(kind==='people'?'#people-grid':'#passersby-grid');if(grid){grid.classList.add('is-switching');grid.innerHTML='';}}
+  if(reset){stream.baseOffset=Number.isInteger(startOffset)?Math.max(0,startOffset):0;stream.offset=stream.baseOffset;stream.items=[];stream.more=true;const grid=$(kind==='people'?'#people-grid':'#passersby-grid');if(grid){grid.classList.add('is-switching');grid.innerHTML='';}}
   stream.loading=true;stream.generation++; const ticket=stream.generation;
   const status=$(kind==='people'?'#people-stream-status':'#passersby-stream-status');
   if(status)status.textContent=reset?'正在加载…':'继续加载…';
   try{
     const data=await api(peopleQuery({ignored:kind==='passersby'?1:0,q:stream.q,offset:stream.offset,limit:48,named:kind==='people'&&Boolean(stream.q),sort:kind==='people'?state.peopleSort:'photos'}));
     if(ticket!==stream.generation||(viewToken&&!isCurrentView(viewToken)))return;
-    stream.total=data.total; stream.items=reset?data.items:stream.items.concat(data.items); stream.offset=stream.items.length; stream.more=stream.items.length<data.total;
+    stream.total=data.total; stream.items=reset?data.items:stream.items.concat(data.items); stream.offset=Number(data.offset||0)+(data.items||[]).length; stream.more=stream.offset<data.total;
     const grid=$(kind==='people'?'#people-grid':'#passersby-grid');
     const total=$(kind==='people'?'#people-total':'#passersby-total');
     if(kind==='people')state.people=stream.items; else state.passersby=stream.items;
     if(total)total.textContent=kind==='people'?'':(fmt(stream.total)+' 组路人');
     if(grid){
       grid.classList.remove('is-switching');
-      const html=stream.items.length?peopleCardsHtml(stream.items,kind):`<div class="no-results" style="grid-column:1/-1">${kind==='people'?'还没有人物分组。到“扫描与入库”勾选人脸检测，扫描照片后即可核对和命名。':'还没有标为路人的面孔。'}</div>`;
+      const html=stream.items.length?peopleCardsHtml(stream.items,kind):`<div class="no-results" style="grid-column:1/-1">${kind==='people'?(state.peoplePendingOnly?'目前没有待命名人物。':'还没有人物分组。到“扫描与入库”勾选人脸检测，扫描照片后即可核对和命名。'):'还没有标为路人的面孔。'}</div>`;
       if(reset) grid.innerHTML=html;
       else {
         const existing=new Set([...grid.querySelectorAll('[data-person]')].map(el=>el.dataset.person));
@@ -534,7 +546,25 @@ async function loadPeopleOptions(){
   setNamedPeopleCount(named.total);
   const pc=$('#passersby-count'); if(pc)pc.textContent=fmt(ignored.total);
 }
-async function loadPeople(viewToken=null){state.peopleStream.people.q=($('#people-search')?.value||'').trim();syncPeopleSortButtons();await fetchPeoplePage('people',true,viewToken);loadPeopleOptions();}
+async function loadPeople(viewToken=null){state.peoplePendingOnly=false;syncPeoplePendingButton();state.peopleStream.people.q=($('#people-search')?.value||'').trim();syncPeopleSortButtons();await fetchPeoplePage('people',true,viewToken);loadPeopleOptions();}
+async function togglePendingPeople(){
+ if(state.peoplePendingOnly){
+  await loadPeople();
+  $('#people-view')?.scrollIntoView({block:'start',behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'});
+  return;
+ }
+ setPeopleMerging(false);
+ const search=$('#people-search');if(search)search.value='';
+ const stream=state.peopleStream.people;stream.q='';
+ const named=await api(peopleQuery({named:1,limit:1,sort:state.peopleSort}));
+ state.peoplePendingOnly=true;syncPeoplePendingButton();
+ await fetchPeoplePage('people',true,null,named.total);
+ const divider=$('#people-grid .people-section-divider');
+ if(!divider){toast('目前没有待命名人物');return;}
+ divider.scrollIntoView({block:'start',behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'});
+ const first=divider.nextElementSibling?.querySelector?.('.person-open');
+ if(first)requestAnimationFrame(()=>first.focus({preventScroll:true}));
+}
 async function loadPassersby(viewToken=null){state.peopleStream.passersby.q=($('#passersby-search')?.value||'').trim(); await fetchPeoplePage('passersby',true,viewToken); loadPeopleOptions();}
 async function fillMergeTargets(query, selectedId){
   const ignored=state.personDetail?.ignored?1:0;
@@ -663,7 +693,12 @@ async function loadPlaces(reset=true, viewToken=null){
 }
 function pickMergeTarget(ids,items){const selected=new Set((ids||[]).map(Number));const pool=(items||[]).filter(p=>selected.has(Number(p.id)));if(!pool.length)return null;const rank=(a,b)=>(b.photo_count-a.photo_count)||(a.id-b.id);const named=pool.filter(p=>p.confirmed&&p.name).slice().sort(rank);const rest=pool.slice().sort(rank);const target=named[0]||rest[0];if(target&&target.ignored&&rest.some(p=>!p.ignored))return rest.find(p=>!p.ignored)||null;return target||null;}
 async function resolveMergeTarget(ids){if(!ids.length)throw new Error('请先选择要合并的人物');if(ids.length>100)throw new Error('一次最多选择 100 个人物');const data=await api(peopleQuery({limit:1,ids:ids.join(',')}));const pool=(data.items||[]).filter(p=>ids.includes(p.id));if(!pool.length)throw new Error('没有找到所选人物，请刷新后再试');const target=pickMergeTarget(ids,pool);if(!target)throw new Error('没有可合并的目标');if(!ids.includes(target.id))throw new Error('合并目标必须属于当前选择');return target;}
-function faceItemHtml(f,person){return `<div class="face-item" data-face-id="${f.id}"><img src="/api/face/${f.id}" data-face-photo="${f.asset_id}" alt="点击查看原照片" tabindex="0"><button type="button" class="text-button" data-split="${f.id}">这不是同一个人 · 移出</button><button type="button" class="text-button" data-ignore-face="${f.id}">${person.ignored?'只恢复这张':'这张是路人'}</button></div>`;}
+function faceItemHtml(f,person){
+ const canChooseCover=isNamedPerson(person)&&!person.ignored;
+ const selected=Number(person.cover_face_id)>0&&Number(person.cover_face_id)===Number(f.id);
+ const coverButton=canChooseCover?`<button type="button" class="person-cover-button ${selected?'is-cover':''}" data-set-cover="${f.id}" aria-label="${selected?'当前首页头像':'设为首页头像'}" aria-pressed="${selected?'true':'false'}" title="${selected?'当前首页头像':'设为首页头像'}"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.2"/><path d="M5.5 19c.7-4 3-6 6.5-6s5.8 2 6.5 6"/><path d="M4 4h16v16H4z"/></svg></button>`:'';
+ return `<div class="face-item" data-face-id="${f.id}"><img src="/api/face/${f.id}" data-face-photo="${f.asset_id}" alt="点击查看原照片" tabindex="0">${coverButton}<button type="button" class="text-button" data-split="${f.id}">这不是同一个人 · 移出</button><button type="button" class="text-button" data-ignore-face="${f.id}">${person.ignored?'只恢复这张':'这张是路人'}</button></div>`;
+}
 function updatePersonFaceStatus(){const p=state.personDetail;const status=$('#person-faces-status');if(!status||!p)return;const n=(p.faces||[]).length;const total=p.face_count||n;if(state.personFaces&&state.personFaces.loading){status.hidden=false;status.textContent='正在加载人脸';return;}if(p.more){status.hidden=false;status.textContent='已显示 '+fmt(n)+' / '+fmt(total)+' · 继续下滚加载';return;}status.hidden=!n;status.textContent=n?('已显示全部 '+fmt(total)+' 张人脸'):'';}
 function renderPersonFaces(reset=false, appended=[]){const p=state.personDetail;if(!p)return;const faces=p.faces||[];const grid=$('#person-faces');if(!grid)return;if(reset)grid.innerHTML=faces.map(f=>faceItemHtml(f,p)).join('');else (appended||[]).forEach(f=>{if(!grid.querySelector('[data-face-id="'+f.id+'"]'))grid.insertAdjacentHTML('beforeend',faceItemHtml(f,p));});updatePersonFaceStatus();}
 function maybeLoadMorePersonFaces(){const p=state.personDetail;const body=$('.person-body');if(!p||!p.more||!body)return;if(state.personFaces&&state.personFaces.loading)return;if(body.scrollTop+body.clientHeight>body.scrollHeight-160)loadPersonFaces(false);}
@@ -781,6 +816,7 @@ const personFilterSearch=$('#person-filter-search'); personFilterSearch&&personF
 $('#people-search').addEventListener('input',()=>{clearTimeout(state.peopleSearchTimer);state.peopleSearchTimer=setTimeout(action(()=>loadPeople()),250);});
 $('#people-sort-photos').addEventListener('click',action(async()=>{if(state.peopleSort==='photos')return;state.peopleSort='photos';syncPeopleSortButtons();await loadPeople();}));
 $('#people-sort-name').addEventListener('click',action(async()=>{state.peopleSort=state.peopleSort==='name_asc'?'name_desc':'name_asc';syncPeopleSortButtons();await loadPeople();}));
+$('#people-jump-pending').addEventListener('click',action(()=>togglePendingPeople()));
 $('#places-search').addEventListener('input',()=>{clearTimeout(state.placesSearchTimer);state.placesSearchTimer=setTimeout(action(()=>loadPlaces(true)),250);});
 $('#places-beijing').addEventListener('click',action(async()=>{ensurePlaceMap().setView([BEIJING_VIEW.lat,BEIJING_VIEW.lng],BEIJING_VIEW.zoom);await loadPlaceMap();}));
 $('#places-world').addEventListener('click',action(async()=>{ensurePlaceMap().setView([WORLD_VIEW.lat,WORLD_VIEW.lng],WORLD_VIEW.zoom);await loadPlaceMap();}));
@@ -883,6 +919,31 @@ document.addEventListener('click',action(async e=>{
  }
  const openPersonBtn=e.target.closest('[data-open-person]');
  if(openPersonBtn){await openPerson(Number(openPersonBtn.dataset.openPerson));return;}
+ const coverButton=e.target.closest('[data-set-cover]');
+ if(coverButton){
+  e.preventDefault();e.stopPropagation();
+  const faceId=Number(coverButton.dataset.setCover),personId=Number(state.personId);
+  if(!faceId||!personId)return;
+  coverButton.disabled=true;
+  try{
+   await api('/api/people/'+personId+'/cover',{method:'PUT',body:JSON.stringify({face_id:faceId})});
+   if(state.personDetail&&Number(state.personDetail.id)===personId){
+    state.personDetail.cover=faceId;
+    state.personDetail.cover_face_id=faceId;
+   }
+   const item=patchPersonInStream(personId,{cover:faceId,cover_face_id:faceId});
+   if(item)renderPersonCard(item);
+   $$('#person-faces [data-set-cover]').forEach(button=>{
+    const selected=Number(button.dataset.setCover)===faceId;
+    button.classList.toggle('is-cover',selected);
+    button.setAttribute('aria-pressed',String(selected));
+    button.setAttribute('aria-label',selected?'当前首页头像':'设为首页头像');
+    button.title=selected?'当前首页头像':'设为首页头像';
+   });
+   toast('首页头像已选定');
+  }finally{coverButton.disabled=false;}
+  return;
+ }
  const person=e.target.closest('[data-person]');
  if(person)await openPerson(Number(person.dataset.person));
  const facePhoto=e.target.closest('[data-face-photo]');

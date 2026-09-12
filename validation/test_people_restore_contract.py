@@ -217,6 +217,7 @@ def main() -> int:
             page.wait_for_selector("#detail-dialog[open]")
             page.wait_for_function("document.querySelector('#detail-img').naturalWidth>0")
             page.keyboard.press("Escape")
+            page.wait_for_selector("#detail-dialog", state="hidden")
             page.route("**/api/original/5", lambda route: route.abort())
             page.route("**/api/preview/5*", lambda route: route.abort())
             page.evaluate("openPhoto(5,{q:'',filter:'all',person:'4',directory:'',sort:'date_desc'})")
