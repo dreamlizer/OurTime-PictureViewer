@@ -100,7 +100,7 @@ try:
         page.fill('#edit-date','2012 年夏季');page.select_option('#edit-precision','范围 / 描述');page.fill('#edit-place','北京 · 家庭旅行');page.fill('#edit-notes','仅供验收的测试标注');page.click('#detail-form button[type="submit"]');page.wait_for_function("document.querySelector('#detail-facts').textContent.includes('人工确认')")
         edited=req('/api/photos/'+str(filename['id']));check(edited['manual_date']=='2012 年夏季' and edited['captured_at']=='2012-07-21T12:34:56','真实页面保存大致时间地点，原始时间保持不变')
         page.screenshot(path=str(REPORTS/'03-photo-detail.png'),full_page=True)
-        page.click('[data-close="detail-dialog"]')
+        page.click('[data-close="detail-dialog"]');page.wait_for_function("!document.querySelector('#detail-dialog').open")
         found=req('/api/photos?place=' + urllib.parse.quote('北京 · 家庭旅行') + '&limit=20')
         check(found.get('total')==1 and found['items'][0]['id']==filename['id'],'补录地点可通过独立 place 参数精确筛出')
         page.evaluate("""place => {

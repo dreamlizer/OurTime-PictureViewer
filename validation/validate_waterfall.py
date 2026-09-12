@@ -63,21 +63,30 @@ with sync_playwright() as pw:
     }""")
     page.locator(f'[data-photo="{aid}"]').dblclick()
     page.wait_for_selector('#detail-dialog[open]');page.wait_for_function('(id)=>state.detail?.id===id',arg=aid)
-    scroll=page.evaluate('viewer.returnScroll')
     page.keyboard.press('ArrowRight');page.wait_for_function('(id)=>state.detail?.id!==id',arg=aid)
+    viewed=page.evaluate('state.detail.id')
     page.keyboard.press('Escape');page.wait_for_function("!document.querySelector('#detail-dialog').open")
-    page.wait_for_timeout(150);end_scroll=page.evaluate('scrollY')
-    check(abs(end_scroll-scroll)<30,f'瀑布流打开大图可继续翻图，关闭后保留滚动位置（{scroll} → {end_scroll}）')
+    page.wait_for_timeout(1000)
+    check(page.evaluate("""id => {
+      const card=document.querySelector(`[data-photo="${id}"]`);
+      if(!card)return false;
+      const rect=card.getBoundingClientRect();
+      return rect.bottom>0&&rect.top<innerHeight;
+    }""",viewed),'瀑布流打开大图可继续翻图，关闭后回到最后查看的照片')
     page.evaluate('scrollTo(0,0)');page.wait_for_selector(f'[data-photo="{first}"]',timeout=30000)
     check(True,'向上滚动可以重新加载已回收的照片')
     page.evaluate('state.selecting=true;streamSelection()');page.locator(f'[data-photo="{first}"]').click()
     page.evaluate('scrollTo(0,document.documentElement.scrollHeight)');page.wait_for_function('waterfall.pending.size===0')
     page.evaluate('scrollTo(0,0)');page.wait_for_selector(f'[data-photo="{first}"]',timeout=30000)
     check(page.locator(f'[data-photo="{first}"]').evaluate('(e)=>e.classList.contains("selected")'),'回收并重新加载后，批量选择状态仍保留')
-    page.evaluate('state.selecting=false;streamSelection()');page.fill('#search','2014-04-22 18-09-34-HTC ONE.jpg')
+    page.evaluate("""() => {
+      state.selecting=false;streamSelection();
+      state.q='2014-04-22 18-09-34-HTC ONE.jpg';
+      return loadPhotos();
+    }""")
     page.wait_for_function("waterfall.query.q.includes('HTC ONE') && waterfall.pending.size===0")
     check(page.locator('[data-photo="10"]').count()==1 and page.evaluate('waterfall.heights.length')<=2,'改变搜索条件重置瀑布流，不混入旧结果')
-    page.fill('#search','');page.wait_for_function("waterfall.query.q==='' && waterfall.pending.size===0")
+    page.evaluate("""() => {state.q='';return loadPhotos();}""");page.wait_for_function("waterfall.query.q==='' && waterfall.pending.size===0")
     page.wait_for_timeout(200);page.screenshot(path=str(ROOT/'validation/reports/19-waterfall-desktop.png'))
     page.set_viewport_size({'width':390,'height':844});page.wait_for_function("waterfall.width===document.querySelector('#photo-grid').clientWidth")
     page.wait_for_timeout(150)

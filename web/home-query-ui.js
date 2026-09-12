@@ -4,7 +4,8 @@
   const VERSION = '2.0.0';
   const SORTS = new Map([
     ['date_desc', '最新优先'], ['date_asc', '最早优先'],
-    ['name_asc', '文件名顺序'], ['name_desc', '文件名倒序']
+    ['name_asc', '文件名顺序'], ['name_desc', '文件名倒序'],
+    ['recognized_desc', '已识别人物最多']
   ]);
   const REQUIRED = ['readState', 'applyQuery', 'applySort', 'getPeople',
     'setSelecting', 'selectVisible', 'clearSelection', 'editSelected', 'excludeSelected'];
@@ -149,6 +150,8 @@
       all('sort').value = s.sort;
       const grouped = isGroup(s);
       root.classList.toggle('ot-home-group', grouped);
+      const recognizedSort=all('sort').querySelector('option[value="recognized_desc"]');
+      if(recognizedSort){recognizedSort.hidden=!grouped;recognizedSort.disabled=!grouped;}
       all('place').hidden = grouped; all('folder').hidden = grouped; all('select').hidden = grouped;
       root.querySelector('.ot-home-query').hidden = s.selecting;
       all('batch').hidden = !s.selecting;

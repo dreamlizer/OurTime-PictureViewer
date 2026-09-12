@@ -6,7 +6,7 @@
   'use strict';
   const value = input => input == null ? '' : String(input);
   const fields = ['q', 'person', 'directory', 'place', 'dateFrom', 'dateTo'];
-  const allowedSort = new Set(['date_desc', 'date_asc', 'name_asc', 'name_desc']);
+  const allowedSort = new Set(['date_desc', 'date_asc', 'name_asc', 'name_desc', 'recognized_desc']);
   const same = (a, b) => fields.every(key => value(a[key]) === value(b[key]));
 
   function create(bindings) {
@@ -105,6 +105,7 @@
       },
       applySort(sort, context) {
         if (!allowedSort.has(sort)) return Promise.reject(new Error('不支持的照片排序。'));
+        if (sort === 'recognized_desc' && !scope().startsWith('group:')) return Promise.reject(new Error('这个排序只用于合影。'));
         return update({ sort }, context, 'sort');
       },
       getPeople: context => bindings.getPeople(context),

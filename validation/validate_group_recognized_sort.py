@@ -1,10 +1,13 @@
 """Isolated contract check for the group-photo recognized-people sort."""
 from __future__ import annotations
 
+import argparse
 import json
 import sqlite3
 import sys
 import tempfile
+import urllib.parse
+import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -12,8 +15,11 @@ sys.path.insert(0, str(ROOT))
 
 from browse_queries import fetch_photos
 from library_db import init_schema
+from playwright.sync_api import sync_playwright
 
 REPORT = ROOT / "validation" / "reports" / "group-recognized-sort.json"
+SCREENSHOT = ROOT / "validation" / "reports" / "group-recognized-sort-live.png"
+URL = "http://127.0.0.1:8765"
 
 
 def check(value, message, checks):
@@ -40,7 +46,15 @@ def add_asset(conn, aid, named_people, unnamed_people, captured_at):
         )
 
 
+def request_json(path):
+    with urllib.request.urlopen(URL + path, timeout=30) as response:
+        return json.load(response)
+
+
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--live", action="store_true")
+    args = parser.parse_args()
     checks = []
     with tempfile.TemporaryDirectory(prefix="shiguang-group-sort-") as temp:
         db_path = Path(temp) / "library.sqlite3"
@@ -85,11 +99,61 @@ def main():
 
     html = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
     app = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
-    check('value="recognized_desc"' in html and "data-group-sort" in html, "合影页提供“已识别人物最多”选项", checks)
-    check("groupSort.hidden=!groupDetail" in app, "该排序只在合影详情显示", checks)
+    query_ui = (ROOT / "web" / "home-query-ui.js").read_text(encoding="utf-8")
+    query_bridge = (ROOT / "web" / "home-query-bridge.js").read_text(encoding="utf-8")
+    check(
+        'value="recognized_desc"' in html and "['recognized_desc', '已识别人物最多']" in query_ui,
+        "合影页提供“已识别人物最多”选项",
+        checks,
+    )
+    check(
+        "recognizedSort.hidden=!grouped" in query_ui
+        and "sort === 'recognized_desc' && !scope().startsWith('group:')" in query_bridge
+        and "groupSort.hidden=!groupDetail" in app,
+        "该排序只在合影详情显示",
+        checks,
+    )
+    live = None
+    if args.live:
+        before = request_json("/api/status")
+        query = urllib.parse.urlencode(
+            {"filter": "group:10plus", "sort": "recognized_desc", "limit": 24}
+        )
+        expected = request_json("/api/photos?" + query)
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(channel="chrome", headless=True)
+            page = browser.new_page(viewport={"width": 1500, "height": 1000})
+            errors = []
+            page.on("pageerror", lambda error: errors.append(str(error)))
+            page.goto(URL, wait_until="domcontentloaded")
+            page.evaluate("window.__ourTimeApp.setView('group:10plus')")
+            page.wait_for_selector("#photo-grid .photo-card")
+            option = page.locator('[data-ot="sort"] option[value="recognized_desc"]')
+            check(not option.evaluate("(e)=>e.hidden"), "正式合影详情显示新增排序选项", checks)
+            page.select_option('[data-ot="sort"]', "recognized_desc")
+            page.wait_for_function(
+                "waterfall.query?.sort==='recognized_desc' && waterfall.pending.size===0",
+                timeout=30000,
+            )
+            first_id = int(page.locator("#photo-grid .photo-card").first.get_attribute("data-photo"))
+            check(first_id == expected["items"][0]["id"], "正式页面首张照片与排序接口第一名一致", checks)
+            page.screenshot(path=str(SCREENSHOT), full_page=False)
+            check(not errors, "正式合影排序页面没有 JavaScript 错误", checks)
+            browser.close()
+        after = request_json("/api/status")
+        check(before["capabilities"]["pid"] == after["capabilities"]["pid"], "正式排序复核没有打断后台", checks)
+        live = {
+            "total": expected["total"],
+            "first_id": expected["items"][0]["id"],
+            "top": [
+                [item["recognized_people"], item["visible_faces"]]
+                for item in expected["items"][:10]
+            ],
+            "screenshot": str(SCREENSHOT),
+        }
     REPORT.parent.mkdir(parents=True, exist_ok=True)
     REPORT.write_text(
-        json.dumps({"passed": True, "checks": checks}, ensure_ascii=False, indent=2),
+        json.dumps({"passed": True, "checks": checks, "live": live}, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
     print(json.dumps({"passed": True, "checks": len(checks)}, ensure_ascii=False))
