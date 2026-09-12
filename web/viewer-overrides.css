@@ -85,6 +85,43 @@
   overflow:visible;
   background:transparent;
 }
+#detail-dialog #photo-mat > .viewer-photo-close{
+  position:absolute;
+  top:9px;
+  right:9px;
+  z-index:12;
+  width:30px;
+  height:30px;
+  padding:0;
+  display:grid;
+  place-items:center;
+  border:1px solid rgba(255,255,255,.14);
+  border-radius:50%;
+  background:rgba(19,24,21,.26);
+  color:rgba(255,255,255,.76);
+  box-shadow:0 1px 7px rgba(0,0,0,.12);
+  font:400 22px/1 var(--sans);
+  opacity:.82;
+  transition:background-color 130ms ease,color 130ms ease,opacity 130ms ease;
+}
+#detail-dialog #photo-mat > .viewer-photo-close:hover{
+  background:rgba(19,24,21,.5);
+  color:#fff;
+  opacity:1;
+}
+#detail-dialog #photo-mat > .viewer-photo-close:focus-visible{
+  outline:2px solid rgba(255,255,255,.9);
+  outline-offset:2px;
+  opacity:1;
+}
+#detail-dialog .viewer-heading{
+  justify-content:flex-start;
+}
+#detail-dialog #viewer-position{
+  position:absolute;
+  left:50%;
+  transform:translateX(-50%);
+}
 #detail-dialog #photo-signature{
   display:block !important;
   height:var(--viewer-signature-h);

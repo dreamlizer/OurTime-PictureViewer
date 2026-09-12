@@ -105,10 +105,10 @@
 </section>
  <footer>拾光 <span>·</span> 一张照片，一份可以慢慢补全的记忆。<span class="footer-right">照片与人物信息保存在本机</span></footer>
 </main>
-<dialog aria-label="照片详情" id="detail-dialog" class="hide-info"><div class="dialog-shell"><button class="dialog-close" data-close="detail-dialog" aria-label="关闭">×</button><div class="detail-image">
+<dialog aria-label="照片详情" id="detail-dialog" class="hide-info"><div class="dialog-shell"><div class="detail-image">
  <div class="viewer-heading"><span id="viewer-context"></span><b id="viewer-position" aria-live="polite"></b></div>
  <div class="viewer-body">
-  <div class="viewer-stage"><div id="image-viewport" tabindex="0" aria-label="照片浏览区"><div id="image-canvas"><figure id="photo-mat"><img id="detail-img" alt="照片预览" draggable="false"><div id="face-name-layer" class="face-name-layer" hidden></div><figcaption id="photo-signature"><div class="signature-camera"><span class="signature-seal" aria-hidden="true">拾</span><div><strong id="signature-camera"></strong><small id="signature-format"></small></div></div><div id="signature-settings" class="signature-settings"></div><div class="signature-memory"><strong id="signature-date"></strong><small id="signature-place"></small></div></figcaption></figure></div></div><button id="viewer-prev" class="viewer-arrow left" aria-label="上一张">‹</button><button id="viewer-next" class="viewer-arrow right" aria-label="下一张">›</button></div>
+   <div class="viewer-stage"><div id="image-viewport" tabindex="0" aria-label="照片浏览区"><div id="image-canvas"><figure id="photo-mat"><img id="detail-img" alt="照片预览" draggable="false"><button class="dialog-close viewer-photo-close" data-close="detail-dialog" aria-label="关闭照片">×</button><div id="face-name-layer" class="face-name-layer" hidden></div><figcaption id="photo-signature"><div class="signature-camera"><span class="signature-seal" aria-hidden="true">拾</span><div><strong id="signature-camera"></strong><small id="signature-format"></small></div></div><div id="signature-settings" class="signature-settings"></div><div class="signature-memory"><strong id="signature-date"></strong><small id="signature-place"></small></div></figcaption></figure></div></div><button id="viewer-prev" class="viewer-arrow left" aria-label="上一张">‹</button><button id="viewer-next" class="viewer-arrow right" aria-label="下一张">›</button></div>
   <aside class="viewer-tools" aria-label="浏览操作">
    <button type="button" id="zoom-out" aria-label="缩小">−</button>
    <button type="button" id="zoom-fit">适应</button>
