@@ -22,14 +22,16 @@ async def main():
         await page.wait_for_selector('.stream-entered')
         image = page.locator('.stream-entered img').first
         assert await image.evaluate('(e)=>getComputedStyle(e).opacity') == '0'
-        checks.append('慢速图片请求期间显示占位底色')
+        assert await image.evaluate('(e)=>getComputedStyle(e.parentElement).backgroundColor') == 'rgba(0, 0, 0, 0)'
+        assert await image.evaluate('(e)=>getComputedStyle(e.parentElement,"::after").opacity') == '0'
+        checks.append('慢速图片请求期间只保留透明尺寸，不显示灰色占位框')
         release.set()
         await page.wait_for_function("document.querySelector('.stream-entered.stream-image-ready img')?.naturalWidth > 0")
         await page.wait_for_timeout(500)
         image = page.locator('.stream-entered.stream-image-ready img').first
         assert await image.evaluate('(e)=>getComputedStyle(e).opacity') == '1'
         assert await image.evaluate('(e)=>getComputedStyle(e.parentElement,"::after").opacity') == '0'
-        checks.append('真实缩略图加载后可见且占位底色淡出')
+        checks.append('真实缩略图加载后自然淡入')
         await page.evaluate('scrollTo(0,200)')
         await page.wait_for_timeout(40)
         await page.evaluate('scrollTo(0,1000)')

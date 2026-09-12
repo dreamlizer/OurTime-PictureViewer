@@ -152,6 +152,13 @@ function updateChrome(){
   document.body.classList.toggle('is-sticky-browser-view',stickyBrowserView);
   const namedCount=$('#people-named-count'); if(namedCount) namedCount.hidden=view!=='people';
   document.body.classList.toggle('is-group-query',String(view).startsWith('group:'));
+  const groupDetail=String(view).startsWith('group:');
+  const groupSort=$('#sort-order option[data-group-sort]');
+  if(groupSort)groupSort.hidden=!groupDetail;
+  if(!groupDetail&&state.sort==='recognized_desc'){
+    state.sort='date_desc';
+    if($('#sort-order'))$('#sort-order').value=state.sort;
+  }
   const organizeNav=$('#organize-nav');
   if(organizeNav) organizeNav.open=organize;
   $$('.nav[data-view]').forEach(el=>{
@@ -424,12 +431,25 @@ async function rememberPersonName(id,name,alias){
   const title=$('#person-title'); if(title) title.textContent=personLabel(state.personDetail);
  }
  queueNamedPeopleCountRefresh();
+ if(state.view==='people')await loadPeople();
 }
+function isNamedPerson(p){return Boolean(p&&p.name&&p.name!=='待核对'&&p.confirmed);}
 function personCard(p,mode='people'){
   if(mode==='passersby')return `<article class="person-card" data-person="${p.id}"><button type="button" class="person-open" data-open-person="${p.id}"><img src="/api/face/${p.cover}" alt="路人缩略图" loading="lazy"><b>${esc(p.name||'路人')}</b><p>${p.photo_count} 张照片 · ${p.face_count} 张人脸</p><small>暂不参与人物识别</small></button><button type="button" class="text-button person-restore" data-restore-person="${p.id}">恢复到人物档案</button></article>`;
-  const named=Boolean(p.name && p.name!=='待核对' && p.confirmed);
+  const named=isNamedPerson(p);
   const merging=Boolean(state.peopleMerging);
-  return `<article class="person-card ${state.peopleSelected.has(p.id)?'selected':''}" data-person="${p.id}">${merging?'<label class="person-check"><input type="checkbox" data-select-person="'+p.id+'" '+(state.peopleSelected.has(p.id)?'checked':'')+' aria-label="选择这个人"></label>':''}<button type="button" class="person-open" data-open-person="${p.id}"><img src="/api/face/${p.cover}" alt="人物候选缩略图" loading="lazy"><b>${esc(personLabel(p))}</b><p>${p.photo_count} 张</p></button>${named?'':'<button type="button" class="text-button person-quick-name" data-quick-name="'+p.id+'">命名</button><button type="button" class="text-button person-ignore" data-ignore-person="'+p.id+'">标为路人</button>'}</article>`;
+  return `<article class="person-card ${named?'person-named':'person-unnamed'} ${state.peopleSelected.has(p.id)?'selected':''}" data-person="${p.id}">${merging?'<label class="person-check"><input type="checkbox" data-select-person="'+p.id+'" '+(state.peopleSelected.has(p.id)?'checked':'')+' aria-label="选择这个人"></label>':''}<button type="button" class="person-open" data-open-person="${p.id}"><img src="/api/face/${p.cover}" alt="人物候选缩略图" loading="lazy"><b>${esc(personLabel(p))}</b><p>${p.photo_count} 张</p></button>${named?'':'<button type="button" class="text-button person-quick-name" data-quick-name="'+p.id+'">命名</button><button type="button" class="text-button person-ignore" data-ignore-person="'+p.id+'">标为路人</button>'}</article>`;
+}
+function peopleCardsHtml(items,kind='people',includeDivider=true){
+  if(kind!=='people')return items.map(p=>personCard(p,kind)).join('');
+  let dividerAdded=!includeDivider;
+  return items.map(p=>{
+    const divider=!dividerAdded&&!isNamedPerson(p)
+      ?'<div class="people-section-divider" role="separator"><span>待命名人物</span><small>还需要核对的面孔</small></div>'
+      :'';
+    if(divider)dividerAdded=true;
+    return divider+personCard(p,kind);
+  }).join('');
 }
 async function fetchPeoplePage(kind, reset=false, viewToken=null){
   const stream=state.peopleStream[kind];
@@ -448,12 +468,12 @@ async function fetchPeoplePage(kind, reset=false, viewToken=null){
     if(total)total.textContent=kind==='people'?'':(fmt(stream.total)+' 组路人');
     if(grid){
       grid.classList.remove('is-switching');
-      const html=stream.items.length?stream.items.map(p=>personCard(p,kind)).join(''):`<div class="no-results" style="grid-column:1/-1">${kind==='people'?'还没有人物分组。到“扫描与入库”勾选人脸检测，扫描照片后即可核对和命名。':'还没有标为路人的面孔。'}</div>`;
+      const html=stream.items.length?peopleCardsHtml(stream.items,kind):`<div class="no-results" style="grid-column:1/-1">${kind==='people'?'还没有人物分组。到“扫描与入库”勾选人脸检测，扫描照片后即可核对和命名。':'还没有标为路人的面孔。'}</div>`;
       if(reset) grid.innerHTML=html;
       else {
         const existing=new Set([...grid.querySelectorAll('[data-person]')].map(el=>el.dataset.person));
         const added=stream.items.filter(p=>!existing.has(String(p.id)));
-        if(added.length) grid.insertAdjacentHTML('beforeend', added.map(p=>personCard(p,kind)).join(''));
+        if(added.length)grid.insertAdjacentHTML('beforeend',peopleCardsHtml(added,kind,!grid.querySelector('.people-section-divider')));
       }
     }
     if(status)status.textContent=stream.more?'向下滚动继续加载':(stream.items.length?'已显示全部':'');
@@ -775,7 +795,12 @@ document.addEventListener('click',action(async e=>{
    else if(state.selected.size<1000)state.selected.add(id);
    else toast('一次最多选择 1000 张照片');
    streamSelection();
-  }else await openPhoto(id,currentBrowseContext());
+  }else {
+   const context=currentBrowseContext();
+   const position=Number(photo.dataset.position);
+   if(Number.isInteger(position)&&position>=0)context.position=position;
+   await openPhoto(id,context);
+  }
  }
  const ignorePersonCard=e.target.closest('[data-ignore-person]');
   if(ignorePersonCard){

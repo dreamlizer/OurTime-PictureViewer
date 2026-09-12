@@ -8,19 +8,37 @@ const FACE_LABEL_IMAGES={
     s:'/api/face-label-bg/1.png',
     m:'/api/face-label-bg/2.png',
     l:'/api/face-label-bg/3.png'
+  },
+  tea:{
+    s:'/api/face-label-bg/4.png',
+    m:'/api/face-label-bg/5.png',
+    l:'/api/face-label-bg/6.png'
   }
 };
 const faceLabelThemeReadiness=new Map();
+const TEA_FACE_FONT_OPTIONS=[
+  {value:'ma-shan-zheng',label:'Ma Shan Zheng（默认）'},
+  {value:'long-cang',label:'Long Cang · 龙藏体'},
+  {value:'liu-jian-mao-cao',label:'Liu Jian Mao Cao · 毛草'}
+];
+const TEA_FACE_FONT_KEYS=new Set(TEA_FACE_FONT_OPTIONS.map(option=>option.value));
+const GENERAL_FACE_FONT_OPTIONS=[
+  {value:'sans',label:'黑体 / 无衬线'},
+  {value:'serif',label:'宋体 / 衬线'},
+  {value:'kai',label:'楷体'},
+  {value:'fangsong',label:'仿宋'},
+  {value:'other',label:'其他…'}
+];
 const FACE_STYLE_PRESETS={
   classic:{
     theme:'classic',
     fontSize:13,
-    fontFamily:'serif',
+    fontFamily:'kai',
     textColor:'#f6f1e6',
     backgroundColor:'#141812',
-    backgroundOpacity:.38,
-    radius:4,
-    paddingX:7,
+    backgroundOpacity:.5,
+    radius:10,
+    paddingX:5,
     paddingY:5,
     shadow:true
   },
@@ -28,25 +46,25 @@ const FACE_STYLE_PRESETS={
     theme:'ivory',
     fontSize:15,
     fontFamily:'kai',
-    textColor:'#4b433a',
+    textColor:'#5a2f28',
     backgroundColor:'#ffffff',
-    backgroundOpacity:0,
+    backgroundOpacity:.76,
     radius:0,
     paddingX:0,
     paddingY:0,
     shadow:false
   },
-  outline:{
-    theme:'outline',
-    fontSize:13,
-    fontFamily:'serif',
-    textColor:'#fbf8f0',
-    backgroundColor:'#111410',
-    backgroundOpacity:.18,
-    radius:4,
-    paddingX:8,
-    paddingY:6,
-    shadow:true
+  tea:{
+    theme:'tea',
+    fontSize:16,
+    fontFamily:'ma-shan-zheng',
+    textColor:'#f7ead8',
+    backgroundColor:'#7e624b',
+    backgroundOpacity:.85,
+    radius:0,
+    paddingX:0,
+    paddingY:0,
+    shadow:false
   },
   accent:{
     theme:'accent',
@@ -64,6 +82,20 @@ const FACE_STYLE_PRESETS={
 const DEFAULT_FACE_STYLE={
   ...FACE_STYLE_PRESETS.classic
 };
+const FACE_UNNAMED_MARKERS=new Set(['plus','pulse','ring']);
+const FACE_LABEL_OVERLAP_LIMIT=.12;
+const LEGACY_CLASSIC_FACE_STYLE={
+  theme:'classic',
+  fontSize:13,
+  fontFamily:'serif',
+  textColor:'#f6f1e6',
+  backgroundColor:'#141812',
+  backgroundOpacity:.38,
+  radius:4,
+  paddingX:7,
+  paddingY:5,
+  shadow:true
+};
 function readViewerPrefs(){
   try{
     const raw=localStorage.getItem(VIEWER_PREFS_KEY);
@@ -71,22 +103,33 @@ function readViewerPrefs(){
   }catch(e){return {};}
 }
 const storedViewerPrefs=readViewerPrefs();
-const LEGACY_FACE_THEMES=new Set(['ink','paper','tea','cinnabar']);
+const LEGACY_FACE_THEMES=new Set(['ink','paper','cinnabar']);
 function initialFaceStyle(){
   const stored=storedViewerPrefs.faceStyle;
   if(!stored)return {...DEFAULT_FACE_STYLE};
+  if(stored.theme==='outline')return {...FACE_STYLE_PRESETS.tea};
   if(LEGACY_FACE_THEMES.has(stored.theme))return {...DEFAULT_FACE_STYLE};
+  if(stored.theme==='classic'&&Object.entries(LEGACY_CLASSIC_FACE_STYLE).every(([key,value])=>stored[key]===value)){
+    return {...DEFAULT_FACE_STYLE};
+  }
   const theme=Object.prototype.hasOwnProperty.call(FACE_STYLE_PRESETS,stored.theme)?stored.theme:'classic';
-  return {...FACE_STYLE_PRESETS[theme],...stored,theme};
+  const style={...FACE_STYLE_PRESETS[theme],...stored,theme};
+  if(theme==='tea'&&!TEA_FACE_FONT_KEYS.has(style.fontFamily)){
+    style.fontFamily=FACE_STYLE_PRESETS.tea.fontFamily;
+    delete style.customFontFamily;
+  }
+  return style;
 }
 const viewer={
   ids:[],index:0,target:0,offset:0,total:0,context:null,generation:0,busy:false,
   timer:null,playing:false,scale:1,fit:true,loader:null,drafts:new Map(),window:200,
   returnScroll:undefined,openedPhotoId:null,openedAbsolute:null,openedContext:null,openedWaterfallGeneration:null,exit:null,
+  sequencePromise:null,loadingTimer:null,transitionDirection:0,closingTimer:null,
   faceNames:storedViewerPrefs.faceNames!==false,
   faceAlias:storedViewerPrefs.faceAlias===true,
   faceVertical:storedViewerPrefs.faceVertical!==false,
   faceLabelPosition:['auto','left','right'].includes(storedViewerPrefs.faceLabelPosition)?storedViewerPrefs.faceLabelPosition:'auto',
+  faceUnnamedMarker:FACE_UNNAMED_MARKERS.has(storedViewerPrefs.faceUnnamedMarker)?storedViewerPrefs.faceUnnamedMarker:'plus',
   faceStyle:initialFaceStyle()
 };
 function saveViewerPrefs(){
@@ -96,6 +139,7 @@ function saveViewerPrefs(){
       faceAlias:viewer.faceAlias===true,
       faceVertical:viewer.faceVertical!==false,
       faceLabelPosition:viewer.faceLabelPosition,
+      faceUnnamedMarker:viewer.faceUnnamedMarker,
       faceStyle:viewer.faceStyle,
       slideDelay:Number($('#slide-delay')?.value||storedViewerPrefs.slideDelay||5)
     }));
@@ -177,16 +221,32 @@ function buildFaceStylePopover(){
   pop.id='face-style-popover';pop.className='face-style-popover';pop.hidden=true;
   pop.setAttribute('aria-label','人名标签样式设置');
   pop.innerHTML=`
-    <div class="face-style-head"><b>人名标签</b><button type="button" id="face-style-close" aria-label="关闭">×</button></div>
-    <div class="face-style-preview"><span id="face-style-preview-label">示例姓名</span></div>
-    <label>风格 <select id="face-theme"><option value="classic">原始</option><option value="ivory">素笺</option><option value="outline">线框</option><option value="accent">暗朱</option></select></label>
-    <label class="face-custom-control">字号 <output id="face-font-size-value"></output><input id="face-font-size" type="range" min="10" max="22" step="1"></label>
-    <label class="face-custom-control">字体 <select id="face-font-family"><option value="sans">黑体 / 无衬线</option><option value="serif">宋体 / 衬线</option><option value="kai">楷体</option><option value="fangsong">仿宋</option></select></label>
-    <label>标签位置 <select id="face-label-position"><option value="auto">自动</option><option value="left">优先左侧</option><option value="right">优先右侧</option></select></label>
-    <div class="face-style-colors"><label>文字<input id="face-text-color" type="color"></label><label>底色<input id="face-bg-color" type="color"></label></div>
-    <label class="face-custom-control">底色透明度 <output id="face-bg-opacity-value"></output><input id="face-bg-opacity" type="range" min="0" max="90" step="1"></label>
-    <label class="face-custom-control">圆角 <select id="face-radius"><option value="0">直角</option><option value="4">微圆角</option><option value="10">圆角</option><option value="999">胶囊</option></select></label>
-    <label class="face-shadow-row"><input id="face-shadow" type="checkbox"> 文字阴影（亮背景更清楚）</label>
+    <div class="face-style-head">
+      <div><b>人名标签</b><span>照片中的姓名显示</span></div>
+      <button type="button" id="face-style-close" aria-label="关闭">×</button>
+    </div>
+    <div class="face-style-preview">
+      <span id="face-style-preview-label">示例姓名</span>
+      <small id="face-style-preview-caption">默认 · 实际比例</small>
+    </div>
+    <div class="face-style-group">
+      <div class="face-style-group-title">样式</div>
+      <label class="face-style-field"><span>风格</span><select id="face-theme"><option value="classic">默认</option><option value="ivory">素笺</option><option value="tea">茶棕</option><option value="accent">暗朱</option></select></label>
+      <label class="face-style-field face-custom-control face-range-field"><span>字号</span><output id="face-font-size-value"></output><input id="face-font-size" type="range" min="10" max="22" step="1"></label>
+      <label class="face-style-field face-custom-control"><span>字体</span><select id="face-font-family" aria-describedby="face-font-note"><option value="sans">黑体 / 无衬线</option><option value="serif">宋体 / 衬线</option><option value="kai">楷体</option><option value="fangsong">仿宋</option><option value="other">其他…</option></select><small id="face-font-note" class="face-field-note"></small></label>
+    </div>
+    <div class="face-style-group">
+      <div class="face-style-group-title">布局</div>
+      <label class="face-style-field"><span>标签位置</span><select id="face-label-position"><option value="auto">自动</option><option value="left">优先左侧</option><option value="right">优先右侧</option></select></label>
+      <label class="face-style-field"><span>待命名标记</span><select id="face-unnamed-marker"><option value="plus">默认加号</option><option value="pulse">呼吸绿点</option><option value="ring">静态绿环</option></select></label>
+    </div>
+    <div class="face-style-group">
+      <div class="face-style-group-title">外观</div>
+      <div class="face-style-colors"><label><span>文字</span><input id="face-text-color" type="color" aria-label="文字颜色"></label><label><span>底色</span><input id="face-bg-color" type="color" aria-label="底色"></label></div>
+      <label class="face-style-field face-custom-control face-range-field"><span>底色透明度</span><output id="face-bg-opacity-value"></output><input id="face-bg-opacity" type="range" min="0" max="90" step="1"></label>
+      <label class="face-style-field face-custom-control"><span>圆角</span><select id="face-radius"><option value="0">直角</option><option value="4">微圆角</option><option value="10">圆角</option><option value="999">胶囊</option></select></label>
+      <label class="face-style-field face-shadow-row"><input id="face-shadow" type="checkbox"><span>文字阴影</span><small>亮背景下更清楚</small></label>
+    </div>
     <button type="button" id="face-style-reset" class="face-style-reset">恢复默认</button>`;
   body.appendChild(pop);
 
@@ -194,14 +254,27 @@ function buildFaceStylePopover(){
   bind('#face-style-close','click',()=>toggleFaceStylePopover(false));
   bind('#face-theme','change',e=>applyFacePreset(e.target.value));
   bind('#face-font-size','input',e=>updateFaceStyle({fontSize:Number(e.target.value)}));
-  bind('#face-font-family','change',e=>updateFaceStyle({fontFamily:e.target.value}));
+  bind('#face-font-family','change',e=>{
+    if(e.target.value==='other'){
+      syncFaceFontSelect(e.target,viewer.faceStyle||DEFAULT_FACE_STYLE);
+      openLocalFontDialog();
+      return;
+    }
+    updateFaceStyle({fontFamily:e.target.value});
+  });
   bind('#face-label-position','change',e=>{viewer.faceLabelPosition=e.target.value;saveViewerPrefs();if(state.detail)renderFaceNames(state.detail);});
+  bind('#face-unnamed-marker','change',e=>{
+    viewer.faceUnnamedMarker=FACE_UNNAMED_MARKERS.has(e.target.value)?e.target.value:'plus';
+    applyFaceStyle();
+    saveViewerPrefs();
+  });
   bind('#face-text-color','input',e=>updateFaceStyle({textColor:e.target.value}));
   bind('#face-bg-color','input',e=>updateFaceStyle({backgroundColor:e.target.value}));
   bind('#face-bg-opacity','input',e=>updateFaceStyle({backgroundOpacity:Number(e.target.value)/100}));
   bind('#face-radius','change',e=>updateFaceStyle({radius:Number(e.target.value)}));
   bind('#face-shadow','change',e=>updateFaceStyle({shadow:e.target.checked}));
-  bind('#face-style-reset','click',()=>{viewer.faceStyle={...DEFAULT_FACE_STYLE};viewer.faceLabelPosition='auto';applyFaceStyle();saveViewerPrefs();if(state.detail)renderFaceNames(state.detail);});
+  bind('#face-style-reset','click',()=>{viewer.faceStyle={...DEFAULT_FACE_STYLE};viewer.faceLabelPosition='auto';viewer.faceUnnamedMarker='plus';applyFaceStyle();saveViewerPrefs();if(state.detail)renderFaceNames(state.detail);});
+  buildLocalFontDialog();
   applyFaceStyle();
 }
 function applyFacePreset(name){
@@ -213,11 +286,171 @@ function applyFacePreset(name){
   saveViewerPrefs();
   if(state.detail)requestAnimationFrame(()=>renderFaceNames(state.detail));
 }
-function faceFontStack(kind){
+function customFaceFontStack(family){
+  const clean=String(family||'').replace(/[\u0000-\u001f\u007f]/g,'').trim().slice(0,200);
+  return clean?`${JSON.stringify(clean)},"Microsoft YaHei UI","Microsoft YaHei",sans-serif`:faceFontStack('kai');
+}
+function faceFontStack(kind,customFamily){
+  if(kind==='custom')return customFaceFontStack(customFamily||viewer.faceStyle?.customFontFamily);
+  if(kind==='ma-shan-zheng')return '"Ma Shan Zheng","LXGW WenKai GB Screen","STKaiti","KaiTi",serif';
+  if(kind==='long-cang')return '"Long Cang","LXGW WenKai GB Screen","STKaiti","KaiTi",serif';
+  if(kind==='liu-jian-mao-cao')return '"Liu Jian Mao Cao","LXGW WenKai GB Screen","STKaiti","KaiTi",serif';
   if(kind==='sans')return '"Microsoft YaHei UI","Microsoft YaHei","PingFang SC","Noto Sans CJK SC",sans-serif';
   if(kind==='kai')return '"LXGW WenKai","STKaiti","Kaiti SC","KaiTi",serif';
   if(kind==='fangsong')return '"FangSong","STFangsong","FangSong_GB2312","Songti SC","STSong","SimSun",serif';
   return '"Iowan Old Style","Palatino Linotype","STSong","SimSun",serif';
+}
+function setFaceFontOptions(select,options,key){
+  if(!select||select.dataset.optionSet===key)return;
+  select.replaceChildren(...options.map(item=>{
+    const option=document.createElement('option');
+    option.value=item.value;
+    option.textContent=item.label;
+    return option;
+  }));
+  select.dataset.optionSet=key;
+}
+function syncFaceFontSelect(select,style,theme=style?.theme){
+  if(!select)return;
+  if(theme==='tea'){
+    setFaceFontOptions(select,TEA_FACE_FONT_OPTIONS,'tea');
+    select.value=TEA_FACE_FONT_KEYS.has(style?.fontFamily)?style.fontFamily:FACE_STYLE_PRESETS.tea.fontFamily;
+    return;
+  }
+  setFaceFontOptions(select,GENERAL_FACE_FONT_OPTIONS,'general');
+  let custom=select.querySelector('option[value="custom"]');
+  const family=String(style?.customFontFamily||'').trim();
+  if(style?.fontFamily==='custom'&&family){
+    if(!custom){
+      custom=document.createElement('option');
+      custom.value='custom';
+      select.querySelector('option[value="other"]')?.before(custom);
+    }
+    custom.textContent=`其他 · ${family}`;
+    select.value='custom';
+  }else{
+    custom?.remove();
+    select.value=['sans','serif','kai','fangsong'].includes(style?.fontFamily)?style.fontFamily:'kai';
+  }
+}
+const localFontPicker={all:[],selected:''};
+function buildLocalFontDialog(){
+  if($('#local-font-dialog'))return;
+  const dialog=document.createElement('dialog');
+  dialog.id='local-font-dialog';
+  dialog.className='local-font-dialog';
+  dialog.setAttribute('aria-labelledby','local-font-title');
+  dialog.innerHTML=`
+    <div class="local-font-card">
+      <div class="local-font-head">
+        <div><b id="local-font-title">选择本机字体</b><span>选择后先预览，再应用到人名标签</span></div>
+        <button type="button" id="local-font-close" aria-label="关闭">×</button>
+      </div>
+      <div class="local-font-preview" aria-live="polite">
+        <span id="local-font-preview-label">示例姓名</span>
+        <div><strong id="local-font-preview-name">等待选择字体</strong><small>标签实际效果预览</small></div>
+      </div>
+      <label class="local-font-search-label">搜索字体<input id="local-font-search" type="search" placeholder="输入字体名称"></label>
+      <select id="local-font-list" size="9" aria-label="本机字体列表"></select>
+      <p id="local-font-status" class="local-font-status">正在读取本机字体…</p>
+      <div class="local-font-actions">
+        <button type="button" id="local-font-retry" hidden>重新读取</button>
+        <button type="button" id="local-font-cancel">取消</button>
+        <button type="button" id="local-font-confirm" class="primary" disabled>确定</button>
+      </div>
+    </div>`;
+  document.body.appendChild(dialog);
+  $('#local-font-close').addEventListener('click',()=>dialog.close('cancel'));
+  $('#local-font-cancel').addEventListener('click',()=>dialog.close('cancel'));
+  dialog.addEventListener('cancel',event=>{event.preventDefault();dialog.close('cancel');});
+  dialog.addEventListener('close',()=>toggleFaceStylePopover(true));
+  $('#local-font-search').addEventListener('input',renderLocalFontOptions);
+  $('#local-font-list').addEventListener('change',event=>{
+    localFontPicker.selected=event.target.value;
+    updateLocalFontPreview();
+  });
+  $('#local-font-list').addEventListener('dblclick',()=>{
+    if(localFontPicker.selected)confirmLocalFont();
+  });
+  $('#local-font-retry').addEventListener('click',loadLocalFonts);
+  $('#local-font-confirm').addEventListener('click',confirmLocalFont);
+}
+function localFontPreviewText(){
+  const currentFaces=typeof state!=='undefined'?namedFaces(state.detail):[];
+  return currentFaces[0]?.name||'示例姓名';
+}
+function updateLocalFontPreview(){
+  const family=localFontPicker.selected;
+  const preview=$('#local-font-preview-label');
+  if(preview){
+    preview.textContent=localFontPreviewText();
+    preview.style.fontFamily=customFaceFontStack(family);
+    preview.style.writingMode=faceLabelsVertical()?'vertical-rl':'horizontal-tb';
+    preview.style.textOrientation=faceLabelsVertical()?'upright':'mixed';
+  }
+  if($('#local-font-preview-name'))$('#local-font-preview-name').textContent=family||'等待选择字体';
+  if($('#local-font-confirm'))$('#local-font-confirm').disabled=!family;
+}
+function renderLocalFontOptions(){
+  const list=$('#local-font-list');
+  if(!list)return;
+  const query=String($('#local-font-search')?.value||'').trim().toLocaleLowerCase('zh-CN');
+  const visible=localFontPicker.all.filter(name=>!query||name.toLocaleLowerCase('zh-CN').includes(query));
+  list.replaceChildren(...visible.map(name=>{
+    const option=document.createElement('option');
+    option.value=name;
+    option.textContent=name;
+    option.style.fontFamily=customFaceFontStack(name);
+    return option;
+  }));
+  const preferred=visible.includes(localFontPicker.selected)?localFontPicker.selected:visible[0]||'';
+  localFontPicker.selected=preferred;
+  list.value=preferred;
+  updateLocalFontPreview();
+  if(localFontPicker.all.length&&$('#local-font-status')){
+    $('#local-font-status').textContent=visible.length?`共 ${localFontPicker.all.length} 种字体，当前显示 ${visible.length} 种`:'没有匹配的字体';
+  }
+}
+async function loadLocalFonts(){
+  const status=$('#local-font-status'),retry=$('#local-font-retry'),list=$('#local-font-list');
+  if(status)status.textContent='正在读取本机字体…';
+  if(retry)retry.hidden=true;
+  if(list)list.disabled=true;
+  localFontPicker.all=[];
+  localFontPicker.selected='';
+  updateLocalFontPreview();
+  if(typeof window.queryLocalFonts!=='function'){
+    if(status)status.textContent='当前浏览器不支持读取本机字体。请使用最新版 Chrome 打开拾光。';
+    return;
+  }
+  try{
+    const fonts=await window.queryLocalFonts();
+    localFontPicker.all=[...new Set(fonts.map(font=>String(font.family||'').trim()).filter(Boolean))]
+      .sort((a,b)=>a.localeCompare(b,'zh-CN',{sensitivity:'base'}));
+    if(!localFontPicker.all.length)throw new Error('empty-font-list');
+    const current=viewer.faceStyle?.fontFamily==='custom'?viewer.faceStyle.customFontFamily:'';
+    localFontPicker.selected=localFontPicker.all.includes(current)?current:localFontPicker.all[0];
+    if(list)list.disabled=false;
+    renderLocalFontOptions();
+  }catch(error){
+    console.warn('读取本机字体失败',error);
+    if(status)status.textContent='没有获得本机字体权限。请允许字体访问后点击“重新读取”。';
+    if(retry)retry.hidden=false;
+    if(list)list.disabled=true;
+  }
+}
+function openLocalFontDialog(){
+  buildLocalFontDialog();
+  const dialog=$('#local-font-dialog');
+  if(!dialog)return;
+  $('#local-font-search').value='';
+  dialog.showModal();
+  loadLocalFonts();
+}
+function confirmLocalFont(){
+  if(!localFontPicker.selected)return;
+  updateFaceStyle({fontFamily:'custom',customFontFamily:localFontPicker.selected});
+  $('#local-font-dialog')?.close('confirm');
 }
 function faceLabelProfile(name){
   const normalized=String(name||'').replace(/\s+/g,'');
@@ -249,7 +482,7 @@ function ensureFaceLabelThemeAvailable(theme){
   if(!FACE_LABEL_IMAGES[theme])return;
   faceLabelThemeReady(theme).then(ready=>{
     if(ready||viewer.faceStyle?.theme!==theme)return;
-    console.warn(`人名标签主题 ${theme} 的底图缺失，已恢复原始样式`);
+    console.warn(`人名标签主题 ${theme} 的底图缺失，已恢复默认样式`);
     viewer.faceStyle={...DEFAULT_FACE_STYLE};
     applyFaceStyle();
     saveViewerPrefs();
@@ -260,11 +493,16 @@ function applyFaceStyle(){
   const root=$('#detail-dialog')||document.documentElement;
   const s=viewer.faceStyle||DEFAULT_FACE_STYLE;
   const theme=Object.prototype.hasOwnProperty.call(FACE_STYLE_PRESETS,s.theme)?s.theme:'classic';
+  if(theme==='tea'&&!TEA_FACE_FONT_KEYS.has(s.fontFamily)){
+    s.fontFamily=FACE_STYLE_PRESETS.tea.fontFamily;
+    delete s.customFontFamily;
+  }
   root.dataset.faceTheme=theme;
+  root.dataset.unnamedMarker=FACE_UNNAMED_MARKERS.has(viewer.faceUnnamedMarker)?viewer.faceUnnamedMarker:'plus';
   const pop=$('#face-style-popover');
   if(pop)pop.dataset.faceTheme=theme;
   root.style.setProperty('--face-font-size',`${s.fontSize}px`);
-  root.style.setProperty('--face-font-family',faceFontStack(s.fontFamily));
+  root.style.setProperty('--face-font-family',faceFontStack(s.fontFamily,s.customFontFamily));
   root.style.setProperty('--face-text-color',s.textColor);
   root.style.setProperty('--face-bg-color',s.backgroundColor);
   root.style.setProperty('--face-bg-opacity',String(s.backgroundOpacity));
@@ -278,34 +516,49 @@ function applyFaceStyle(){
     Object.entries(themeImages).forEach(([size,url])=>root.style.setProperty(`--face-label-${size}-image`,`url("${url}")`));
   }
 
-  const themeSelect=$('#face-theme'),fontSize=$('#face-font-size'),family=$('#face-font-family'),position=$('#face-label-position'),text=$('#face-text-color'),bg=$('#face-bg-color'),op=$('#face-bg-opacity'),radius=$('#face-radius'),shadow=$('#face-shadow');
+  const themeSelect=$('#face-theme'),fontSize=$('#face-font-size'),family=$('#face-font-family'),position=$('#face-label-position'),marker=$('#face-unnamed-marker'),text=$('#face-text-color'),bg=$('#face-bg-color'),op=$('#face-bg-opacity'),radius=$('#face-radius'),shadow=$('#face-shadow');
   if(themeSelect)themeSelect.value=theme;
-  if(fontSize)fontSize.value=String(s.fontSize);
-  if(family)family.value=s.fontFamily;
+  if(fontSize){
+    fontSize.min=themeImages?'12':'10';
+    fontSize.max=themeImages?'18':'22';
+    fontSize.value=String(s.fontSize);
+  }
+  syncFaceFontSelect(family,s,theme);
   if(position)position.value=viewer.faceLabelPosition;
+  if(marker)marker.value=root.dataset.unnamedMarker;
   if(text)text.value=s.textColor;
   if(bg)bg.value=s.backgroundColor;
   if(op)op.value=String(Math.round(s.backgroundOpacity*100));
   if(radius)radius.value=String(s.radius);
   if(shadow)shadow.checked=!!s.shadow;
-  const themeLocksCustomStyle=Boolean(themeImages);
+  const imageTheme=Boolean(themeImages);
+  const lockedControls=new Set([text,bg,radius,shadow]);
   [fontSize,family,text,bg,op,radius,shadow].forEach(control=>{
-    if(control)control.disabled=themeLocksCustomStyle;
+    if(!control)return;
+    control.disabled=imageTheme&&(lockedControls.has(control)||(control===family&&theme!=='tea'));
   });
   if(pop){
-    pop.querySelectorAll('.face-custom-control,.face-style-colors,.face-shadow-row').forEach(section=>{
-      section.classList.toggle('is-disabled',themeLocksCustomStyle);
+    [fontSize,family,op,radius].forEach(control=>{
+      control?.closest('label')?.classList.toggle('is-disabled',Boolean(control.disabled));
     });
+    pop.querySelector('.face-style-colors')?.classList.toggle('is-disabled',imageTheme);
+    pop.querySelector('.face-shadow-row')?.classList.toggle('is-disabled',imageTheme);
   }
   if($('#face-font-size-value'))$('#face-font-size-value').textContent=`${s.fontSize}px`;
   if($('#face-bg-opacity-value'))$('#face-bg-opacity-value').textContent=`${Math.round(s.backgroundOpacity*100)}%`;
+  if($('#face-font-note'))$('#face-font-note').textContent=theme==='tea'?'茶棕专用 · 三款本地毛笔字体':family?.disabled?'由当前主题固定':'可选择本机其他字体';
+  if($('#face-style-preview-caption')){
+    const themeName={classic:'默认',ivory:'素笺',tea:'茶棕',accent:'暗朱'}[theme]||'默认';
+    const fontName=theme==='tea'?family?.selectedOptions?.[0]?.textContent?.replace('（默认）','')?.split(' · ')[0]:'实际比例';
+    $('#face-style-preview-caption').textContent=`${themeName} · ${fontName||'实际比例'}`;
+  }
   const preview=$('#face-style-preview-label');
   if(preview){
     const currentFaces=typeof state!=='undefined'?namedFaces(state.detail):[];
     preview.textContent=currentFaces[0]?.name||'示例姓名';
     applyFaceLabelProfile(preview,preview.textContent);
     preview.style.fontSize=themeImages?'':`${s.fontSize}px`;
-    preview.style.fontFamily=themeImages?'':faceFontStack(s.fontFamily);
+    preview.style.fontFamily=themeImages?'':faceFontStack(s.fontFamily,s.customFontFamily);
     preview.style.color=themeImages?'':s.textColor;
     preview.style.backgroundColor=themeImages?'':hexToRgba(s.backgroundColor,s.backgroundOpacity);
     preview.style.borderRadius=themeImages?'':s.radius>=999?'999px':`${s.radius}px`;
@@ -334,10 +587,12 @@ function toggleFaceStylePopover(force){
 function updateToolVisuals(){
   const dir=$('#toggle-face-dir');
   if(dir){
-    const fixedVertical=Boolean(FACE_LABEL_IMAGES[viewer.faceStyle?.theme]);
+    const fixedTheme=viewer.faceStyle?.theme;
+    const fixedVertical=Boolean(FACE_LABEL_IMAGES[fixedTheme]);
     const vertical=faceLabelsVertical();
     dir.innerHTML=vertical?iconSvg.vertical:iconSvg.horizontal;
-    const next=fixedVertical?'素笺使用竖排':vertical?'切换为横排':'切换为竖排';
+    const fixedThemeName=fixedTheme==='ivory'?'素笺':fixedTheme==='tea'?'茶棕':'图片标签';
+    const next=fixedVertical?`${fixedThemeName}使用竖排`:vertical?'切换为横排':'切换为竖排';
     dir.title=next;dir.setAttribute('aria-label',next);
   }
   const play=$('#viewer-play');
@@ -366,24 +621,36 @@ function setViewerLoading(loading){
  if(!dialog)return;
  let indicator=$('#viewer-loading');
  if(!indicator&&stage){indicator=document.createElement('div');indicator.id='viewer-loading';indicator.textContent='加载中…';indicator.setAttribute('aria-live','polite');stage.appendChild(indicator);}
+ clearTimeout(viewer.loadingTimer);viewer.loadingTimer=null;
  dialog.classList.toggle('is-loading',Boolean(loading));
- if(indicator)indicator.hidden=!loading;
+ const hasVisibleImage=Boolean(img&&!img.hidden&&img.getAttribute('src'));
+ dialog.classList.toggle('is-switching',Boolean(loading&&hasVisibleImage));
+ if(indicator)indicator.hidden=true;
  if(loading){
-  clearViewerImage();
-  if(signature){signature.hidden=true;signature.replaceChildren();}
-  if(faces){faces.hidden=true;faces.replaceChildren();}
+  if(!hasVisibleImage&&indicator)viewer.loadingTimer=setTimeout(()=>{if(dialog.classList.contains('is-loading'))indicator.hidden=false;},100);
   viewerMessage('');
  }else{
   if(img)img.hidden=!img.getAttribute('src');
   if(signature)signature.hidden=!signature.childElementCount;
+  dialog.classList.remove('is-switching');
  }
 }
 function viewerImageFailed(message){
- clearViewerImage();
+ const img=$('#detail-img');
+ if(!img||img.hidden||!img.getAttribute('src'))clearViewerImage();
  setViewerLoading(false);
  viewerMessage(message);
 }
 function waitViewerFrames(count=2){return new Promise(resolve=>{const next=()=>count--<=0?resolve():requestAnimationFrame(next);next();});}
+function closePhotoViewer(){
+ const dialog=$('#detail-dialog');
+ if(!dialog||!dialog.open)return;
+ clearTimeout(viewer.closingTimer);
+ if(matchMedia('(prefers-reduced-motion: reduce)').matches){dialog.close();return;}
+ dialog.classList.add('viewer-closing');
+ viewer.closingTimer=setTimeout(()=>{if(dialog.open)dialog.close();},150);
+}
+globalThis.closePhotoViewer=closePhotoViewer;
 function stopSlides(){viewer.playing=false;clearTimeout(viewer.timer);viewer.timer=null;syncViewerTools();}
 function pressTool(id, on){const el=$(id); if(!el)return; el.setAttribute('aria-pressed', String(!!on));}
 function syncViewerTools(){
@@ -404,25 +671,57 @@ function updatePosition(){
  $('#viewer-prev').disabled=absolute<=0;$('#viewer-next').disabled=absolute>=(viewer.total||viewer.ids.length)-1;
  $('#viewer-context').textContent=contextLabel(viewer.context||{});
 }
+function signatureModeForWidth(width){
+ const w=Number(width)||0;
+ return w>=980?'wide':w>=620?'medium':'narrow';
+}
+function signatureHeightForMode(mode){
+ return mode==='narrow'?96:mode==='medium'?86:68;
+}
+function applySignatureMode(mode){
+ const dialog=$('#detail-dialog');
+ if(!dialog)return 0;
+ const height=signatureHeightForMode(mode);
+ dialog.dataset.signatureMode=mode;
+ dialog.style.setProperty('--viewer-signature-h',height+'px');
+ return height;
+}
+function currentSignatureHeight(){
+ const dialog=$('#detail-dialog'),signature=$('#photo-signature');
+ if(!signature||signature.hidden)return 0;
+ return Number.parseFloat(getComputedStyle(dialog||document.documentElement).getPropertyValue('--viewer-signature-h'))||68;
+}
 function updateZoom(reset=false){
  const img=$('#detail-img'),area=$('#image-viewport'),mat=$('#photo-mat');if(!img.naturalWidth)return;
  const signature=$('#photo-signature');
- const signatureHeight=signature&&!signature.hidden?Number(getComputedStyle(document.documentElement).getPropertyValue('--viewer-signature-h').replace('px',''))||68:0;
- if(viewer.fit){
-  const width=Math.max(40, area.clientWidth);
-  const height=Math.max(40, area.clientHeight-signatureHeight);
-  viewer.scale=Math.max(.01, Math.min(width/img.naturalWidth, height/img.naturalHeight));
- }
- const w=Math.max(1,Math.round(img.naturalWidth*viewer.scale));
- const h=Math.max(1,Math.round(img.naturalHeight*viewer.scale));
- mat.classList.toggle('compact-signature',w<560);
- area.classList.toggle('zoomed', !viewer.fit);
- mat.style.width=w+'px';
- img.style.width=w+'px';
- img.style.height=h+'px';
- $('#zoom-level').textContent=Math.round(viewer.scale*100)+'%';
- if(reset){area.scrollTop=0;area.scrollLeft=0;}
- if(state.detail && viewer.faceNames!==false) requestAnimationFrame(()=>renderFaceNames(state.detail));
+  let w=0,h=0;
+  for(let pass=0;pass<2;pass++){
+   const signatureHeight=currentSignatureHeight();
+   if(viewer.fit){
+    const width=Math.max(40,area.clientWidth);
+    const height=Math.max(40,area.clientHeight-signatureHeight);
+    viewer.scale=Math.max(.01,Math.min(width/img.naturalWidth,height/img.naturalHeight));
+   }
+   w=Math.max(1,Math.round(img.naturalWidth*viewer.scale));
+   h=Math.max(1,Math.round(img.naturalHeight*viewer.scale));
+   const mode=signatureModeForWidth(w);
+   const nextHeight=signature&&!signature.hidden?signatureHeightForMode(mode):0;
+   if(!signature||signature.hidden||nextHeight===signatureHeight){
+    if(signature&&!signature.hidden)applySignatureMode(mode);
+    break;
+   }
+   applySignatureMode(mode);
+  }
+  w=Math.max(1,Math.round(img.naturalWidth*viewer.scale));
+  h=Math.max(1,Math.round(img.naturalHeight*viewer.scale));
+  if(signature&&!signature.hidden)applySignatureMode(signatureModeForWidth(w));
+  area.classList.toggle('zoomed',!viewer.fit);
+  mat.style.width=w+'px';
+  img.style.width=w+'px';
+  img.style.height=h+'px';
+  $('#zoom-level').textContent=Math.round(viewer.scale*100)+'%';
+  if(reset){area.scrollTop=0;area.scrollLeft=0;}
+  if(state.detail&&viewer.faceNames!==false)requestAnimationFrame(()=>renderFaceNames(state.detail));
 }
 function renderSignature(a,file){
  const signature=$('#photo-signature');if(!signature)return;
@@ -452,30 +751,30 @@ function renderSignature(a,file){
  const filename=file?.path?basename(file.path):'';
  const hasMemory=Boolean(shownDate||place);
  const hasCapture=Boolean(camera||exposure.length);
-
- const mainValue=shownDate||place||(hasCapture?(camera||'拍摄信息'):(filename||'图片'));
- const mainKind=shownDate?timeKind:(!hasMemory&&!hasCapture?'基础文件信息':(!shownDate&&place?'地点':''));
- const placeMarkup=shownDate&&place?`<span id="signature-place" class="signature-place">${esc(place)}</span>`:'';
- const inlineMarkup=!hasMemory&&hasCapture&&exposure.length?`<span id="signature-primary-inline" class="signature-inline">${exposure.map(esc).join(' · ')}</span>`:'';
- const secondaryBits=hasMemory?[camera,...exposure].filter(Boolean):basics;
- const rightBits=hasMemory?basics:[];
- const secondaryMarkup=secondaryBits.map(v=>`<span>${esc(v)}</span>`).join('');
- const rightMarkup=rightBits.join(' · ');
+ const hasFile=basics.length>0;
+ const exposureMarkup=exposure.map(value=>`<span class="signature-exposure-token">${esc(value)}</span>`).join('');
+ const fileMarkup=basics.map((value,index)=>`<span class="signature-file-token ${index===0&&dimensions?'signature-dimensions':index===1&&format?'signature-format-token':'signature-size-token'}">${esc(value)}</span>`).join('');
+ const placeMarkup=place?`<span id="signature-place" class="signature-place" title="${esc(place)}">${esc(place)}</span>`:'';
+ const title=[shownDate&&`${timeKind}：${rawDate}`,place&&`地点：${place}`,camera&&`设备：${camera}`,exposure.join(' · '),basics.join(' · '),filename&&`文件名：${filename}`].filter(Boolean).join('\n');
 
  signature.innerHTML=`
-  <div class="signature-v2">
-   <span class="signature-seal-v2" aria-hidden="true">拾</span>
-   <div id="signature-primary" class="signature-primary">
-    <strong id="signature-primary-value">${esc(mainValue)}</strong>
-    <small id="signature-primary-kind"${mainKind?'':' hidden'}>${esc(mainKind)}</small>
+  <div class="signature-v3 ${hasMemory?'has-memory':''} ${hasCapture?'has-capture':''} ${hasFile?'has-file':''}" data-has-memory="${hasMemory}" data-has-capture="${hasCapture}" data-has-file="${hasFile}">
+   <span class="signature-seal-v3" aria-hidden="true">拾</span>
+   <div id="signature-primary" class="signature-memory"${hasMemory?'':' hidden'}>
+    <div class="signature-memory-main">
+     <strong id="signature-primary-value" class="signature-date"${shownDate?'':' hidden'}>${esc(shownDate)}</strong>
+     <small id="signature-primary-kind"${shownDate?'':' hidden'}>${esc(timeKind)}</small>
+    </div>
     ${placeMarkup}
-    ${inlineMarkup}
    </div>
-   <div id="signature-settings" class="signature-secondary"${secondaryBits.length?'':' hidden'}>${secondaryMarkup}</div>
-   <div id="signature-format" class="signature-file"${rightBits.length?'':' hidden'}>${esc(rightMarkup)}</div>
+   <div id="signature-settings" class="signature-capture"${hasCapture?'':' hidden'}>
+    ${camera?`<span class="signature-camera" title="${esc(camera)}">${esc(camera)}</span>`:''}
+    ${exposure.length?`<div class="signature-exposure">${exposureMarkup}</div>`:''}
+   </div>
+   <div id="signature-format" class="signature-file"${hasFile?'':' hidden'}>${fileMarkup}</div>
   </div>`;
  signature.hidden=false;
- signature.title=[shownDate&&`${timeKind}：${rawDate}`,place&&`地点：${place}`,camera&&`设备：${camera}`,exposure.join(' · '),basics.join(' · ')].filter(Boolean).join('\n');
+ signature.title=title;
 }
 function namedFaces(photo){return (photo&&photo.faces||[]).filter(f=>f.name&&!f.ignored);}
 function visibleFaces(photo){return (photo&&photo.faces||[]).filter(f=>!f.ignored);}
@@ -504,16 +803,14 @@ function faceLabelText(face, alias){
   if(face.name) return alias&&face.alias?(face.name+' / '+face.alias):face.name;
   return '+';
 }
-function rectsOverlap(a,b,gap=6){
-  return a.x<b.x+b.w+gap && a.x+a.w+gap>b.x && a.y<b.y+b.h+gap && a.y+a.h+gap>b.y;
-}
 function rectOverlapArea(a,b){
  const w=Math.max(0,Math.min(a.x+a.w,b.x+b.w)-Math.max(a.x,b.x));
  const h=Math.max(0,Math.min(a.y+a.h,b.y+b.h)-Math.max(a.y,b.y));
  return w*h;
 }
-function rectOverflow(rect,layerW,layerH,pad=4){
- return Math.max(0,pad-rect.x)+Math.max(0,pad-rect.y)+Math.max(0,rect.x+rect.w-(layerW-pad))+Math.max(0,rect.y+rect.h-(layerH-pad));
+function rectOverlapRatio(a,b){
+ const smaller=Math.min(Math.max(1,a.w*a.h),Math.max(1,b.w*b.h));
+ return rectOverlapArea(a,b)/smaller;
 }
 function faceLabelDistance(rect,item){
  const dx=Math.max(item.fx-(rect.x+rect.w),rect.x-(item.fx+item.fw),0);
@@ -529,9 +826,6 @@ function clampFaceLabel(rect, layerW, layerH, pad=6){
   rect.y=Math.min(Math.max(pad, rect.y), Math.max(pad, layerH-rect.h-pad));
   return rect;
 }
-function faceLabelFits(rect, layerW, layerH, pad=4){
-  return rect.x>=pad && rect.y>=pad && rect.x+rect.w<=layerW-pad && rect.y+rect.h<=layerH-pad;
-}
 function faceLabelCandidate(item, side, vertical, width, height, offset, gap=6){
   if(vertical){
     return {
@@ -541,7 +835,14 @@ function faceLabelCandidate(item, side, vertical, width, height, offset, gap=6){
     };
   }
   const y=side==='top'?item.fy-height-gap:item.fy+item.fh+gap;
-  return {x:item.cx-width/2,y:y+offset,w:width,h:height,side,btn:item.btn};
+  return {x:item.cx-width/2+offset,y,w:width,h:height,side,btn:item.btn};
+}
+function faceLabelOffsets(vertical,width,height,layerW,layerH){
+  const step=Math.max(12,Math.round((vertical?height:width)*.28));
+  const span=vertical?layerH:layerW;
+  const offsets=[0];
+  for(let distance=step;distance<=span;distance+=step)offsets.push(-distance,distance);
+  return offsets;
 }
 function faceLabelSide(items, ox, imgW){
   const forced=viewer.faceLabelPosition;
@@ -580,7 +881,6 @@ function layoutFaceNameButtons(layer, faces, alias){
   const placed=[];
   const gap=6;
   const preferredSide=vertical?faceLabelSide(items,ox,imgW):'bottom';
-  const offsets=[0,-12,12,-24,24,-36,36];
   const faceRects=items.map(item=>({x:item.fx,y:item.fy,w:item.fw,h:item.fh}));
   buttons.forEach((btn,i)=>{
     const it=items[i];
@@ -589,35 +889,47 @@ function layoutFaceNameButtons(layer, faces, alias){
     const w=Math.max(18, btn.offsetWidth);
     const h=Math.max(18, btn.offsetHeight);
     const sides=vertical?[preferredSide,preferredSide==='left'?'right':'left']:[preferredSide,'top'];
-    let chosen=null;
+    const offsets=faceLabelOffsets(vertical,w,h,layerW,layerH);
+    const candidates=new Map();
     for(const side of sides){
       for(const offset of offsets){
         const candidate=faceLabelCandidate(it,side,vertical,w,h,offset,gap);
-        const hitsLabel=placed.some(other=>rectsOverlap(candidate,other,3));
-        const hitsFace=faceRects.some((faceRect,faceIndex)=>faceIndex!==i&&rectsOverlap(candidate,faceRect,3));
-        if(faceLabelFits(candidate,layerW,layerH,4)&&!hitsLabel&&!hitsFace){chosen=candidate;break;}
+        clampFaceLabel(candidate,layerW,layerH,4);
+        const key=`${side}:${Math.round(candidate.x)}:${Math.round(candidate.y)}`;
+        if(!candidates.has(key))candidates.set(key,candidate);
       }
-      if(chosen)break;
     }
-    if(!chosen){
-      let best=null;let bestScore=null;
-      for(const side of sides){
-        for(const offset of offsets){
-          const candidate=faceLabelCandidate(it,side,vertical,w,h,offset,gap);
-          const otherFaceOverlap=faceRects.reduce((sum,faceRect,faceIndex)=>sum+(faceIndex===i?0:rectOverlapArea(candidate,faceRect)),0);
-          const placedOverlap=placed.reduce((sum,other)=>sum+rectOverlapArea(candidate,other),0);
-          const score=[rectOverflow(candidate,layerW,layerH,4),otherFaceOverlap,placedOverlap,side===preferredSide?0:1,faceLabelDistance(candidate,it)];
-          if(!bestScore||compareFaceLabelScore(score,bestScore)<0){best=candidate;bestScore=score;}
-        }
+    let chosen=null;let bestScore=null;
+    for(const candidate of candidates.values()){
+      const labelRatios=placed.map(other=>rectOverlapRatio(candidate,other));
+      const maxLabelRatio=labelRatios.length?Math.max(...labelRatios):0;
+      const placedOverlap=placed.reduce((sum,other)=>sum+rectOverlapArea(candidate,other),0);
+      const otherFaceOverlap=faceRects.reduce((sum,faceRect,faceIndex)=>sum+(faceIndex===i?0:rectOverlapArea(candidate,faceRect)),0);
+      const hardLabel=maxLabelRatio>FACE_LABEL_OVERLAP_LIMIT?1:0;
+      const hardFace=otherFaceOverlap>0?1:0;
+      const score=[
+        hardLabel||hardFace?1:0,
+        hardLabel,
+        hardFace,
+        maxLabelRatio,
+        otherFaceOverlap,
+        placedOverlap,
+        candidate.side===preferredSide?0:1,
+        faceLabelDistance(candidate,it)
+      ];
+      if(!bestScore||compareFaceLabelScore(score,bestScore)<0){
+        chosen=candidate;
+        bestScore=score;
       }
-      chosen=best||faceLabelCandidate(it,sides[0],vertical,w,h,0,gap);
-      clampFaceLabel(chosen,layerW,layerH,4);
     }
+    chosen=chosen||clampFaceLabel(faceLabelCandidate(it,sides[0],vertical,w,h,0,gap),layerW,layerH,4);
     placed.push(chosen);
     btn.classList.add(chosen.side);
     if(!it.named)btn.setAttribute('title','命名人物');
   });
-  placed.forEach(rect=>{
+  placed.forEach((rect,index)=>{
+    const maxRatio=placed.reduce((max,other,otherIndex)=>otherIndex===index?max:Math.max(max,rectOverlapRatio(rect,other)),0);
+    rect.btn.dataset.labelOverlapRatio=maxRatio.toFixed(3);
     rect.btn.style.left=Math.round(rect.x)+'px';
     rect.btn.style.top=Math.round(rect.y)+'px';
   });
@@ -659,9 +971,16 @@ async function displayPhoto(id){
  const src=viewerImageSrc(state.detail, file, id);
  const applySrc=async(url)=>{
   if(!$('#detail-dialog').open||state.detail?.id!==id||ticket!==renderPhoto.ticket)return false;
+  const detailImage=$('#detail-img');
+  const changing=Boolean(detailImage.getAttribute('src')&&!detailImage.hidden);
   viewer.fit=true;
-  $('#detail-img').src=url;
-  $('#detail-img').hidden=false;
+  detailImage.classList.remove('viewer-photo-arriving','viewer-photo-forward','viewer-photo-backward');
+  if(changing)void detailImage.offsetWidth;
+  detailImage.src=url;
+  detailImage.hidden=false;
+  if(changing){
+   detailImage.classList.add('viewer-photo-arriving',viewer.transitionDirection<0?'viewer-photo-backward':'viewer-photo-forward');
+  }
   $('#photo-signature').hidden=false;
   $('#face-name-layer').hidden=false;
   renderSignature(state.detail,scoped||files[0]);
@@ -691,23 +1010,58 @@ async function displayPhoto(id){
  });
  return ticket===renderPhoto.ticket;
 }
+async function loadViewerSequence(id,nextContext,generation){
+ const params=new URLSearchParams({...nextContext,sequence:true,limit:String(viewer.window)});
+ params.delete('position');
+ const position=Number(nextContext&&nextContext.position);
+ if(Number.isInteger(position)&&position>=0)params.set('offset',String(Math.max(0,position-Math.floor(viewer.window/2))));
+ else params.set('around',String(id));
+ let result=await api('/api/photos?'+params);
+ if(generation!==viewer.generation)return false;
+ if(!result.missing&&!result.ids?.includes(id)&&Number.isInteger(position)&&position>=0){
+  params.delete('offset');params.set('around',String(id));
+  result=await api('/api/photos?'+params);
+  if(generation!==viewer.generation)return false;
+ }
+ if(result.missing||!result.ids?.includes(id)){viewerMessage('当前范围已变化，请刷新照片列表后再打开。');return false;}
+ viewer.ids=result.ids||[];
+ viewer.offset=result.offset||0;
+ viewer.total=result.total||viewer.ids.length;
+ viewer.maxId=result.max_id||nextContext.max_id;
+ viewer.index=viewer.target=viewer.ids.indexOf(id);
+ viewer.absolute=(viewer.offset||0)+viewer.index;
+ viewer.goal=viewer.absolute;
+ updatePosition();
+ return true;
+}
 async function openPhoto(id,context=null){
  const wasOpen=$('#detail-dialog').open;
- if(!wasOpen){viewer.returnScroll=scrollY;viewer.openedPhotoId=null;viewer.openedAbsolute=null;viewer.openedContext=null;viewer.openedWaterfallGeneration=null;viewer.exit=null;}
+ if(!wasOpen){viewer.returnScroll=scrollY;viewer.openedPhotoId=null;viewer.openedAbsolute=null;viewer.openedContext=null;viewer.openedWaterfallGeneration=null;viewer.exit=null;clearViewerImage();}
  stopSlides();
  const alreadyOpen=wasOpen;
  const generation=++viewer.generation;
  viewer.goal=null; viewer.queued=null;
  if(!alreadyOpen){$('#detail-dialog').classList.add('hide-info');syncViewerTools();}
  const nextContext=context||currentBrowseContext();
- const sameContext=viewer.context && JSON.stringify(viewer.context)===JSON.stringify(nextContext);
- if(context || !sameContext || !viewer.ids.includes(id)){
-  viewer.context=nextContext;viewer.ids=[];
-  const params=new URLSearchParams({...viewer.context,sequence:true,limit:String(viewer.window),around:String(id)});
-  const result=await api('/api/photos?'+params);
-  if(generation!==viewer.generation)return;
-  if(result.missing){viewerMessage('当前范围已变化，请刷新照片列表后再打开。');return false;}
-  viewer.ids=result.ids||[]; viewer.offset=result.offset||0; viewer.total=result.total||viewer.ids.length; viewer.maxId=result.max_id||viewer.context.max_id;
+ const sameContext=viewer.context&&sameBrowseContext(viewer.context,nextContext);
+ const needsSequence=!sameContext||!viewer.ids.includes(id);
+ let sequence=null;
+ if(needsSequence){
+  viewer.context=nextContext;
+  const position=Number(nextContext&&nextContext.position);
+  viewer.ids=[id];
+  viewer.offset=Number.isInteger(position)&&position>=0?position:0;
+  viewer.total=Math.max(1,Number(typeof waterfall==='object'&&waterfall.total)||1);
+  viewer.maxId=nextContext.max_id;
+  viewer.index=viewer.target=0;
+  viewer.absolute=viewer.offset;
+  viewer.goal=viewer.absolute;
+  sequence=loadViewerSequence(id,nextContext,generation);
+  viewer.sequencePromise=sequence;
+  sequence.then(
+   ()=>{if(viewer.sequencePromise===sequence)viewer.sequencePromise=null;},
+   ()=>{if(viewer.sequencePromise===sequence)viewer.sequencePromise=null;}
+  );
  }
  if(!viewer.ids.includes(id)){viewerMessage('当前范围已变化，请刷新照片列表后再打开。');return false;}
   viewer.index=viewer.target=viewer.ids.indexOf(id);
@@ -718,8 +1072,11 @@ async function openPhoto(id,context=null){
    viewer.openedContext={...viewer.context};
    viewer.openedWaterfallGeneration=typeof waterfall==='object'?waterfall.generation:null;
   }
-  viewer.goal=viewer.absolute;
+ viewer.goal=viewer.absolute;
  const displayed=await displayPhoto(id);
+ if(sequence){
+  try{await sequence;}catch(err){if(generation===viewer.generation)viewerMessage('照片已打开，连续浏览范围暂时没有载入。');}
+ }
  if(generation===viewer.generation)$('#image-viewport').focus({preventScroll:true});
  return Boolean(displayed);
 }
@@ -744,12 +1101,14 @@ async function ensureViewerWindow(absolute, generation=viewer.generation){
 }
 async function movePhoto(delta,automatic=false){
  if(!automatic)stopSlides();
+ if(viewer.sequencePromise){try{await viewer.sequencePromise;}catch(e){}}
  const total=viewer.total||viewer.ids.length;
  const current=Number.isFinite(viewer.goal)?viewer.goal:(Number.isFinite(viewer.absolute)?viewer.absolute:(viewer.offset||0)+(viewer.target||0));
  const goal=Math.max(0,Math.min(Math.max(total-1,0),current+delta));
  viewer.goal=goal;
  if(goal===current && delta!==0){viewerMessage(goal===0?'已经是当前范围的第一张。':'已经是当前范围的最后一张。');stopSlides();return;}
  if(goal===current){stopSlides();return;}
+ viewer.transitionDirection=Math.sign(delta);
  await consumeViewerGoal(automatic);
 }
 async function consumeViewerGoal(automatic=false){
@@ -788,6 +1147,11 @@ async function consumeViewerGoal(automatic=false){
 buildViewerToolbar();
 applyFaceStyle();
 syncViewerTools();
+document.addEventListener('click',e=>{
+ const close=e.target.closest&&e.target.closest('[data-close="detail-dialog"]');
+ if(!close)return;
+ e.preventDefault();e.stopPropagation();closePhotoViewer();
+},true);
 
 $('#viewer-prev').addEventListener('click',action(()=>movePhoto(-1)));
 $('#viewer-next').addEventListener('click',action(()=>movePhoto(1)));
@@ -817,8 +1181,8 @@ $('#viewer-info').addEventListener('click',toggleInfo);
 $('#close-info').addEventListener('click',toggleInfo);
 $('#viewer-play').addEventListener('click',()=>{if(viewer.playing){stopSlides();syncViewerTools();return;}const current=Number.isFinite(viewer.absolute)?viewer.absolute:(viewer.offset||0)+(viewer.target||0);if(current>=(viewer.total||viewer.ids.length)-1){viewerMessage('已经是最后一张，请先返回前面的照片。');return;}viewer.playing=true;syncViewerTools();scheduleSlide();});
 $('#slide-delay').addEventListener('change',()=>{saveViewerPrefs();if(viewer.timer)scheduleSlide();});
-$('#detail-dialog').addEventListener('close',()=>{viewer.exit={photoId:Number(state.detail?.id)||0,absolute:Number(viewer.absolute),context:viewer.context?{...viewer.context}:null,fallbackScroll:viewer.returnScroll,openedPhotoId:Number(viewer.openedPhotoId)||0,openedAbsolute:Number(viewer.openedAbsolute),openedContext:viewer.openedContext?{...viewer.openedContext}:null,waterfallGeneration:viewer.openedWaterfallGeneration};stopSlides();toggleFaceStylePopover(false);viewer.generation++;viewer.queued=null;viewer.goal=null;renderPhoto.ticket++;if(viewer.loader){viewer.loader.onload=null;viewer.loader.onerror=null;viewer.loader.src='';}if(document.fullscreenElement)document.exitFullscreen().catch(()=>{});});
-$('#detail-dialog').addEventListener('cancel',()=>{viewer.generation++;renderPhoto.ticket++;});
+$('#detail-dialog').addEventListener('close',()=>{viewer.exit={photoId:Number(state.detail?.id)||0,absolute:Number(viewer.absolute),context:viewer.context?{...viewer.context}:null,fallbackScroll:viewer.returnScroll,openedPhotoId:Number(viewer.openedPhotoId)||0,openedAbsolute:Number(viewer.openedAbsolute),openedContext:viewer.openedContext?{...viewer.openedContext}:null,waterfallGeneration:viewer.openedWaterfallGeneration};clearTimeout(viewer.closingTimer);viewer.closingTimer=null;$('#detail-dialog').classList.remove('viewer-closing');stopSlides();toggleFaceStylePopover(false);viewer.generation++;viewer.queued=null;viewer.goal=null;viewer.sequencePromise=null;renderPhoto.ticket++;if(viewer.loader){viewer.loader.onload=null;viewer.loader.onerror=null;viewer.loader.src='';}if(document.fullscreenElement)document.exitFullscreen().catch(()=>{});});
+$('#detail-dialog').addEventListener('cancel',e=>{e.preventDefault();closePhotoViewer();});
 document.addEventListener('visibilitychange',()=>{if(document.hidden)stopSlides();});
 document.addEventListener('keydown',action(async e=>{
  if(!$('#detail-dialog').open||$$('dialog[open]').at(-1)?.id!=='detail-dialog'||e.target.closest('input,textarea,select,[contenteditable="true"]')||e.ctrlKey||e.altKey||e.metaKey)return;
@@ -840,7 +1204,7 @@ $('#detail-dialog').addEventListener('pointerdown',e=>{
 });
 $('#detail-dialog').addEventListener('click',e=>{
  if(!outsidePhotoDown||e.target.closest(keepOpenSelector))return;
- outsidePhotoDown=false;$('#detail-dialog').close();
+ outsidePhotoDown=false;closePhotoViewer();
 });
 $('#detail-dialog').addEventListener('close',()=>outsidePhotoDown=false);
 $('#detail-form').addEventListener('input',()=>{stopSlides();viewer.drafts.set(state.detail.id,Object.fromEntries(['#edit-date','#edit-precision','#edit-place','#edit-notes'].map(k=>[k,$(k).value])));viewerMessage('补录尚未保存；翻图时会暂存在本页，刷新页面会丢失。');});

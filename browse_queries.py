@@ -14,7 +14,21 @@ PHOTO_ORDERS = {
     'date_asc': 'sort_date ASC, id ASC',
     'name_asc': 'file_order(path), path COLLATE NOCASE, id',
     'name_desc': 'file_order(path) DESC, path COLLATE NOCASE DESC, id DESC',
+    'recognized_desc': 'recognized_people DESC, visible_faces DESC, sort_date DESC, id DESC',
 }
+
+RECOGNIZED_PEOPLE_SQL = (
+    "(SELECT count(DISTINCT x.person_id) FROM faces x "
+    "JOIN people p ON p.id=x.person_id "
+    "WHERE x.asset_id=a.id AND coalesce(x.ignored,0)=0 "
+    "AND coalesce(p.ignored,0)=0 AND p.confirmed=1 "
+    "AND trim(coalesce(p.name,''))<>'')"
+)
+VISIBLE_FACE_COUNT_SQL = (
+    "(SELECT count(*) FROM faces x JOIN people p ON p.id=x.person_id "
+    "WHERE x.asset_id=a.id AND coalesce(x.ignored,0)=0 "
+    "AND coalesce(p.ignored,0)=0)"
+)
 
 
 def file_order_key(path):
@@ -273,10 +287,21 @@ def fetch_people(conn, ignored=0, q='', offset=0, limit=48, ids='', named=0):
     }
 
 
-def photo_from_sql(path_sql, where, order_sql):
+def photo_metric_select(sort):
+    if sort != 'recognized_desc':
+        return ''
     return (
-        'SELECT a.id, path, sort_date FROM ('
+        ', ' + RECOGNIZED_PEOPLE_SQL + ' recognized_people'
+        ', ' + VISIBLE_FACE_COUNT_SQL + ' visible_faces'
+    )
+
+
+def photo_from_sql(path_sql, where, order_sql, metric_select=''):
+    metric_columns = ', recognized_people, visible_faces' if metric_select else ''
+    return (
+        'SELECT a.id, path, sort_date' + metric_columns + ' FROM ('
         'SELECT a.id, coalesce(a.manual_date, a.captured_at) sort_date, ' + path_sql + ' path '
+        + metric_select + ' '
         'FROM assets a WHERE ' + where + ') a ORDER BY ' + order_sql
     )
 
@@ -296,7 +321,8 @@ def fetch_photos(conn, *, q='', filter='all', person='', offset=0, limit=60, dir
     values = list(spec['values']) + [upper]
     path_values = list(spec['path_values'])
     order_sql = PHOTO_ORDERS[sort]
-    query = photo_from_sql(spec['path_sql'], where, order_sql)
+    metric_select = photo_metric_select(sort)
+    query = photo_from_sql(spec['path_sql'], where, order_sql, metric_select)
     total = conn.execute('SELECT count(*) FROM assets a WHERE ' + where, values).fetchone()[0]
     if sequence:
         window = min(max(int(limit), 1), 400)
@@ -305,6 +331,7 @@ def fetch_photos(conn, *, q='', filter='all', person='', offset=0, limit=60, dir
             ranked = (
                 'SELECT id, ROW_NUMBER() OVER (ORDER BY ' + order_sql + ') - 1 AS pos FROM ('
                 'SELECT a.id, coalesce(a.manual_date, a.captured_at) sort_date, ' + spec['path_sql'] + ' path '
+                + metric_select + ' '
                 'FROM assets a WHERE ' + where + ') a'
             )
             pos = conn.execute(
@@ -347,6 +374,12 @@ def fetch_photos(conn, *, q='', filter='all', person='', offset=0, limit=60, dir
             'FROM assets a WHERE a.id IN (' + placeholders + ')'
         )
         details = {r['id']: dict(r) for r in conn.execute(detail_sql, ids)}
-        items = [dict(details[r['id']], path=r['path']) for r in rows]
+        items = []
+        for row in rows:
+            item = dict(details[row['id']], path=row['path'])
+            if sort == 'recognized_desc':
+                item['recognized_people'] = int(row['recognized_people'] or 0)
+                item['visible_faces'] = int(row['visible_faces'] or 0)
+            items.append(item)
     return {'total': total, 'items': items, 'max_id': upper, 'missing': False}
 

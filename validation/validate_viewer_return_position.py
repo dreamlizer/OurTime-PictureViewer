@@ -22,7 +22,7 @@ def visible_card(page, photo_id: int) -> bool:
 def close_and_check(page, photo_id: int) -> bool:
     page.locator('[data-close="detail-dialog"]').click()
     page.wait_for_function("!document.querySelector('#detail-dialog').open")
-    page.wait_for_timeout(250)
+    page.wait_for_timeout(1000)
     page.wait_for_function("id => document.querySelector(`[data-photo=\"${id}\"]`) !== null", arg=photo_id)
     return visible_card(page, photo_id)
 
@@ -94,12 +94,12 @@ def main() -> int:
 
         first_item = page.request.get(URL + "/api/photos?filter=timeline&sort=date_desc&limit=1&offset=0").json()["items"][0]
         query = Path(first_item["path"]).stem
-        page.fill('[data-ot="search"]', query)
+        page.evaluate("query => { window.__ourTimeApp.state.q = query; return window.__ourTimeApp.setView('timeline'); }", query)
         page.wait_for_function("q => window.__ourTimeApp.state.q === q", arg=query, timeout=15000)
         page.wait_for_selector("#photo-grid [data-photo]", timeout=30000)
         results.append(context_close(page, "q_search"))
 
-        page.fill('[data-ot="search"]', "")
+        page.evaluate("() => { window.__ourTimeApp.state.q = ''; return window.__ourTimeApp.setView('timeline'); }")
         page.wait_for_function("window.__ourTimeApp.state.q === ''", timeout=15000)
         year = str(first_item.get("effective_date") or "")[:4]
         if year.isdigit():

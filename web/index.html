@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="zh-CN">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>拾光 · 本地照片资料库</title><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/vendor/leaflet.css"><link rel="stylesheet" href="/vendor/MarkerCluster.css"><link rel="stylesheet" href="/vendor/MarkerCluster.Default.css"><link rel="stylesheet" href="/appearance.css"><link rel="stylesheet" href="/home-query-ui.css"></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>拾光 · 本地照片资料库</title><link rel="preload" href="/vendor/fonts/lxgw-wenkai-screen/LXGWWenKaiGBScreen.ttf" as="font" type="font/ttf" crossorigin><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/vendor/leaflet.css"><link rel="stylesheet" href="/vendor/MarkerCluster.css"><link rel="stylesheet" href="/vendor/MarkerCluster.Default.css"><link rel="stylesheet" href="/appearance.css"><link rel="stylesheet" href="/home-query-ui.css"></head>
 <body>
 <aside class="sidebar">
  <a class="brand" href="/" aria-label="拾光首页"><span class="brand-mark">拾</span><span>拾光<small>本地照片资料库</small></span></a>
@@ -59,7 +59,7 @@
    <button data-time-sort="date_asc" class="secondary small">时间正序</button>
    <button id="timeline-by-year" class="secondary small">按年份查看</button>
   </div>
-  <div class="browse-options"><select id="sort-order" aria-label="排列顺序"><option value="date_desc">从新到旧</option><option value="date_asc">从旧到新</option><option value="name_asc">文件名顺序</option><option value="name_desc">文件名倒序</option></select><button id="refresh-photos" class="text-button">刷新</button></div></div></div>
+  <div class="browse-options"><select id="sort-order" aria-label="排列顺序"><option value="date_desc">从新到旧</option><option value="date_asc">从旧到新</option><option value="name_asc">文件名顺序</option><option value="name_desc">文件名倒序</option><option value="recognized_desc" data-group-sort hidden>已识别人物最多</option></select><button id="refresh-photos" class="text-button">刷新</button></div></div></div>
   <div id="photo-grid" class="photo-grid"></div>
   <div id="empty" class="empty" hidden aria-hidden="true"><div class="empty-art"><i></i><i></i><i></i><span>＋</span></div><h2>先把照片的位置告诉拾光</h2><p>选择一个本地目录，读取照片信息。<br>原图保持原位，随时可以继续添加。</p><button class="primary" id="empty-add">添加第一个照片目录</button><div class="empty-steps"><span>01　扫描目录</span><span>02　整理信息</span><span>03　确认人物</span></div></div>
   <div id="no-results" class="no-results" hidden>没有符合条件的照片。可以换个关键词，或调整筛选。</div>

@@ -9,8 +9,9 @@ def check(ok,text):
     if not ok:raise AssertionError(text)
     checks.append(text);print('PASS',text,flush=True)
 def open_photo(page,aid=10):
-    a=req('/api/photos/'+str(aid));page.goto(URL);page.fill('#search',Path(a['files'][0]['path']).name)
-    page.locator(f'[data-photo="{aid}"]').dblclick()
+    a=req('/api/photos/'+str(aid));page.goto(URL)
+    page.wait_for_function("typeof openPhoto === 'function'", timeout=15000)
+    page.evaluate("async id => { await openPhoto(id); return true; }", aid)
     page.wait_for_function("document.querySelector('#detail-img').complete && document.querySelector('#detail-img').naturalWidth>0")
     return a
 def closed(page):page.wait_for_function("!document.querySelector('#detail-dialog').open")

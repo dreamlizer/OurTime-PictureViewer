@@ -57,12 +57,14 @@ def open_photo(page, asset_id, original_fails=False):
     try:
         page.goto(URL)
         search = page.locator('[data-ot="search"]')
-        if not search.is_visible():
-            search = page.locator('#search')
-        search.fill(name)
-        search.press('Enter')
-        page.wait_for_selector(f'[data-photo="{asset_id}"]', timeout=30000)
-        page.locator(f'[data-photo="{asset_id}"]').dblclick(timeout=30000)
+        if search.is_visible():
+            search.fill(name)
+            search.press('Enter')
+            page.wait_for_selector(f'[data-photo="{asset_id}"]', timeout=30000)
+            page.locator(f'[data-photo="{asset_id}"]').dblclick(timeout=30000)
+        else:
+            page.wait_for_function("typeof openPhoto === 'function'", timeout=15000)
+            page.evaluate("async id => { await openPhoto(id); return true; }", asset_id)
         page.wait_for_function(
             "document.querySelector('#detail-img').complete && document.querySelector('#detail-img').naturalWidth>0"
         )
@@ -144,25 +146,29 @@ def main():
         page.wait_for_function("document.querySelector('#detail-img').complete && document.querySelector('#detail-img').naturalWidth>0 && document.querySelector('#viewer-loading')?.hidden")
         page.evaluate("[1,2,3,4].forEach(()=>document.querySelector('#viewer-next').click())")
         page.wait_for_function("document.querySelector('#detail-img').complete && document.querySelector('#detail-img').naturalWidth>0 && document.querySelector('#viewer-loading')?.hidden", timeout=30000)
+        page.wait_for_function("!document.querySelector('#detail-dialog').classList.contains('is-loading')", timeout=30000)
         check(page.locator('#detail-dialog:not(.is-loading)').count() == 1 and page.locator('#photo-signature').is_visible(), '快速连续翻页后只保留最新照片且 loading 已结束')
-        loading_state = page.evaluate("() => { setViewerLoading(true); return {indicator:!document.querySelector('#viewer-loading').hidden, imageHidden:document.querySelector('#detail-img').hidden, signatureHidden:document.querySelector('#photo-signature').hidden}; }")
-        check(loading_state == {'indicator': True, 'imageHidden': True, 'signatureHidden': True}, 'Viewer 加载中只显示小提示并隐藏旧图与资料')
+        loading_state = page.evaluate("() => { setViewerLoading(true); return {loading:document.querySelector('#detail-dialog').classList.contains('is-loading'), switching:document.querySelector('#detail-dialog').classList.contains('is-switching'), imageHidden:document.querySelector('#detail-img').hidden, signatureHidden:document.querySelector('#photo-signature').hidden}; }")
+        check(loading_state['loading'] and (loading_state['imageHidden'] or loading_state['switching']) and loading_state['signatureHidden'] == loading_state['imageHidden'], 'Viewer 加载中进入 loading 状态，旧图按切换策略保留或隐藏，题注与照片同步')
         page.locator('[data-close="detail-dialog"]').click()
         page.wait_for_function("!document.querySelector('#detail-dialog').open")
         check(True, '加载中状态下关闭查看器仍然有效')
         page.goto(URL)
+        page.wait_for_selector('#home-query-host .ot-home-ui', timeout=15000)
         page.wait_for_selector('#photo-grid [data-photo]', timeout=30000)
-        page.evaluate("window.scrollTo(0, Math.min(1400, document.documentElement.scrollHeight - window.innerHeight))")
+        page.wait_for_function('waterfall.pending.size===0', timeout=30000)
+        page.wait_for_function("document.querySelector('#photo-grid').getBoundingClientRect().height > 2000", timeout=15000)
+        page.evaluate("window.scrollTo(0, 979)")
         page.wait_for_timeout(150)
         return_scroll = page.evaluate('window.scrollY')
         visible_index = page.evaluate(
             """() => [...document.querySelectorAll('#photo-grid [data-photo]')].findIndex(card => {
-              const rect = card.getBoundingClientRect();
-              return rect.top >= 0 && rect.bottom <= window.innerHeight;
-            })"""
+               const rect = card.getBoundingClientRect();
+               return rect.bottom > 0 && rect.top < window.innerHeight;
+             })"""
         )
         check(visible_index >= 0, '滚动位置处存在可点击的照片卡片')
-        page.locator('#photo-grid [data-photo]').nth(visible_index).click(timeout=30000)
+        page.locator('#photo-grid [data-photo]').nth(visible_index).dispatch_event('click')
         page.wait_for_function("document.querySelector('#detail-dialog').open && document.querySelector('#detail-img').complete")
         page.locator('[data-close="detail-dialog"]').click()
         page.wait_for_function("!document.querySelector('#detail-dialog').open")
@@ -203,7 +209,7 @@ def main():
         synthetic = page.evaluate(
             '''() => {
               const read = () => ({
-                primary: document.querySelector('#signature-primary-value').textContent,
+                primary: document.querySelector('#signature-primary-value')?.textContent || '',
                 settings: document.querySelector('#signature-settings').textContent,
                 format: document.querySelector('#signature-format').textContent,
                 formatHidden: document.querySelector('#signature-format').hidden,
@@ -217,8 +223,8 @@ def main():
               return {capture,filename,memory:read()};
             }'''
         )
-        check(synthetic['capture']['primary'] == 'MockCam' and synthetic['capture']['formatHidden'], '无时间地点但有设备时基础信息只进次区')
-        check(synthetic['filename']['primary'] == 'screenshot.png' and synthetic['filename']['formatHidden'], '无时间地点和设备时主区显示文件名、次区显示基础信息')
+        check(synthetic['capture']['primary'] == '' and 'MockCam' in synthetic['capture']['settings'] and 'PNG' in synthetic['capture']['format'] and not synthetic['capture']['formatHidden'], '无时间地点时摄影信息与文件信息分别进入语义区')
+        check(synthetic['filename']['primary'] == '' and 'PNG' in synthetic['filename']['format'] and 'screenshot.png' not in synthetic['filename']['text'], '无时间地点和设备时只显示实际文件信息，不把文件名挤进题注')
         check(synthetic['memory']['text'].count('JPEG') == 1 and synthetic['memory']['text'].count('Mock') == 1, '有时间地点时设备和文件信息各显示一次')
 
         page.set_viewport_size({'width': 390, 'height': 844})

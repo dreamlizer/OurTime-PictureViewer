@@ -117,15 +117,89 @@ def main():
 
     if '<option value="ivory">素笺</option>' not in viewer:
         fail("人名标签缺少素笺主题名称")
+    if '<option value="classic">默认</option>' not in viewer:
+        fail("人名标签原始主题没有改名为默认")
+    if '<option value="tea">茶棕</option>' not in viewer:
+        fail("人名标签第三主题没有接入茶棕")
+    classic_match = re.search(r"classic:\s*\{(?P<body>.*?)\n\s*\},\s*\n\s*ivory:", viewer, re.S)
+    classic = classic_match.group("body") if classic_match else ""
+    if not all(value in classic for value in (
+        "fontFamily:'kai'",
+        "backgroundOpacity:.5",
+        "radius:10",
+        "paddingX:5",
+    )):
+        fail("默认主题没有使用楷体、50% 底色、圆角和收窄后的左右留白")
+    if (
+        '<option value="other">其他…</option>' not in viewer
+        or "queryLocalFonts" not in viewer
+        or "local-font-preview-label" not in viewer
+    ):
+        fail("字体菜单缺少本机其他字体选择或预览")
+    if not all(value in viewer for value in (
+        'id="face-unnamed-marker"',
+        '<option value="plus">默认加号</option>',
+        '<option value="pulse">呼吸绿点</option>',
+        '<option value="ring">静态绿环</option>',
+        "FACE_LABEL_OVERLAP_LIMIT=.12",
+        "rectOverlapRatio",
+        "labelOverlapRatio",
+    )):
+        fail("待命名标记或标签重叠比例防碰撞机制缺失")
     if not all(path in viewer for path in (
         "/api/face-label-bg/1.png",
         "/api/face-label-bg/2.png",
         "/api/face-label-bg/3.png",
+        "/api/face-label-bg/4.png",
+        "/api/face-label-bg/5.png",
+        "/api/face-label-bg/6.png",
     )):
-        fail("素笺主题没有固定映射 1.png / 2.png / 3.png")
+        fail("素笺或茶棕主题没有固定映射对应 PNG")
     if "faceLabelProfile" not in viewer or "[...normalized].length" not in viewer:
         fail("素笺主题缺少按 Unicode 字符数选择 S/M/L 的规则")
-    ok("素笺主题名称、固定底图映射和姓名长度规则已接入")
+    if not all(value in viewer for value in (
+        "fontFamily:'ma-shan-zheng'",
+        "TEA_FACE_FONT_OPTIONS",
+        "ma-shan-zheng",
+        "long-cang",
+        "liu-jian-mao-cao",
+    )):
+        fail("茶棕主题没有固定接入三款毛笔字体或默认 Ma Shan Zheng")
+    overrides = read(WEB / "viewer-overrides.css")
+    if "prefers-reduced-motion:reduce" not in overrides:
+        fail("呼吸绿点没有尊重系统减少动态效果设置")
+    ok("默认主题、图片标签、本机字体、待命名标记和防碰撞机制已接入")
+
+    font_path = WEB / "vendor" / "fonts" / "lxgw-wenkai-screen" / "LXGWWenKaiGBScreen.ttf"
+    license_path = font_path.with_name("OFL.txt")
+    if not font_path.is_file() or font_path.stat().st_size != 26037854:
+        fail("素笺主题缺少完整的霞鹜文楷屏幕阅读版字体文件")
+    if not license_path.is_file() or "SIL OPEN FONT LICENSE" not in read(license_path):
+        fail("内置字体缺少 OFL 授权文件")
+    if (
+        '@font-face' not in overrides
+        or 'font-family:"LXGW WenKai GB Screen"' not in overrides
+        or "/vendor/fonts/lxgw-wenkai-screen/LXGWWenKaiGBScreen.ttf" not in overrides
+        or "/vendor/fonts/lxgw-wenkai-screen/LXGWWenKaiGBScreen.ttf" not in html
+    ):
+        fail("素笺主题没有预加载并使用项目内置屏幕阅读版文楷")
+    ok("素笺主题内置屏幕阅读版文楷及 OFL 授权")
+
+    brush_fonts = {
+        "ma-shan-zheng": "MaShanZheng-Regular.ttf",
+        "long-cang": "LongCang-Regular.ttf",
+        "liu-jian-mao-cao": "LiuJianMaoCao-Regular.ttf",
+    }
+    for directory, filename in brush_fonts.items():
+        path = WEB / "vendor" / "fonts" / directory / filename
+        license_file = path.with_name("OFL.txt")
+        if not path.is_file() or path.stat().st_size < 4_000_000:
+            fail("茶棕主题缺少完整毛笔字体：%s" % filename)
+        if not license_file.is_file() or "SIL OPEN FONT LICENSE" not in read(license_file):
+            fail("茶棕毛笔字体缺少 OFL 授权：%s" % filename)
+        if ("/vendor/fonts/%s/%s" % (directory, filename)) not in overrides:
+            fail("茶棕毛笔字体没有通过本地 @font-face 接入：%s" % filename)
+    ok("茶棕主题内置三款毛笔字体及各自 OFL 授权")
 
     for name, text in sources.items():
         bad = visible_undefined(text)

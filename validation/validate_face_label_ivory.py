@@ -82,6 +82,15 @@ def main():
 
     status, content_type, byte_count = request_status("/api/face-label-bg/1.png")
     check(status == 200 and content_type == "image/png" and byte_count > 0, "素笺底图 API 返回 PNG", checks)
+    status, content_type, byte_count = request_status(
+        "/vendor/fonts/lxgw-wenkai-screen/LXGWWenKaiGBScreen.ttf"
+    )
+    check(
+        status == 200 and content_type in ("font/ttf", "application/octet-stream")
+        and byte_count == 26037854,
+        "屏幕阅读版文楷由本机项目完整提供",
+        checks,
+    )
     check(request_status("/api/face-label-bg/10.png")[0] == 404, "非白名单 PNG 返回 404", checks)
     check(
         request_status("/api/face-label-bg/%2e%2e%2flibrary.sqlite3")[0] == 404,
@@ -98,20 +107,152 @@ def main():
 
         page.evaluate("applyFacePreset('classic')")
         page.wait_for_timeout(150)
+        classic_style = page.evaluate(
+            """() => {
+              const label=document.querySelector('#face-name-layer .face-name:not(.unnamed)');
+              const style=getComputedStyle(label);
+              return {
+                preset:{...viewer.faceStyle},
+                fontFamily:style.fontFamily,
+                background:style.backgroundColor,
+                radius:style.borderRadius,
+                paddingLeft:style.paddingLeft,
+                paddingRight:style.paddingRight
+              };
+            }"""
+        )
+        check(
+            classic_style["preset"]["fontFamily"] == "kai"
+            and classic_style["preset"]["backgroundOpacity"] == 0.5
+            and classic_style["preset"]["radius"] == 10
+            and classic_style["preset"]["paddingX"] == 5,
+            "默认主题使用楷体、50% 底色、圆角和收窄后的左右留白",
+            checks,
+        )
+        check(
+            "KaiTi" in classic_style["fontFamily"]
+            and classic_style["background"] == "rgba(20, 24, 18, 0.5)"
+            and classic_style["radius"] == "10px"
+            and classic_style["paddingLeft"] == "5px"
+            and classic_style["paddingRight"] == "5px",
+            "默认主题的新预设实际应用到照片标签",
+            checks,
+        )
         page.screenshot(path=str(REPORT_DIR / "face-label-classic.png"), full_page=False)
 
         if page.locator("#face-style-popover").is_hidden():
             page.click("#face-style-button")
+        check(
+            page.evaluate("window.isSecureContext && typeof window.queryLocalFonts==='function'"),
+            "本机 Chrome 在拾光 localhost 页面支持本地字体访问",
+            checks,
+        )
+        page.evaluate(
+            """() => Object.defineProperty(window,'queryLocalFonts',{
+              configurable:true,
+              value:async()=>[
+                {family:'Microsoft YaHei'},
+                {family:'FangSong'},
+                {family:'Microsoft YaHei'},
+                {family:'KaiTi'}
+              ]
+            })"""
+        )
+        page.select_option("#face-font-family", "other")
+        page.wait_for_selector("#local-font-dialog", state="visible")
+        page.wait_for_function(
+            "() => document.querySelectorAll('#local-font-list option').length===3"
+        )
+        font_names = page.locator("#local-font-list option").all_text_contents()
+        check(
+            set(font_names) == {"Microsoft YaHei", "FangSong", "KaiTi"},
+            "“其他”读取并去重列出本机字体",
+            checks,
+        )
+        page.select_option("#local-font-list", "FangSong")
+        page.wait_for_timeout(100)
+        check(
+            "FangSong" in page.locator("#local-font-preview-label").evaluate(
+                "element => getComputedStyle(element).fontFamily"
+            )
+            and page.locator("#local-font-preview-name").text_content() == "FangSong",
+            "选择本机字体后弹窗即时预览标签效果",
+            checks,
+        )
+        page.screenshot(path=str(REPORT_DIR / "face-label-local-font-dialog.png"), full_page=False)
+        page.click("#local-font-confirm")
+        page.wait_for_selector("#local-font-dialog", state="hidden")
+        check(
+            not page.locator("#face-style-popover").is_hidden()
+            and page.locator("#face-font-family").input_value() == "custom"
+            and page.locator("#face-font-family option[value='custom']").text_content() == "其他 · FangSong"
+            and page.evaluate(
+                """() => {
+                  const saved=JSON.parse(localStorage.getItem('ourtime.viewer.preferences.v2')||'{}');
+                  return viewer.faceStyle.fontFamily==='custom'
+                    && viewer.faceStyle.customFontFamily==='FangSong'
+                    && saved.faceStyle?.fontFamily==='custom'
+                    && saved.faceStyle?.customFontFamily==='FangSong';
+                }"""
+            ),
+            "确定字体后返回同一个人名标签菜单、应用并保存选择",
+            checks,
+        )
+        page.evaluate("applyFacePreset('classic')")
+        page.evaluate(
+            """() => {
+              document.querySelector('#face-style-popover').dataset.stabilityProbe='same-menu';
+            }"""
+        )
+        menu_geometry = []
+        for theme in ("classic", "tea", "accent", "ivory"):
+            page.select_option("#face-theme", theme)
+            page.wait_for_function(
+                f"() => document.querySelector('#face-style-popover')?.dataset.faceTheme==='{theme}'"
+            )
+            page.wait_for_timeout(100)
+            menu_geometry.append(
+                page.evaluate(
+                    """() => {
+                      const menu=document.querySelector('#face-style-popover');
+                      const preview=menu.querySelector('.face-style-preview');
+                      const rect=menu.getBoundingClientRect();
+                      return {
+                        theme:menu.dataset.faceTheme,
+                        probe:menu.dataset.stabilityProbe,
+                        left:Math.round(rect.left*10)/10,
+                        top:Math.round(rect.top*10)/10,
+                        width:Math.round(rect.width*10)/10,
+                        height:Math.round(rect.height*10)/10,
+                        previewHeight:Math.round(preview.getBoundingClientRect().height)
+                      };
+                    }"""
+                )
+            )
+        check(
+            all(item["probe"] == "same-menu" for item in menu_geometry),
+            "切换主题始终复用同一个设置菜单",
+            checks,
+        )
+        check(
+            len({(item["left"], item["top"], item["width"], item["height"]) for item in menu_geometry}) == 1
+            and all(item["previewHeight"] == 104 for item in menu_geometry),
+            "四个主题切换时菜单位置和尺寸保持不动",
+            checks,
+        )
         page.select_option("#face-theme", "ivory")
         page.wait_for_function(
             """() => document.querySelector('#detail-dialog')?.dataset.faceTheme==='ivory' &&
               [...document.querySelectorAll('#face-name-layer .face-name:not(.unnamed)')]
                 .every(label => getComputedStyle(label,'::before').backgroundImage.includes('/api/face-label-bg/'))"""
         )
+        page.wait_for_function(
+            """() => document.fonts.check('15px "LXGW WenKai GB Screen"')"""
+        )
         page.wait_for_timeout(250)
 
         theme_names = page.locator("#face-theme option").all_text_contents()
-        check(theme_names == ["原始", "素笺", "线框", "暗朱"], "主题名称显示为原始 / 素笺 / 线框 / 暗朱", checks)
+        check(theme_names == ["默认", "素笺", "茶棕", "暗朱"], "主题名称显示为默认 / 素笺 / 茶棕 / 暗朱", checks)
         check(page.locator("#toggle-face-dir").is_disabled(), "素笺固定竖排，避免竖牌被横排模式破坏", checks)
         check(
             page.locator("#face-style-popover .face-custom-control:visible").count() == 4
@@ -121,19 +262,20 @@ def main():
             checks,
         )
         check(
-            all(
-                page.locator(selector).is_disabled()
-                for selector in (
-                    "#face-font-size",
-                    "#face-font-family",
-                    "#face-text-color",
-                    "#face-bg-color",
-                    "#face-bg-opacity",
-                    "#face-radius",
-                    "#face-shadow",
-                )
-            ),
-            "素笺不可修改的样式控件置灰禁用",
+            not page.locator("#face-font-size").is_disabled()
+            and not page.locator("#face-bg-opacity").is_disabled(),
+            "素笺允许调节字号和底牌透明度",
+            checks,
+        )
+        check(
+            all(page.locator(selector).is_disabled() for selector in (
+                "#face-font-family",
+                "#face-text-color",
+                "#face-bg-color",
+                "#face-radius",
+                "#face-shadow",
+            )),
+            "素笺其余固定样式控件置灰禁用",
             checks,
         )
 
@@ -148,12 +290,18 @@ def main():
                 height:Math.round(rect.height),
                 background:getComputedStyle(label,'::before').backgroundImage,
                 backgroundOpacity:getComputedStyle(label,'::before').opacity,
+                backgroundFilter:getComputedStyle(label,'::before').filter,
+                backgroundClip:getComputedStyle(label,'::before').clipPath,
+                texture:getComputedStyle(label,'::after').backgroundImage,
+                textureOpacity:getComputedStyle(label,'::after').opacity,
                 writingMode:style.writingMode,
                 textOrientation:style.textOrientation,
                 color:style.color,
                 border:style.borderStyle,
                 boxShadow:style.boxShadow,
                 fontFamily:style.fontFamily,
+                fontSize:style.fontSize,
+                left:rect.left,
                 paddingLeft:style.paddingLeft,
                 paddingRight:style.paddingRight,
                 letterSpacing:style.letterSpacing
@@ -177,8 +325,40 @@ def main():
             checks,
         )
         check(
-            all(label["boxShadow"] == "none" and "STKaiti" in label["fontFamily"] for label in labels),
-            "素笺没有额外阴影并使用本机楷体 fallback 栈",
+            all(
+                label["boxShadow"] == "none"
+                and "LXGW WenKai GB Screen" in label["fontFamily"]
+                for label in labels
+            ),
+            "素笺没有额外阴影并使用内置屏幕阅读版文楷",
+            checks,
+        )
+        cdp = page.context.new_cdp_session(page)
+        cdp.send("DOM.enable")
+        cdp.send("CSS.enable")
+        document_node = cdp.send("DOM.getDocument", {"depth": -1})["root"]["nodeId"]
+        label_node = cdp.send(
+            "DOM.querySelector",
+            {
+                "nodeId": document_node,
+                "selector": "#face-name-layer .face-name:not(.unnamed)",
+            },
+        )["nodeId"]
+        platform_fonts = cdp.send(
+            "CSS.getPlatformFontsForNode", {"nodeId": label_node}
+        )["fonts"]
+        check(
+            any(
+                font["familyName"] == "LXGW WenKai GB Screen"
+                and font["isCustomFont"]
+                for font in platform_fonts
+            ),
+            "Chrome 实际使用项目内置文楷而不是系统回退字体",
+            checks,
+        )
+        check(
+            all(label["color"] == "rgb(90, 47, 40)" for label in labels),
+            "素笺文字使用清晰但克制的深赭红",
             checks,
         )
         check(
@@ -187,10 +367,108 @@ def main():
             checks,
         )
         check(
-            all(float(label["letterSpacing"].removesuffix("px")) >= 1.9 for label in labels if label["size"] == "s"),
-            "两字姓名增加字间距",
+            all(float(label["letterSpacing"].removesuffix("px")) >= 4 for label in labels if label["size"] == "s")
+            and all(float(label["letterSpacing"].removesuffix("px")) >= 1.8 for label in labels if label["size"] == "m"),
+            "两字和三字姓名分别增加字间距",
             checks,
         )
+        check(
+            all(
+                label["backgroundFilter"] != "none"
+                and label["backgroundClip"] != "none"
+                and "repeating-linear-gradient" in label["texture"]
+                and 0 < float(label["textureOpacity"]) < float(label["backgroundOpacity"])
+                for label in labels
+            ),
+            "素笺增强转角轮廓并叠加低强度纸纹",
+            checks,
+        )
+
+        page.locator("#face-font-size").evaluate(
+            """control => {
+              control.value='17';
+              control.dispatchEvent(new Event('input',{bubbles:true}));
+            }"""
+        )
+        page.wait_for_timeout(150)
+        resized_labels = page.evaluate(
+            """() => [...document.querySelectorAll('#face-name-layer .face-name:not(.unnamed)')].map(label => {
+              const rect=label.getBoundingClientRect();
+              return {
+                count:[...label.textContent.replace(/\\s+/g,'')].length,
+                width:Math.round(rect.width),
+                left:rect.left,
+                fontSize:getComputedStyle(label).fontSize,
+                paddingLeft:getComputedStyle(label).paddingLeft,
+                paddingRight:getComputedStyle(label).paddingRight
+              };
+            })"""
+        )
+        check(
+            all(
+                label["fontSize"]
+                == f"{17 if label['count'] <= 2 else 16 if label['count'] == 3 else 15 if label['count'] == 4 else 14}px"
+                for label in resized_labels
+            ),
+            "字号滑杆按姓名长度等差调整实际文字",
+            checks,
+        )
+        check(
+            all(
+                label["width"] == 38
+                and label["paddingLeft"] == "7px"
+                and label["paddingRight"] == "9px"
+                and abs(label["left"] - labels[index]["left"]) <= 1
+                for index, label in enumerate(resized_labels)
+            ),
+            "字号改变后牌宽、左右微调和横向位置保持稳定",
+            checks,
+        )
+
+        page.locator("#face-bg-opacity").evaluate(
+            """control => {
+              control.value='55';
+              control.dispatchEvent(new Event('input',{bubbles:true}));
+            }"""
+        )
+        page.wait_for_timeout(100)
+        check(
+            page.evaluate(
+                """() => [...document.querySelectorAll('#face-name-layer .face-name:not(.unnamed)')]
+                  .every(label => getComputedStyle(label,'::before').opacity === '0.55')"""
+            ),
+            "底牌透明度滑杆实时改变 PNG 透明度",
+            checks,
+        )
+        check(
+            page.locator("#face-font-size-value").text_content() == "17px"
+            and page.locator("#face-bg-opacity-value").text_content() == "55%",
+            "字号和透明度数值提示同步更新",
+            checks,
+        )
+
+        page.locator("#face-font-size").evaluate(
+            """control => {
+              control.value='15';
+              control.dispatchEvent(new Event('input',{bubbles:true}));
+            }"""
+        )
+        page.locator("#face-bg-opacity").evaluate(
+            """control => {
+              control.value='76';
+              control.dispatchEvent(new Event('input',{bubbles:true}));
+            }"""
+        )
+        page.wait_for_timeout(150)
+        check(
+            page.evaluate(
+                """() => [...document.querySelectorAll('#face-name-layer .face-name:not(.unnamed)')]
+                  .every(label => getComputedStyle(label,'::before').opacity === '0.76')"""
+            ),
+            "恢复默认字号和透明度后样式正确",
+            checks,
+        )
+
         geometry = page.evaluate(
             """() => {
               const image=document.querySelector('#detail-img');
@@ -246,10 +524,10 @@ def main():
             }"""
         )
         expected = [
-            {"count": 2, "size": "s", "width": 34, "height": 56, "fontSize": "15px"},
-            {"count": 3, "size": "m", "width": 34, "height": 72, "fontSize": "14px"},
-            {"count": 4, "size": "l", "width": 34, "height": 86, "fontSize": "13px"},
-            {"count": 5, "size": "l", "width": 34, "height": 86, "fontSize": "12px"},
+            {"count": 2, "size": "s", "width": 38, "height": 56, "fontSize": "15px"},
+            {"count": 3, "size": "m", "width": 38, "height": 72, "fontSize": "14px"},
+            {"count": 4, "size": "l", "width": 38, "height": 86, "fontSize": "13px"},
+            {"count": 5, "size": "l", "width": 38, "height": 86, "fontSize": "12px"},
         ]
         check(synthetic == expected, "2 / 3 / 4 / 5 字尺寸和字号符合素笺规则", checks)
 
@@ -270,13 +548,13 @@ def main():
         )
         check(
             fallback_page.locator("#face-theme").input_value() == "classic",
-            "素笺底图缺失时自动恢复原始主题",
+            "素笺底图缺失时自动恢复默认主题",
             checks,
         )
         check(
             not fallback_page.locator("#face-font-size").is_disabled()
             and not fallback_page.locator("#face-radius").is_disabled(),
-            "恢复原始主题后样式控件重新可用",
+            "恢复默认主题后样式控件重新可用",
             checks,
         )
         fallback_page.close()
@@ -288,9 +566,15 @@ def main():
         "asset_id": asset_id,
         "real_name_lengths": sorted(name_lengths),
         "labels": labels,
+        "platform_fonts": platform_fonts,
         "synthetic_sizes": synthetic,
         "checks": checks,
-        "screenshots": ["face-label-classic.png", "face-label-ivory-settings.png", "face-label-ivory.png"],
+        "screenshots": [
+            "face-label-classic.png",
+            "face-label-local-font-dialog.png",
+            "face-label-ivory-settings.png",
+            "face-label-ivory.png",
+        ],
     }
     REPORT.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     print("IVORY_LABEL_OK", len(checks), "checks", flush=True)

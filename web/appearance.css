@@ -153,7 +153,7 @@ input:disabled, select:disabled, textarea:disabled { background-color: #e9eeea; 
 .batch-bar, #people-merge-bar { flex-wrap: wrap; gap: 8px 12px; padding: 12px 14px; background: #e5efe8; border: 1px solid #b5cdbd; border-radius: 9px; font-size: 13px; }
 #selected-count, #people-selected-count { font-weight: 600; color: #214b39; }
 #people-merge-bar { margin-bottom: 20px; }
-#photo-grid .photo-frame { background: #e9ece9; border-radius: 8px; }
+#photo-grid .photo-frame { background: transparent; border-radius: 8px; }
 #photo-grid .photo-card { border-radius: 8px; }
 #photo-grid .photo-card:hover .photo-frame img { transform: none; }
 #photo-grid .photo-card:hover .photo-frame { box-shadow: 0 0 0 2px #829b8b; }
@@ -165,7 +165,7 @@ input:disabled, select:disabled, textarea:disabled { background-color: #e9eeea; 
 #photo-grid .card-caption span { color: var(--muted); font-size: 11px; flex: 0 1 auto; min-width: 0; max-width: 56%; text-overflow: ellipsis; }
 .copy-badge { padding: 2px 7px; color: #3c5445; background: #fffffff0; border: 1px solid #dce2de; border-radius: 5px; font-size: 11px; }
 #photo-grid .stream-motion { transform: none; transition: opacity 140ms ease; }
-#photo-grid .stream-motion .photo-frame::after { background: #e9ece9; transition: opacity 140ms ease; }
+#photo-grid .stream-motion .photo-frame::after { background: transparent; opacity: 0; transition: opacity 140ms ease; }
 #photo-grid .stream-motion .photo-frame img { transition: opacity 140ms ease; }
 #photo-grid .stream-image-error .photo-frame::after { color: var(--muted); font-size: 12px; }
 #library-view:has(#photo-grid .photo-card) #empty { display: none; }
@@ -190,19 +190,34 @@ input:disabled, select:disabled, textarea:disabled { background-color: #e9eeea; 
   order: 2; flex-basis: 100%; margin: 0; color: var(--muted); line-height: 1.6;
 }
 .people-grid { grid-template-columns: repeat(auto-fill, minmax(152px, 1fr)); gap: 20px 16px; align-items: stretch; }
-.person-card { width: auto; min-width: 0; padding: 40px 12px 12px; border: 1px solid var(--line); border-radius: 12px; background: #fff; color: var(--ink); }
-.person-card:hover { border-color: #8fa697; background: #fcfdfc; }
+.person-card { width: auto; min-width: 0; padding: 22px 12px 11px; border: 1px solid var(--line); border-radius: 12px; background: #fff; color: var(--ink); }
+.person-card.person-named { background: #e3e8df; border-color: #c9d2c8; }
+.person-card.person-unnamed { background: #fbfcf9; border-color: #e7e9e2; }
+.person-card:hover { border-color: #8fa697; background: #f5f8f4; }
+.person-card.person-named:hover { background: #dce4da; }
 .person-card.selected { border-color: var(--green); outline: 2px solid var(--green); outline-offset: 0; background: #edf5ef; }
-.person-card img { width: 96px; height: 96px; border-radius: 50%; margin: 0 0 12px; background: #e9eeea; }
-.person-card .person-open { padding: 0 2px 4px; width: 100%; background: none; border: 0; }
+.person-card img { width: 90px; height: 90px; border-radius: 50%; margin: 0 0 8px; background: #e9eeea; }
+.person-card .person-open { padding: 0 2px 2px; width: 100%; background: none; border: 0; }
 .person-open { border-radius: 8px; }
 .person-card b { font-size: 14px; font-weight: 600; white-space: normal; overflow-wrap: anywhere; line-height: 1.5; }
-.person-card p { font-size: 12px; color: var(--muted); margin: 6px 0 12px; }
+.person-card p { font-size: 12px; color: var(--muted); margin: 4px 0 7px; }
 .person-card small { color: var(--ochre); font-size: 11px; }
+.people-section-divider {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin: 12px 0 -2px;
+  padding: 17px 4px 9px;
+  border-top: 1px solid #cbd3c9;
+  color: #536054;
+}
+.people-section-divider span { font: 500 16px/1.4 var(--sans); }
+.people-section-divider small { color: var(--muted); font-size: 11px; }
 .person-check { left: 8px; top: 7px; width: 32px; height: 32px; display: grid; place-items: center; cursor: pointer; }
-.person-card > .person-quick-name { position: static; width: 100%; margin: auto 0 0; min-height: 32px; padding: 5px 8px; background: var(--pale); color: var(--green); border: 1px solid #c7d8cc; border-radius: 6px; font-size: 12px; }
+.person-card > .person-quick-name { position: static; width: 100%; margin: auto 0 0; min-height: 30px; padding: 4px 8px; background: var(--pale); color: var(--green); border: 1px solid #c7d8cc; border-radius: 6px; font-size: 12px; }
 .person-card > .person-quick-name:hover { background: #d8e8dd; }
-.person-card > .person-ignore { min-height: 32px; padding: 5px 8px; width: 100%; margin-top: 5px; color: var(--muted); border-radius: 6px; font-size: 12px; }
+.person-card > .person-ignore { min-height: 30px; padding: 4px 8px; width: 100%; margin-top: 4px; color: var(--muted); border-radius: 6px; font-size: 12px; }
 .person-card > .person-ignore:hover { background: var(--surface-hover); color: var(--ink); }
 #passersby-grid .person-card { padding-top: 22px; }
 
@@ -553,8 +568,6 @@ body.is-home-view .chrome-row {
 .signature-settings span { font-size: 10px; letter-spacing: .2px; }
 .signature-memory small { font-size: 11px; }
 .signature-time-label { font-size: 10px; }
-#photo-mat.compact-signature .signature-camera small, #photo-mat.compact-signature .signature-memory small { font-size: 10px; }
-#photo-mat.compact-signature .signature-settings span, #photo-mat.compact-signature .signature-time-label { font-size: 9px; }
 
 /* Responsive changes keep labels available; compact navigation uses tooltips/ARIA. */
 @media (max-width: 1200px) {

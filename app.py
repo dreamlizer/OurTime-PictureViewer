@@ -9,6 +9,7 @@ import io
 import json
 import csv
 import math
+import mimetypes
 import sqlite3
 import threading
 import time
@@ -35,6 +36,8 @@ from library_db import (
     migrate_place_overrides, place_rules_version, upsert_place_rule,
 )
 from browse_queries import directory_predicate as directory_clause, fetch_people, fetch_photos
+
+mimetypes.add_type('font/ttf', '.ttf')
 
 BASE = Path(__file__).resolve().parent
 DATA = Path(os.environ.get('PHOTO_LIBRARY_DATA', str(BASE / 'data'))).resolve()

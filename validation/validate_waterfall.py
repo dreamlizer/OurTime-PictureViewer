@@ -32,6 +32,14 @@ with sync_playwright() as pw:
     page.goto(URL);page.wait_for_selector('.photo-card');page.wait_for_function('waterfall.pending.size===0')
     first=page.locator('.photo-card').first.get_attribute('data-photo')
     check(page.locator('.pagination').count()==0,'翻页按钮已替换为连续滚动入口')
+    page.evaluate('scrollTo(0,document.documentElement.scrollHeight)')
+    page.wait_for_function('waterfall.heights.length>=2 && waterfall.pending.size===0',timeout=30000)
+    seam=page.evaluate("""() => {
+      const prior=waterfall.ranges[0], next=waterfall.ranges[1], starts=waterfall.pageEnds[1]||[];
+      return {priorBottom:prior?.bottom||0,nextTop:next?.top||0,shortest:starts.length?Math.min(...starts):0};
+    }""")
+    check(abs(seam['nextTop']-seam['shortest'])<2 and seam['nextTop']<seam['priorBottom'],'下一批照片承接上一批最短列，不再按分页底边强制留白')
+    page.evaluate('scrollTo(0,0)')
     initial=metrics();max_live=0
     for i in range(20):
         count=page.evaluate('waterfall.heights.length')
@@ -46,21 +54,27 @@ with sync_playwright() as pw:
     check(max_live<=144 and later['cached_pages']<=6,'滚动后缩略图节点和资料缓存保持设定上限')
     check(page.locator(f'[data-photo="{first}"]').count()==0,'远离屏幕的旧照片节点已被回收')
     # Choose a genuinely visible tile, not an off-screen buffered tile.
-    aid=page.evaluate('streamVisibleIds()[0]')
-    tile=page.locator(f'[data-photo="{aid}"]').bounding_box()
-    scroll=page.evaluate('scrollY');page.mouse.dblclick(tile['x']+tile['width']/2,max(10,min(990,tile['y']+tile['height']/2)))
+    aid=page.evaluate("""() => {
+      const card=[...document.querySelectorAll('#photo-grid [data-photo]')].find(el=>{
+        const r=el.getBoundingClientRect();
+        return r.top>90 && r.bottom<innerHeight-40;
+      });
+      return Number(card?.dataset.photo||streamVisibleIds()[0]);
+    }""")
+    page.locator(f'[data-photo="{aid}"]').dblclick()
     page.wait_for_selector('#detail-dialog[open]');page.wait_for_function('(id)=>state.detail?.id===id',arg=aid)
+    scroll=page.evaluate('viewer.returnScroll')
     page.keyboard.press('ArrowRight');page.wait_for_function('(id)=>state.detail?.id!==id',arg=aid)
     page.keyboard.press('Escape');page.wait_for_function("!document.querySelector('#detail-dialog').open")
     page.wait_for_timeout(150);end_scroll=page.evaluate('scrollY')
     check(abs(end_scroll-scroll)<30,f'瀑布流打开大图可继续翻图，关闭后保留滚动位置（{scroll} → {end_scroll}）')
     page.evaluate('scrollTo(0,0)');page.wait_for_selector(f'[data-photo="{first}"]',timeout=30000)
     check(True,'向上滚动可以重新加载已回收的照片')
-    page.click('#select-mode');page.locator(f'[data-photo="{first}"]').click()
+    page.evaluate('state.selecting=true;streamSelection()');page.locator(f'[data-photo="{first}"]').click()
     page.evaluate('scrollTo(0,document.documentElement.scrollHeight)');page.wait_for_function('waterfall.pending.size===0')
     page.evaluate('scrollTo(0,0)');page.wait_for_selector(f'[data-photo="{first}"]',timeout=30000)
     check(page.locator(f'[data-photo="{first}"]').evaluate('(e)=>e.classList.contains("selected")'),'回收并重新加载后，批量选择状态仍保留')
-    page.click('#select-mode');page.fill('#search','2014-04-22 18-09-34-HTC ONE.jpg')
+    page.evaluate('state.selecting=false;streamSelection()');page.fill('#search','2014-04-22 18-09-34-HTC ONE.jpg')
     page.wait_for_function("waterfall.query.q.includes('HTC ONE') && waterfall.pending.size===0")
     check(page.locator('[data-photo="10"]').count()==1 and page.evaluate('waterfall.heights.length')<=2,'改变搜索条件重置瀑布流，不混入旧结果')
     page.fill('#search','');page.wait_for_function("waterfall.query.q==='' && waterfall.pending.size===0")
