@@ -386,30 +386,35 @@ dialog::backdrop { background: #162b2466; backdrop-filter: blur(4px); }
   margin: 0;
   padding: 0;
 }
-body.is-people-view {
-  --people-topbar-height: 60px;
-  --people-title-height: 52px;
+body.is-sticky-browser-view {
+  --sticky-topbar-height: 60px;
+  --sticky-masthead-height: 52px;
 }
-body.is-people-view .topbar {
+body.is-sticky-browser-view.is-home-view:not(.is-group-query) {
+  --sticky-masthead-height: 68px;
+}
+body.is-sticky-browser-view .topbar {
   position: sticky;
   top: 0;
   z-index: 12;
-  min-height: var(--people-topbar-height);
-  height: var(--people-topbar-height);
+  min-height: var(--sticky-topbar-height);
+  height: var(--sticky-topbar-height);
   background: var(--paper);
 }
-body.is-people-view .masthead {
+body.is-sticky-browser-view .masthead {
   position: sticky;
-  top: var(--people-topbar-height);
+  top: var(--sticky-topbar-height);
   z-index: 11;
-  min-height: var(--people-title-height);
-  height: var(--people-title-height);
+  min-height: var(--sticky-masthead-height);
+  height: var(--sticky-masthead-height);
   padding: 10px 0 4px;
   background: var(--paper);
 }
-#people-view .people-view-chrome {
-  top: calc(var(--people-topbar-height) + var(--people-title-height));
+body.is-sticky-browser-view .view-chrome {
+  top: calc(var(--sticky-topbar-height) + var(--sticky-masthead-height));
   z-index: 10;
+}
+#people-view .people-view-chrome {
   padding: 4px 0 10px;
 }
 #people-view .toolbar {
@@ -606,6 +611,7 @@ body.is-people-view .masthead {
   .footer-right { float: none; display: block; margin: 6px 0 0; }
 }
 @media (max-width: 540px) {
+  body.is-sticky-browser-view.is-home-view:not(.is-group-query) { --sticky-masthead-height: 140px; }
   main { padding-inline: 12px; }
   .breadcrumb { display: none; }
   .topbar { justify-content: flex-end; }

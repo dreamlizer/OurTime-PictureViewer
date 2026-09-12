@@ -148,6 +148,8 @@ function updateChrome(){
   const stats=$('#stats'); if(stats) stats.hidden=!showStats;
   document.body.classList.toggle('is-subpage',!showStats);
   document.body.classList.toggle('is-people-view',view==='people');
+  const stickyBrowserView=view==='people'||['timeline','folders','places','groups'].includes(view)||String(view).startsWith('place:')||String(view).startsWith('group:');
+  document.body.classList.toggle('is-sticky-browser-view',stickyBrowserView);
   const namedCount=$('#people-named-count'); if(namedCount) namedCount.hidden=view!=='people';
   document.body.classList.toggle('is-group-query',String(view).startsWith('group:'));
   const organizeNav=$('#organize-nav');
