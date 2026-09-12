@@ -4,54 +4,57 @@
 
 const VIEWER_PREFS_KEY='ourtime.viewer.preferences.v2';
 const FACE_STYLE_PRESETS={
-  ink:{
-    fontSize:14,
-    fontFamily:'kai',
-    textColor:'#f6efe2',
-    backgroundColor:'#1b201c',
-    backgroundOpacity:.48,
-    radius:10,
+  classic:{
+    theme:'classic',
+    fontSize:13,
+    fontFamily:'serif',
+    textColor:'#f6f1e6',
+    backgroundColor:'#141812',
+    backgroundOpacity:.38,
+    radius:4,
+    paddingX:7,
+    paddingY:5,
+    shadow:true
+  },
+  soft:{
+    theme:'soft',
+    fontSize:13,
+    fontFamily:'serif',
+    textColor:'#30342f',
+    backgroundColor:'#f2eee5',
+    backgroundOpacity:.88,
+    radius:7,
+    paddingX:8,
+    paddingY:6,
+    shadow:false
+  },
+  outline:{
+    theme:'outline',
+    fontSize:13,
+    fontFamily:'serif',
+    textColor:'#fbf8f0',
+    backgroundColor:'#111410',
+    backgroundOpacity:.18,
+    radius:4,
     paddingX:8,
     paddingY:6,
     shadow:true
   },
-  paper:{
-    fontSize:14,
-    fontFamily:'fangsong',
-    textColor:'#332d25',
-    backgroundColor:'#eee3cc',
-    backgroundOpacity:.94,
-    radius:0,
-    paddingX:8,
-    paddingY:7,
-    shadow:false
-  },
-  tea:{
-    fontSize:14,
+  accent:{
+    theme:'accent',
+    fontSize:13,
     fontFamily:'serif',
-    textColor:'#f5ead6',
-    backgroundColor:'#443329',
-    backgroundOpacity:.80,
-    radius:4,
+    textColor:'#fbf1e7',
+    backgroundColor:'#654740',
+    backgroundOpacity:.76,
+    radius:5,
     paddingX:8,
-    paddingY:7,
-    shadow:true
-  },
-  cinnabar:{
-    fontSize:14,
-    fontFamily:'kai',
-    textColor:'#faead4',
-    backgroundColor:'#753f34',
-    backgroundOpacity:.88,
-    radius:4,
-    paddingX:8,
-    paddingY:7,
-    shadow:true
+    paddingY:6,
+    shadow:false
   }
 };
 const DEFAULT_FACE_STYLE={
-  theme:'ink',
-  ...FACE_STYLE_PRESETS.ink
+  ...FACE_STYLE_PRESETS.classic
 };
 function readViewerPrefs(){
   try{
@@ -60,6 +63,14 @@ function readViewerPrefs(){
   }catch(e){return {};}
 }
 const storedViewerPrefs=readViewerPrefs();
+const LEGACY_FACE_THEMES=new Set(['ink','paper','tea','cinnabar']);
+function initialFaceStyle(){
+  const stored=storedViewerPrefs.faceStyle;
+  if(!stored)return {...DEFAULT_FACE_STYLE};
+  if(LEGACY_FACE_THEMES.has(stored.theme))return {...DEFAULT_FACE_STYLE};
+  const theme=Object.prototype.hasOwnProperty.call(FACE_STYLE_PRESETS,stored.theme)?stored.theme:'classic';
+  return {...FACE_STYLE_PRESETS[theme],...stored,theme};
+}
 const viewer={
   ids:[],index:0,target:0,offset:0,total:0,context:null,generation:0,busy:false,
   timer:null,playing:false,scale:1,fit:true,loader:null,drafts:new Map(),window:200,
@@ -68,7 +79,7 @@ const viewer={
   faceAlias:storedViewerPrefs.faceAlias===true,
   faceVertical:storedViewerPrefs.faceVertical!==false,
   faceLabelPosition:['auto','left','right'].includes(storedViewerPrefs.faceLabelPosition)?storedViewerPrefs.faceLabelPosition:'auto',
-  faceStyle:{...DEFAULT_FACE_STYLE,...(storedViewerPrefs.faceStyle||{})}
+  faceStyle:initialFaceStyle()
 };
 function saveViewerPrefs(){
   try{
@@ -160,7 +171,7 @@ function buildFaceStylePopover(){
   pop.innerHTML=`
     <div class="face-style-head"><b>人名标签</b><button type="button" id="face-style-close" aria-label="关闭">×</button></div>
     <div class="face-style-preview"><span id="face-style-preview-label">示例姓名</span></div>
-    <label>风格 <select id="face-theme"><option value="ink">烟墨玻璃</option><option value="paper">宣纸雅笺</option><option value="tea">茶褐书签</option><option value="cinnabar">朱砂印签</option></select></label>
+    <label>风格 <select id="face-theme"><option value="classic">原始</option><option value="soft">雾白</option><option value="outline">线框</option><option value="accent">暗朱</option></select></label>
     <label>字号 <output id="face-font-size-value"></output><input id="face-font-size" type="range" min="10" max="22" step="1"></label>
     <label>字体 <select id="face-font-family"><option value="sans">黑体 / 无衬线</option><option value="serif">宋体 / 衬线</option><option value="kai">楷体</option><option value="fangsong">仿宋</option></select></label>
     <label>标签位置 <select id="face-label-position"><option value="auto">自动</option><option value="left">优先左侧</option><option value="right">优先右侧</option></select></label>
@@ -187,8 +198,8 @@ function buildFaceStylePopover(){
 }
 function applyFacePreset(name){
   const valid=Object.prototype.hasOwnProperty.call(FACE_STYLE_PRESETS,name);
-  const theme=valid?name:'ink';
-  viewer.faceStyle={theme,...FACE_STYLE_PRESETS[theme]};
+  const theme=valid?name:'classic';
+  viewer.faceStyle={...FACE_STYLE_PRESETS[theme]};
   applyFaceStyle();
   saveViewerPrefs();
   if(state.detail)requestAnimationFrame(()=>renderFaceNames(state.detail));
@@ -202,7 +213,7 @@ function faceFontStack(kind){
 function applyFaceStyle(){
   const root=$('#detail-dialog')||document.documentElement;
   const s=viewer.faceStyle||DEFAULT_FACE_STYLE;
-  const theme=Object.prototype.hasOwnProperty.call(FACE_STYLE_PRESETS,s.theme)?s.theme:'ink';
+  const theme=Object.prototype.hasOwnProperty.call(FACE_STYLE_PRESETS,s.theme)?s.theme:'classic';
   root.dataset.faceTheme=theme;
   const pop=$('#face-style-popover');
   if(pop)pop.dataset.faceTheme=theme;

@@ -211,187 +211,83 @@
 }
 
 /* ==================================================
-   Face label themes
+   Face label variants
+   Mature compact-label system: Classic / Soft / Outline / Accent
    ================================================== */
 
 #detail-dialog .face-name:not(.unnamed){
   position:absolute;
-  isolation:isolate;
   border:1px solid transparent;
   transition:
-    background-color .15s ease,
-    border-color .15s ease,
-    color .15s ease;
+    background-color .14s ease,
+    border-color .14s ease,
+    color .14s ease,
+    box-shadow .14s ease;
+  background-image:none;
 }
 
-/* ---------- 1. 烟墨玻璃 ---------- */
-
-#detail-dialog[data-face-theme="ink"] .face-name:not(.unnamed){
-  border-color:rgba(233,221,191,.30);
-  background-image:
-    linear-gradient(
-      180deg,
-      rgba(255,255,255,.055),
-      rgba(255,255,255,0) 38%,
-      rgba(0,0,0,.06)
-    );
-  box-shadow:
-    0 3px 14px rgba(0,0,0,.16),
-    inset 0 0 0 1px rgba(255,255,255,.025);
-  backdrop-filter:blur(5px) saturate(.9);
-}
-
-#detail-dialog[data-face-theme="ink"] .face-name-layer:not(.horizontal) .face-name:not(.unnamed)::before,
-#detail-dialog[data-face-theme="ink"] .face-name-layer:not(.horizontal) .face-name:not(.unnamed)::after{
-  content:"";
-  position:absolute;
-  left:50%;
-  width:3px;
-  height:3px;
-  margin-left:-1.5px;
-  border-radius:50%;
-  background:rgba(237,222,187,.68);
-  pointer-events:none;
-}
-
-#detail-dialog[data-face-theme="ink"] .face-name-layer:not(.horizontal) .face-name:not(.unnamed)::before{top:3px}
-#detail-dialog[data-face-theme="ink"] .face-name-layer:not(.horizontal) .face-name:not(.unnamed)::after{bottom:3px}
-
-/* ---------- 2. 宣纸雅笺 ---------- */
-
-#detail-dialog[data-face-theme="paper"] .face-name:not(.unnamed){
-  border-color:rgba(92,75,55,.18);
-  background-image:
-    radial-gradient(circle at 20% 25%,rgba(120,95,65,.07) 0 1px,transparent 1.5px),
-    radial-gradient(circle at 76% 70%,rgba(120,95,65,.045) 0 1px,transparent 1.4px),
-    linear-gradient(100deg,rgba(255,255,255,.16),rgba(100,76,48,.025));
-  background-size:13px 17px,17px 19px,100% 100%;
-  box-shadow:
-    0 2px 8px rgba(54,43,30,.10),
-    inset 0 0 12px rgba(113,91,61,.035);
-  backdrop-filter:none;
-}
-
-#detail-dialog[data-face-theme="paper"] .face-name-layer:not(.horizontal) .face-name:not(.unnamed){
-  padding-bottom:calc(var(--face-padding-y) + 10px);
-}
-
-#detail-dialog[data-face-theme="paper"] .face-name-layer:not(.horizontal) .face-name:not(.unnamed)::after{
-  content:"";
-  position:absolute;
-  left:50%;
-  bottom:3px;
-  width:19px;
-  height:9px;
-  transform:translateX(-50%);
-  background:#6e5b45;
-  opacity:.44;
-  pointer-events:none;
-  -webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 22'%3E%3Cpath d='M4 18C15 15 22 10 31 3M18 12l-5-6M25 8l6 5' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'/%3E%3Ccircle cx='11' cy='7' r='2.3' fill='black'/%3E%3Ccircle cx='32' cy='4' r='2.4' fill='black'/%3E%3Ccircle cx='33' cy='14' r='2' fill='black'/%3E%3C/svg%3E") center/contain no-repeat;
-  mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 22'%3E%3Cpath d='M4 18C15 15 22 10 31 3M18 12l-5-6M25 8l6 5' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'/%3E%3Ccircle cx='11' cy='7' r='2.3' fill='black'/%3E%3Ccircle cx='32' cy='4' r='2.4' fill='black'/%3E%3Ccircle cx='33' cy='14' r='2' fill='black'/%3E%3C/svg%3E") center/contain no-repeat;
-}
-
-#detail-dialog[data-face-theme="paper"] .face-name-layer:not(.horizontal) .face-name:not(.unnamed):nth-child(even)::after{
-  transform:translateX(-50%) scaleX(-1);
-}
-
-/* ---------- 3. 茶褐书签 ---------- */
-
-#detail-dialog[data-face-theme="tea"] .face-name:not(.unnamed){
-  border-color:rgba(220,191,147,.38);
-  background-image:
-    linear-gradient(
-      90deg,
-      rgba(255,255,255,.025),
-      transparent 26%,
-      rgba(255,255,255,.035) 62%,
-      transparent
-    );
-  box-shadow:
-    0 3px 12px rgba(35,24,18,.22),
-    inset 0 0 0 1px rgba(255,239,207,.035);
+/* Classic: keep the earliest label treatment as the default. */
+#detail-dialog[data-face-theme="classic"] .face-name:not(.unnamed){
+  background:var(--face-bg-rgba);
+  color:var(--face-text-color);
+  border-color:transparent;
+  box-shadow:0 1px 2px rgba(0,0,0,.08);
+  text-shadow:var(--face-shadow);
   backdrop-filter:blur(2px);
+  -webkit-backdrop-filter:blur(2px);
 }
 
-#detail-dialog[data-face-theme="tea"] .face-name-layer:not(.horizontal) .face-name:not(.unnamed){
-  padding-bottom:calc(var(--face-padding-y) + 11px);
+/* Soft: quiet surface with a barely visible boundary. */
+#detail-dialog[data-face-theme="soft"] .face-name:not(.unnamed){
+  background:var(--face-bg-rgba);
+  color:var(--face-text-color);
+  border-color:rgba(58,63,57,.11);
+  box-shadow:0 1px 6px rgba(32,35,31,.07);
+  text-shadow:none;
+  backdrop-filter:blur(5px) saturate(.92);
+  -webkit-backdrop-filter:blur(5px) saturate(.92);
 }
 
-#detail-dialog[data-face-theme="tea"] .face-name-layer:not(.horizontal) .face-name:not(.unnamed)::after{
-  content:"";
-  position:absolute;
-  left:50%;
-  bottom:3px;
-  width:20px;
-  height:10px;
-  transform:translateX(-50%);
-  background:#dbc49b;
-  opacity:.56;
-  pointer-events:none;
-  -webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 24'%3E%3Cpath d='M23 22C24 14 25 8 28 2' stroke='black' stroke-width='2' fill='none'/%3E%3Cpath d='M25 15C16 13 12 9 9 5c7 0 12 2 17 7M27 10c7-5 12-5 16-4-3 5-8 8-16 8M23 18c-7-2-11-1-15 1 4 3 9 4 15 2' fill='black'/%3E%3C/svg%3E") center/contain no-repeat;
-  mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 24'%3E%3Cpath d='M23 22C24 14 25 8 28 2' stroke='black' stroke-width='2' fill='none'/%3E%3Cpath d='M25 15C16 13 12 9 9 5c7 0 12 2 17 7M27 10c7-5 12-5 16-4-3 5-8 8-16 8M23 18c-7-2-11-1-15 1 4 3 9 4 15 2' fill='black'/%3E%3C/svg%3E") center/contain no-repeat;
+/* Outline: let the boundary carry the label without a heavy fill. */
+#detail-dialog[data-face-theme="outline"] .face-name:not(.unnamed){
+  background:var(--face-bg-rgba);
+  color:var(--face-text-color);
+  border-color:rgba(255,255,255,.56);
+  box-shadow:0 1px 3px rgba(0,0,0,.12);
+  text-shadow:0 1px 3px rgba(0,0,0,.58);
+  backdrop-filter:blur(3px);
+  -webkit-backdrop-filter:blur(3px);
 }
 
-#detail-dialog[data-face-theme="tea"] .face-name-layer:not(.horizontal) .face-name:not(.unnamed):nth-child(even)::after{
-  transform:translateX(-50%) scaleX(-1);
-}
-
-/* ---------- 4. 朱砂印签 ---------- */
-
-#detail-dialog[data-face-theme="cinnabar"] .face-name:not(.unnamed){
-  border-color:rgba(225,179,137,.50);
+/* Accent: one restrained line gives the dark surface recognition. */
+#detail-dialog[data-face-theme="accent"] .face-name:not(.unnamed){
+  background:var(--face-bg-rgba);
+  color:var(--face-text-color);
+  border-color:rgba(244,217,195,.18);
   box-shadow:
-    0 3px 12px rgba(62,29,22,.22),
-    inset 0 0 0 1px rgba(255,232,198,.06);
-  background-image:
-    linear-gradient(
-      135deg,
-      rgba(255,255,255,.035),
-      transparent 45%,
-      rgba(75,22,18,.06)
-    );
-  backdrop-filter:blur(2px);
+    inset 2px 0 0 rgba(238,198,163,.62),
+    0 2px 7px rgba(37,22,18,.11);
+  text-shadow:none;
+  backdrop-filter:blur(3px);
+  -webkit-backdrop-filter:blur(3px);
 }
 
-#detail-dialog[data-face-theme="cinnabar"] .face-name-layer:not(.horizontal) .face-name:not(.unnamed){
-  padding-bottom:calc(var(--face-padding-y) + 11px);
+#detail-dialog[data-face-theme="accent"] .face-name-layer.horizontal .face-name:not(.unnamed){
+  box-shadow:
+    inset 0 -2px 0 rgba(238,198,163,.62),
+    0 2px 7px rgba(37,22,18,.11);
 }
 
-#detail-dialog[data-face-theme="cinnabar"] .face-name-layer:not(.horizontal) .face-name:not(.unnamed)::after{
-  content:"";
-  position:absolute;
-  left:50%;
-  bottom:3px;
-  width:20px;
-  height:9px;
-  transform:translateX(-50%);
-  background:#ecc9a5;
-  opacity:.62;
-  pointer-events:none;
-  -webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 52 22'%3E%3Cpath d='M4 15c3-5 8-5 11-1 1-6 10-7 13-2 3-5 11-4 13 1 5-2 8 1 8 4H4c0-1 0-1 0-2Zm9 2c3-4 7-4 10 0m5 0c3-4 7-4 10 0' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E") center/contain no-repeat;
-  mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 52 22'%3E%3Cpath d='M4 15c3-5 8-5 11-1 1-6 10-7 13-2 3-5 11-4 13 1 5-2 8 1 8 4H4c0-1 0-1 0-2Zm9 2c3-4 7-4 10 0m5 0c3-4 7-4 10 0' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E") center/contain no-repeat;
-}
-
-#detail-dialog[data-face-theme="cinnabar"] .face-name-layer:not(.horizontal) .face-name:not(.unnamed):nth-child(even)::after{
-  transform:translateX(-50%) scaleX(-1);
-}
-
-/* ---------- 横排名字不要出现竖签底部纹样 ---------- */
-
-#detail-dialog .face-name-layer.horizontal .face-name:not(.unnamed)::before,
-#detail-dialog .face-name-layer.horizontal .face-name:not(.unnamed)::after{
-  display:none;
-}
-
-/* ---------- 未命名 + 永远保持轻量 ---------- */
-
+/* Unnamed '+' stays lightweight and independent from named themes. */
 #detail-dialog[data-face-theme] .face-name.unnamed{
   border:0;
   background:rgba(20,24,18,.24);
   background-image:none;
   color:rgba(246,241,230,.82);
   box-shadow:none;
+  text-shadow:none;
   backdrop-filter:blur(2px);
+  -webkit-backdrop-filter:blur(2px);
 }
 
 /* ---------- slim, grouped toolbar ---------- */
@@ -533,7 +429,7 @@
   place-items:center;
   margin:0 0 13px;
   border-radius:10px;
-  background:linear-gradient(135deg,#d7d4ca,#7d887c 55%,#d6cfc0);
+  background:#e5e8e2;
   overflow:hidden;
 }
 #detail-dialog #face-style-preview-label{
@@ -541,6 +437,26 @@
   padding:5px 7px;
   writing-mode:horizontal-tb;
   white-space:nowrap;
+  border:1px solid transparent;
+  transition:all .14s ease;
+}
+#detail-dialog .face-style-popover[data-face-theme="classic"] #face-style-preview-label{
+  border-color:transparent;
+  box-shadow:0 1px 2px rgba(0,0,0,.08);
+}
+#detail-dialog .face-style-popover[data-face-theme="soft"] #face-style-preview-label{
+  border-color:rgba(58,63,57,.11);
+  box-shadow:0 1px 6px rgba(32,35,31,.07);
+}
+#detail-dialog .face-style-popover[data-face-theme="outline"] #face-style-preview-label{
+  border-color:rgba(255,255,255,.56);
+  box-shadow:0 1px 3px rgba(0,0,0,.12);
+}
+#detail-dialog .face-style-popover[data-face-theme="accent"] #face-style-preview-label{
+  border-color:rgba(244,217,195,.18);
+  box-shadow:
+    inset 2px 0 0 rgba(238,198,163,.62),
+    0 2px 7px rgba(37,22,18,.11);
 }
 #detail-dialog .face-style-popover>label{
   display:grid;
