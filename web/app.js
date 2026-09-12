@@ -344,9 +344,16 @@ async function fetchPeoplePage(kind, reset=false, viewToken=null){
     const total=$(kind==='people'?'#people-total':'#passersby-total');
     if(kind==='people')state.people=stream.items; else state.passersby=stream.items;
     if(total)total.textContent=kind==='people'?'':(fmt(stream.total)+' 组路人');
-    if(grid)grid.innerHTML=stream.items.length?stream.items.map(p=>personCard(p,kind)).join(''):`<div class="no-results" style="grid-column:1/-1">${kind==='people'?'还没有人物分组。到“扫描与入库”勾选人脸检测，扫描照片后即可核对和命名。':'还没有标为路人的面孔。'}</div>`;
+    if(grid){
+      grid.classList.remove('is-switching');
+      grid.innerHTML=stream.items.length?stream.items.map(p=>personCard(p,kind)).join(''):`<div class="no-results" style="grid-column:1/-1">${kind==='people'?'还没有人物分组。到“扫描与入库”勾选人脸检测，扫描照片后即可核对和命名。':'还没有标为路人的面孔。'}</div>`;
+    }
     if(status)status.textContent=stream.more?'向下滚动继续加载':(stream.items.length?'已显示全部':'');
     if(kind==='people')updatePeopleMerge();
+  }catch(err){
+    const failed=$(kind==='people'?'#people-grid':'#passersby-grid');
+    if(failed && ticket===stream.generation)failed.classList.remove('is-switching');
+    throw err;
   }finally{ if(ticket===stream.generation)stream.loading=false; }
 }
 async function loadPeopleOptions(){
@@ -473,7 +480,12 @@ async function loadPlaces(reset=true, viewToken=null){
   const stream=state.placeStream; if(stream.loading||(!reset&&!stream.more))return; stream.loading=true;
   const status=$('#places-stream-status'); if(status&&q)status.textContent=reset?'正在搜索地点…':'继续加载…';
   try{
-    if(!q){ await loadPlaceMap(); return; }
+    if(!q){
+      await loadPlaceMap();
+      const list=$('#places-list');
+      if(list && (!viewToken || isCurrentView(viewToken))) list.classList.remove('is-switching');
+      return;
+    }
     const ticket=state.placeGeneration; const data=await api('/api/places?'+new URLSearchParams({q:stream.q,offset:String(stream.offset),limit:'24'}), {signal:state.placeAbort&&state.placeAbort.signal}); if(ticket!==state.placeGeneration||(viewToken&&!isCurrentView(viewToken)))return;
     stream.total=data.total; stream.unknown=data.unknown||0; stream.dated=data.dated||0;
     stream.items=reset?data.places:stream.items.concat(data.places||[]);
