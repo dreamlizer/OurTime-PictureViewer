@@ -128,16 +128,25 @@ def main() -> int:
         page.wait_for_timeout(200)
         sticky_geometry = page.evaluate(
             """() => {
+                const topbar = document.querySelector('.topbar').getBoundingClientRect();
+                const masthead = document.querySelector('.masthead').getBoundingClientRect();
                 const title = document.querySelector('#page-title').getBoundingClientRect();
                 const search = document.querySelector('#people-search').closest('.people-search').getBoundingClientRect();
-                return {title, search, viewport: innerHeight};
+                const add = document.querySelector('#add-folder').getBoundingClientRect();
+                return {topbar, masthead, title, search, add, viewport: innerHeight};
             }"""
         )
         check(
-            sticky_geometry["title"]["top"] >= 0
-            and sticky_geometry["search"]["top"] >= sticky_geometry["title"]["bottom"]
+            abs(sticky_geometry["topbar"]["top"]) <= 1
+            and sticky_geometry["masthead"]["top"] >= sticky_geometry["topbar"]["bottom"] - 1
+            and sticky_geometry["search"]["top"] >= sticky_geometry["masthead"]["bottom"] - 1
             and sticky_geometry["search"]["bottom"] < sticky_geometry["viewport"],
-            "向下滚动后标题、搜索框和合并按钮仍固定可见",
+            "向下滚动后顶栏、标题和搜索工具按顺序固定",
+        )
+        check(
+            sticky_geometry["add"]["top"] >= 0
+            and sticky_geometry["title"]["top"] >= sticky_geometry["topbar"]["bottom"] - 1,
+            "添加照片按钮和人物大标题都不会随列表滚走",
         )
         page.screenshot(path=str(REPORT / "people-header-sticky.png"))
         page.evaluate("window.scrollTo(0, 0)")
@@ -260,8 +269,9 @@ def main() -> int:
         check(
             page.locator("#page-title").is_visible()
             and page.locator("#people-search").is_visible()
-            and page.locator("#people-merge-toggle").is_visible(),
-            "390px 滚动后人物标题和工具仍可见",
+            and page.locator("#people-merge-toggle").is_visible()
+            and page.locator("#add-folder").is_visible(),
+            "390px 滚动后顶栏、人物标题和工具仍可见",
         )
         page.screenshot(path=str(REPORT / "people-header-390.png"))
 

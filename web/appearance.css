@@ -373,7 +373,7 @@ dialog::backdrop { background: #162b2466; backdrop-filter: blur(4px); }
 #toast.error { background: #923b33; }
 
 
-/* Sticky page chrome: title/search/merge stay visible while the list scrolls. */
+/* Sticky page chrome: people navigation, title and tools stay fixed as one stack. */
 .view-chrome {
   position: sticky;
   top: 0;
@@ -386,18 +386,30 @@ dialog::backdrop { background: #162b2466; backdrop-filter: blur(4px); }
   margin: 0;
   padding: 0;
 }
-body.is-people-view .masthead {
+body.is-people-view {
+  --people-topbar-height: 60px;
+  --people-title-height: 52px;
+}
+body.is-people-view .topbar {
   position: sticky;
   top: 0;
-  z-index: 10;
-  min-height: 52px;
-  height: 52px;
+  z-index: 12;
+  min-height: var(--people-topbar-height);
+  height: var(--people-topbar-height);
+  background: var(--paper);
+}
+body.is-people-view .masthead {
+  position: sticky;
+  top: var(--people-topbar-height);
+  z-index: 11;
+  min-height: var(--people-title-height);
+  height: var(--people-title-height);
   padding: 10px 0 4px;
   background: var(--paper);
 }
 #people-view .people-view-chrome {
-  top: 52px;
-  z-index: 9;
+  top: calc(var(--people-topbar-height) + var(--people-title-height));
+  z-index: 10;
   padding: 4px 0 10px;
 }
 #people-view .toolbar {
