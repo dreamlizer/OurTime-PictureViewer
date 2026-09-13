@@ -3,6 +3,17 @@
 // adaptive photo metadata strip. 2026-09-11.
 
 const VIEWER_PREFS_KEY='ourtime.viewer.preferences.v2';
+const SIGNATURE_STYLES=[
+  {key:'original',label:'原版'},
+  {key:'classic',label:'双端参数'},
+  {key:'gallery',label:'作品底签'},
+  {key:'handwritten',label:'手写题签'},
+  {key:'tone',label:'随照片取色'}
+];
+// A browsing-session choice: a fresh page always starts with the original.
+let signatureStyleIndex=0;
+let signaturePaletteSrc='';
+let signatureLayouts=null;
 const FACE_LABEL_IMAGES={
   ivory:{
     s:'/api/face-label-bg/1.png',
@@ -791,6 +802,7 @@ function clearViewerImage(){
  if(signature){signature.hidden=true;signature.replaceChildren();}
  if(faces){faces.hidden=true;faces.replaceChildren();}
  const favorite=$('#photo-favorite');if(favorite)favorite.hidden=true;
+ const placeMap=$('#photo-place-map');if(placeMap)placeMap.hidden=true;
 }
 function setViewerLoading(loading){
  const dialog=$('#detail-dialog'),img=$('#detail-img'),signature=$('#photo-signature'),faces=$('#face-name-layer'),stage=document.querySelector('.viewer-stage');
@@ -866,6 +878,24 @@ function syncPhotoFavorite(photo=state.detail){
  const label=button.querySelector('span');if(label)label.textContent=favorite?'已收藏':'收藏';
 }
 $('#photo-favorite')?.addEventListener('click',action(togglePhotoFavorite));
+function syncPhotoPlaceButton(photo=state.detail){
+ const button=$('#photo-place-map');if(!button)return;
+ const ready=Boolean(photo&&photo.id);
+ const located=ready&&hasPhotoCoordinates(photo);
+ button.hidden=!ready;
+ button.dataset.located=String(located);
+ button.setAttribute('aria-label',located?'在地图上查看这张照片':'这张照片没有定位坐标');
+ button.title=located?'在地图上查看':'没有定位坐标';
+}
+async function openCurrentPhotoPlaceMap(){
+ const photo=state.detail;
+ if(!hasPhotoCoordinates(photo))throw new Error('这张照片没有定位坐标');
+ const context=viewer.context?{...viewer.context}:currentBrowseContext();
+ const dialog=$('#detail-dialog');
+ if(dialog&&dialog.open){const closed=new Promise(resolve=>dialog.addEventListener('close',resolve,{once:true}));closePhotoViewer();await closed;}
+ await showPhotoPlaceMap(photo,{context,returnView:state.view,absolute:viewer.absolute});
+}
+$('#photo-place-map')?.addEventListener('click',action(async e=>{e.preventDefault();e.stopPropagation();await openCurrentPhotoPlaceMap();}));
 function scheduleSlide(){clearTimeout(viewer.timer);viewer.timer=setTimeout(async()=>{try {await movePhoto(1,true);}catch(e){viewerMessage(e.message);stopSlides();}},Number($('#slide-delay').value)*1000);}
 function updatePosition(){
  const absolute=Number.isFinite(viewer.absolute)?viewer.absolute:(viewer.offset||0)+(viewer.index||0);
@@ -882,7 +912,8 @@ function signatureHeightForMode(mode){
 }
 function signatureWidthForPhoto(width){
  const signature=$('#photo-signature');
- return signature&&!signature.hidden?Math.max(width,Math.min(280,$('#image-viewport').clientWidth)):width;
+ const frame=signature?.dataset.style==='tone'?12:0;
+ return signature&&!signature.hidden?Math.max(width,Math.min(280,$('#image-viewport').clientWidth-frame)):width;
 }
 function applySignatureMode(mode,width){
  const dialog=$('#detail-dialog');
@@ -902,14 +933,15 @@ function applySignatureMode(mode,width){
 function updateZoom(reset=false){
  const img=$('#detail-img'),area=$('#image-viewport'),mat=$('#photo-mat');if(!img.naturalWidth)return;
  const signature=$('#photo-signature');
+ const framed=signature&&!signature.hidden&&signature.dataset.style==='tone';
   let w=0,h=0;
   let reserved=0;
   // Reserve monotonically within one fit operation so a breakpoint cannot
   // oscillate between a wider/shorter and narrower/taller caption.
   for(let pass=0;pass<10;pass++){
    if(viewer.fit){
-    const width=Math.max(40,area.clientWidth);
-    const height=Math.max(1,area.clientHeight-reserved);
+    const width=Math.max(40,area.clientWidth-(framed?12:0));
+    const height=Math.max(1,area.clientHeight-reserved-(framed?6:0));
     viewer.scale=Math.min(width/img.naturalWidth,height/img.naturalHeight);
    }
    w=Math.max(1,Math.round(img.naturalWidth*viewer.scale));
@@ -989,10 +1021,94 @@ function renderSignature(a,file){
     ${exposure.length?`<div class="signature-exposure">${exposureMarkup}</div>`:''}
    </div>
    <div id="signature-format" class="signature-file"${hasFile?'':' hidden'}>${fileMarkup}</div>
-  </div>`;
+  </div>
+  <button type="button" class="signature-switch" aria-describedby="signature-switch-tip" title="">
+   <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="4" width="14" height="12" rx="2"/><path d="M3 12h14M7 14h2m3 0h1"/></svg>
+  </button>
+  <span id="signature-switch-tip" class="signature-switch-tip" role="tooltip"></span>`;
  signature.hidden=false;
  signature.title=title;
+ const cameraLine=camera?`<strong class="caption-camera" title="${esc(camera)}">${esc(camera)}</strong>`:'';
+ const dateLine=shownDate?`<span class="caption-date">${dateMarkup}${timeKindMarkup}</span>`:'';
+ const placeLine=place?`<span class="caption-place" title="${esc(place)}">${esc(place)}</span>`:'';
+ const memoryLine=`<div class="caption-memory">${dateLine}${placeLine}</div>`;
+ const exposureLine=exposure.length?`<div class="caption-exposure">${exposureMarkup}</div>`:'';
+ const filesLine=hasFile?`<div class="caption-files">${fileMarkup}</div>`:'';
+ const redMark='<span class="caption-brand caption-red" role="img" aria-label="拾光红色圆形字标"><svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="24" fill="#d21e28"/><text x="24" y="29" text-anchor="middle" fill="white" font-family="Ma Shan Zheng" font-size="20">拾光</text></svg></span>';
+ const blueMark='<span class="caption-brand caption-blue" role="img" aria-label="拾光蓝色光学方标"><svg viewBox="0 0 40 40" aria-hidden="true"><path fill="#123cba" d="M0 0h40v40q-20-7-40 0z"/><path d="M10 25h20M20 9v10m-9-7 4 5m14-5-4 5m-7 3c0 6-3 8-7 9m12-9v7q0 2 6 1" stroke="white" stroke-width="1.7" fill="none" stroke-linecap="round"/></svg></span>';
+ const galleryMark='<span class="caption-brand caption-gallery-brand" aria-label="拾光相册"><svg viewBox="0 0 36 30" aria-hidden="true"><path d="m4 23 10-16h7l-5 8h8l5-8h5L24 23h-7l5-8h-8l-5 8z" fill="currentColor"/></svg><span>拾光相册</span></span>';
+ const ringMark='<span class="caption-brand caption-ring" role="img" aria-label="拾光光圈圆环标"><svg viewBox="0 0 36 36" aria-hidden="true"><circle cx="18" cy="18" r="15"/><circle cx="18" cy="18" r="10"/><path d="M18 8v6m10 4h-6m-4 10v-6M8 18h6"/><circle cx="18" cy="18" r="3"/></svg></span>';
+ signatureLayouts={
+  original:signature.querySelector('.signature-v3').innerHTML,
+  classic:`<div class="caption-panel caption-left">${cameraLine||'<strong class="caption-camera">拾光相册</strong>'}${memoryLine}</div><div class="caption-panel caption-right caption-leica-lockup">${redMark}<div class="caption-technical">${exposureLine}${filesLine}</div></div>`,
+  gallery:`<div class="caption-panel caption-left">${cameraLine||'<strong class="caption-camera">拾光相册</strong>'}${memoryLine}</div><div class="caption-panel caption-right">${galleryMark}${exposureLine}${filesLine}</div>`,
+  handwritten:`<div class="caption-panel caption-left"><div class="caption-optical-lockup">${cameraLine||'<strong class="caption-camera">拾光</strong>'}${blueMark}</div>${exposureLine}${filesLine}</div><div class="caption-panel caption-right"><span class="caption-handmark" role="img" aria-label="拾光相册手写字标">拾光相册</span>${memoryLine}</div>`,
+  tone:`<div class="caption-panel caption-left"><div class="caption-tone-lockup"><span class="caption-tone-wordmark">拾光相册</span>${ringMark}</div>${cameraLine}</div><div class="caption-panel caption-right">${exposureLine}${memoryLine}${filesLine}</div>`
+ };
+ applySignatureStyle();
 }
+function applySignatureStyle(){
+ const signature=$('#photo-signature');
+ if(!signature)return;
+ const style=SIGNATURE_STYLES[signatureStyleIndex];
+ signature.dataset.style=style.key;
+ const content=signature.querySelector('.signature-v3');
+ if(content&&signatureLayouts){
+  content.innerHTML=signatureLayouts[style.key];
+  content.classList.toggle('signature-designed',style.key!=='original');
+ }
+ $('#photo-mat').dataset.captionStyle=style.key;
+ const next=SIGNATURE_STYLES[(signatureStyleIndex+1)%SIGNATURE_STYLES.length];
+ const button=signature.querySelector('.signature-switch');
+ if(button)button.setAttribute('aria-label',`点击切换标签样式；当前${style.label}，下一款${next.label}`);
+ const tip=signature.querySelector('.signature-switch-tip');
+ if(tip)tip.textContent=`点击切换 · ${style.label} ${signatureStyleIndex+1}/5`;
+ if(style.key==='tone')updateSignaturePalette();
+ const font=style.key==='handwritten'?'Ma Shan Zheng':style.key==='gallery'?'Noto Serif SC':style.key==='classic'?'Ma Shan Zheng':null;
+ if(font)document.fonts.load(`20px "${font}"`).then(()=>{
+  if(signature.dataset.style===style.key&&!signature.hidden)updateZoom();
+ }).catch(()=>{});
+}
+function updateSignaturePalette(){
+ const signature=$('#photo-signature'),img=$('#detail-img');
+ if(!signature||signature.dataset.style!=='tone'||!img?.complete||!img.naturalWidth)return;
+ const src=img.currentSrc||img.src;
+ if(src===signaturePaletteSrc)return;
+ signaturePaletteSrc=src;
+ let rgb=[61,69,64];
+ try{
+  // Tiny, same-origin preview sample only; the photo and its metadata stay intact.
+  const canvas=document.createElement('canvas');canvas.width=24;canvas.height=24;
+  const ctx=canvas.getContext('2d',{willReadFrequently:true});
+  ctx.drawImage(img,0,0,24,24);
+  const pixels=ctx.getImageData(0,0,24,24).data,bins=new Map();
+  for(let i=0;i<pixels.length;i+=4){
+   if(pixels[i+3]<128)continue;
+   const color=[pixels[i],pixels[i+1],pixels[i+2]];
+   const key=color.map(v=>v>>5).join(',');
+   const bin=bins.get(key)||{count:0,sum:[0,0,0]};
+   bin.count++;color.forEach((v,j)=>bin.sum[j]+=v);bins.set(key,bin);
+  }
+  const dominant=[...bins.values()].sort((a,b)=>b.count-a.count)[0];
+  if(dominant){
+   const average=dominant.sum.map(v=>v/dominant.count);
+   const gray=average.reduce((a,b)=>a+b,0)/3;
+   // Preserve hue while limiting brightness for small, warm-white lettering.
+   const muted=average.map(v=>v*.9+gray*.1);
+   const scale=Math.min(1,100/Math.max(1,...muted));
+   rgb=muted.map(v=>Math.max(18,Math.round(v*scale)));
+  }
+ }catch(e){/* Unsupported image sources use the neutral dark fallback. */}
+ signature.style.setProperty('--signature-tone',`rgb(${rgb.join(',')})`);
+ $('#photo-mat').style.setProperty('--signature-tone',`rgb(${rgb.join(',')})`);
+}
+$('#photo-signature').addEventListener('click',event=>{
+ if(!event.target.closest('.signature-switch'))return;
+ event.stopPropagation();
+ signatureStyleIndex=(signatureStyleIndex+1)%SIGNATURE_STYLES.length;
+ applySignatureStyle();
+ updateZoom();
+});
 function namedFaces(photo){return (photo&&photo.faces||[]).filter(f=>f.name&&!f.ignored);}
 function visibleFaces(photo){return (photo&&photo.faces||[]);}
 function viewerImageSrc(photo, file, id){
@@ -1234,7 +1350,7 @@ async function displayPhoto(id){
   throw err;
  }
  if(ticket!==renderPhoto.ticket)return false;
- syncPhotoFavorite(state.detail);
+ syncPhotoFavorite(state.detail);syncPhotoPlaceButton(state.detail);
  const root=(viewer.context?.directory||'').replace(/[\/]+$/,'').toLowerCase();
  const files=[...state.detail.files].sort((a,b)=>a.excluded-b.excluded||b.exists_now-a.exists_now||a.id-b.id);
  const scoped=files.find(f=>!root||f.path.toLowerCase().startsWith(root+String.fromCharCode(92))||f.path.toLowerCase()===root);
@@ -1433,7 +1549,7 @@ $('#zoom-in').addEventListener('click',()=>zoomTo(viewer.scale*1.25));
 $('#zoom-out').addEventListener('click',()=>zoomTo(viewer.scale/1.25));
 $('#zoom-fit').addEventListener('click',()=>{viewer.fit=true;updateZoom(true);});
 $('#zoom-actual').addEventListener('click',()=>zoomTo(1));
-$('#detail-img').addEventListener('load',()=>{updateZoom(true);renderFaceNames(state.detail);});
+$('#detail-img').addEventListener('load',()=>{updateSignaturePalette();updateZoom(true);renderFaceNames(state.detail);});
 const faceLayer=$('#face-name-layer');
 faceLayer&&faceLayer.addEventListener('pointerdown',e=>{if(e.target.closest('[data-face-person]')){e.stopPropagation();drag=null;}});
 faceLayer&&faceLayer.addEventListener('pointerover',e=>{const button=e.target.closest('.face-name');if(button)showFaceGuide(button);});

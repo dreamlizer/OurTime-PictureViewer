@@ -151,6 +151,38 @@ def main() -> int:
             page.wait_for_function("document.querySelector('#detail-img').naturalWidth>0")
             page.wait_for_selector('#face-name-layer [data-face-id="101"]')
 
+            viewer_controls = page.evaluate(
+                """() => {
+                  const stage=document.querySelector('.viewer-stage').getBoundingClientRect();
+                  const previous=document.querySelector('#viewer-prev').getBoundingClientRect();
+                  const next=document.querySelector('#viewer-next').getBoundingClientRect();
+                  const tools=document.querySelector('.viewer-tools');
+                  const toolsBox=tools.getBoundingClientRect();
+                  const firstGroup=document.querySelector('.viewer-tool-group');
+                  const favorite=document.querySelector('#photo-favorite');
+                  const alpha=value=>{const match=String(value).match(/rgba?\\([^,]+,[^,]+,[^,]+(?:,\\s*([\\d.]+))?\\)/);return match&&match[1]!==undefined?Number(match[1]):1;};
+                  const arrowStyle=getComputedStyle(document.querySelector('#viewer-next'));
+                  const favoriteStyle=getComputedStyle(favorite);
+                  return {
+                    previousInset:previous.left-stage.left,
+                    nextInset:stage.right-next.right,
+                    toolsInset:stage.right-toolsBox.right,
+                    toolsGap:parseFloat(getComputedStyle(tools).gap),
+                    groupGap:parseFloat(getComputedStyle(firstGroup).gap),
+                    arrowAlpha:alpha(arrowStyle.backgroundColor),
+                    arrowOpacity:parseFloat(arrowStyle.opacity),
+                    favoriteAlpha:alpha(favoriteStyle.backgroundColor),
+                    favoriteTextAlpha:alpha(favoriteStyle.color)
+                  };
+                }"""
+            )
+            check(viewer_controls["previousInset"] >= 45 and viewer_controls["nextInset"] >= 85, "左右翻页箭头均向照片内侧收进约一个按钮宽度")
+            check(viewer_controls["toolsInset"] >= 28, "右侧工具条离开详情页边缘至少半个按钮宽度")
+            check(viewer_controls["toolsGap"] <= 5 and viewer_controls["groupGap"] <= 1, "右侧工具条组间和按钮间距已收紧")
+            check(viewer_controls["arrowAlpha"] <= .32 and viewer_controls["arrowOpacity"] <= .7, "翻页箭头使用更轻、更透明的承载层")
+            check(viewer_controls["favoriteAlpha"] <= .3 and viewer_controls["favoriteTextAlpha"] <= .65, "未收藏按钮降低背景和文字存在感")
+            page.screenshot(path=str(RUN / "viewer-controls-muted.png"), full_page=False)
+
             favorite_geometry = page.locator("#photo-favorite").evaluate(
                 """button => {const image=document.querySelector('#detail-img').getBoundingClientRect();const signature=document.querySelector('#photo-signature').getBoundingClientRect();const box=button.getBoundingClientRect();return {left:box.left>=image.left-1&&box.left<image.left+140,bottom:box.bottom<=image.bottom-8&&box.bottom<signature.top};}"""
             )
@@ -184,8 +216,8 @@ def main() -> int:
             page.wait_for_selector("#quick-name-dialog[open]")
             check(page.locator('#quick-name-dialog [data-close="quick-name-dialog"]').count() == 1, "快速命名只保留右上角关闭入口")
             check(page.locator("#quick-name-confirm").inner_text() == "确认姓名", "姓名输入区下面使用含义明确的确认姓名按钮")
-            page.click("#quick-merge-toggle")
-            page.wait_for_selector("#quick-merge-panel:not([hidden])")
+            check(page.locator("#quick-merge-title").inner_text() == "合并到已有姓名" and page.locator("#quick-merge-panel").is_visible(), "命名与合并使用同级标题，合并区默认直接展开")
+            check(page.locator("#quick-name-dialog").evaluate("dialog => dialog.getBoundingClientRect().width <= 360"), "快捷命名弹窗收窄到紧凑宽度")
             page.wait_for_function("!document.querySelector('#quick-merge-target').disabled")
             quick_targets = page.locator("#quick-merge-target option").evaluate_all(
                 "options => options.map(option => option.value).filter(Boolean)"
@@ -194,9 +226,10 @@ def main() -> int:
             action_layout = page.evaluate(
                 """() => {
                   const confirm=document.querySelector('#quick-name-confirm').getBoundingClientRect();
+                  const mergeTitle=document.querySelector('#quick-merge-title').getBoundingClientRect();
                   const merge=document.querySelector('#quick-merge-submit').getBoundingClientRect();
                   const ignore=document.querySelector('#quick-ignore-person').getBoundingClientRect();
-                  return {confirm,merge,ignore};
+                  return {confirm,mergeTitle,merge,ignore};
                 }"""
             )
             check(
@@ -205,9 +238,10 @@ def main() -> int:
                 "确认姓名与合并按钮同宽同高、视觉层级平等",
             )
             check(
-                action_layout["confirm"]["bottom"] < action_layout["merge"]["top"]
+                action_layout["confirm"]["bottom"] < action_layout["mergeTitle"]["top"]
+                and action_layout["mergeTitle"]["bottom"] < action_layout["merge"]["top"]
                 and action_layout["merge"]["bottom"] < action_layout["ignore"]["top"],
-                "确认、合并、路人三个动作按上下顺序独立排列",
+                "命名、合并、路人三个动作按清楚的上下层级排列",
             )
             page.screenshot(path=str(RUN / "quick-name-actions.png"), full_page=False)
             page.locator('#quick-name-dialog [data-close="quick-name-dialog"]').click()
@@ -215,7 +249,6 @@ def main() -> int:
 
             page.locator('[data-face-id="401"]').click()
             page.wait_for_selector("#quick-name-dialog[open]")
-            page.click("#quick-merge-toggle")
             page.wait_for_function("!document.querySelector('#quick-merge-target').disabled")
             passerby_targets = page.locator("#quick-merge-target option").evaluate_all(
                 "options => options.map(option => option.value).filter(Boolean)"

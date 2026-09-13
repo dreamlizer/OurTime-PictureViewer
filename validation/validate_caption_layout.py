@@ -8,11 +8,11 @@ OUT = ROOT / 'validation/reports/viewer-caption-20260913'
 MEASURE = """() => {
  const rect = n => {const r=n.getBoundingClientRect();return {left:r.left,top:r.top,right:r.right,bottom:r.bottom,width:r.width,height:r.height}};
  const caption=document.querySelector('#photo-signature'), img=document.querySelector('#detail-img');
- const nodes=[...caption.querySelectorAll('.signature-seal-v3,.signature-memory,.signature-capture,.signature-file')].filter(n=>n.getBoundingClientRect().width);
+ const nodes=[...caption.querySelectorAll('.signature-seal-v3,.signature-memory,.signature-capture,.signature-file,.caption-panel')].filter(n=>n.getBoundingClientRect().width);
  return {caption:rect(caption),image:rect(img),mat:rect(document.querySelector('#photo-mat')),viewport:rect(document.querySelector('#image-viewport')),
- mode:document.querySelector('#detail-dialog').dataset.signatureMode,
+ mode:document.querySelector('#detail-dialog').dataset.signatureMode,style:caption.dataset.style||'original',
  face:rect(document.querySelector('#face-name-layer')),
- seal:{background:getComputedStyle(caption.querySelector('.signature-seal-v3')).backgroundColor,radius:getComputedStyle(caption.querySelector('.signature-seal-v3')).borderRadius},
+ seal:caption.querySelector('.signature-seal-v3')?{background:getComputedStyle(caption.querySelector('.signature-seal-v3')).backgroundColor,radius:getComputedStyle(caption.querySelector('.signature-seal-v3')).borderRadius}:null,
  groups:nodes.map(n=>({kind:n.className,...rect(n)})),tokens:[...caption.querySelectorAll('.signature-exposure-token,.signature-file-token')].map(n=>({text:n.textContent,...rect(n)})),
  arrows:[...document.querySelectorAll('.viewer-arrow')].map(rect),tools:rect(document.querySelector('.viewer-tools')),content:rect(caption.firstElementChild),text:caption.innerText};
 }"""
@@ -24,16 +24,20 @@ def check(page, name, fit=True):
     page.wait_for_timeout(220)
     s=page.evaluate(MEASURE)
     c=s['caption']
-    assert s['seal']=={'background':'rgb(185, 46, 49)','radius':'50%'},(name,'original logo changed',s)
+    if s['style']=='original':
+        assert s['seal']=={'background':'rgb(185, 46, 49)','radius':'50%'},(name,'original logo changed',s)
     memory=next((g for g in s['groups'] if g['kind']=='signature-memory'),None)
     right=[g for g in s['groups'] if g['kind'] in ['signature-capture','signature-file']]
     if memory and right:
         assert abs(memory['bottom']-max(g['bottom'] for g in right))<=1,(name,'caption groups must align at the bottom',s)
-        if name.startswith('real-'):
+        if name.startswith('real-') and s['style']=='original':
             assert abs(memory['height']-(max(g['bottom'] for g in right)-min(g['top'] for g in right)))<=4,(name,'right block visually taller than left',s)
     for group in s['groups']:
         if memory and group['kind'] in ['signature-capture','signature-file']:
-            assert group['left']>=memory['right']-1,(name,'details must stay to the right of memory',s)
+            if s['style']=='handwritten' and any(g['kind']=='signature-capture' for g in s['groups']):
+                assert group['right']<=memory['left']+1,(name,'handwritten details must stay to the left of memory',s)
+            else:
+                assert group['left']>=memory['right']-1,(name,'details must stay to the right of memory',s)
     for r in s['groups']+s['tokens']+[s['content']]:
         assert r['left']>=c['left']-1 and r['right']<=c['right']+1, (name,'horizontal clipping',s)
         assert r['top']>=c['top']-1 and r['bottom']<=c['bottom']+1, (name,'vertical clipping',s)
@@ -41,6 +45,8 @@ def check(page, name, fit=True):
         for b in s['groups'][i+1:]:
             assert min(a['right'],b['right'])-max(a['left'],b['left'])<=1 or min(a['bottom'],b['bottom'])-max(a['top'],b['top'])<=1, (name,'groups overlap',s)
     assert c['top']>=s['image']['bottom']-1,(name,'caption overlays photograph',s)
+    for edge in ['left','top','right','bottom']:
+        assert abs(s['face'][edge]-s['image'][edge])<=1,(name,'face layer must follow photo inside its frame',s)
     if fit:
         assert s['mat']['top']>=s['viewport']['top']-1 and s['mat']['bottom']<=s['viewport']['bottom']+1,(name,'fit outside viewport',s)
         assert c['right']<=s['tools']['left']+1,(name,'toolbar covers caption',s)

@@ -17,7 +17,7 @@ REQUIRED = [
     "showDialog", "toast", "dateSource", "readableError", "renderPhoto", "openPerson", "openQuickName",
 ]
 CROSS = {
-    "viewer.js": ["esc", "prettyPlace", "basename", "fmt", "api", "action", "toast"],
+    "viewer.js": ["esc", "prettyPlace", "basename", "fmt", "api", "action", "toast", "hasPhotoCoordinates", "showPhotoPlaceMap"],
     "waterfall.js": ["esc", "basename", "fmt", "api", "action"],
 }
 passed = []
@@ -163,10 +163,13 @@ def main():
     if (
         quick_dialog.count('data-close="quick-name-dialog"') != 1
         or 'id="quick-name-confirm" class="primary quick-main-action">确认姓名</button>' not in quick_dialog
+        or 'id="quick-merge-title">合并到已有姓名</h2>' not in quick_dialog
         or 'id="quick-merge-submit" class="secondary quick-main-action">合并到所选人物</button>' not in quick_dialog
+        or 'id="quick-merge-toggle"' in quick_dialog
+        or 'id="quick-merge-panel" class="quick-merge-panel" hidden' in quick_dialog
         or '>取消</button>' in quick_dialog
         or ".quick-name-dialog .quick-main-action" not in appearance
-        or "min-height: 44px" not in appearance
+        or ".quick-name-dialog { width: 344px" not in appearance
         or "peopleQuery({ignored:0,named:1,q:query,limit:40})" not in app
     ):
         fail("照片快捷命名布局退化，或合并候选没有限定为已命名人物")
@@ -189,6 +192,18 @@ def main():
         'display_only:true',
     )) or 'display_only:bool=False' not in backend:
         fail("合影详情缺少二次确认的仅排除显示入口，或仍可能清理识别缓存")
+    if not all(value in html for value in (
+        'id="photo-place-map"',
+        'id="places-photo-back"',
+        'id="places-heading"',
+    )) or not all(value in app for value in (
+        "const PHOTO_PLACE_FACTOR=.2",
+        "state.placeCluster.clearLayers()",
+        "data-map-photo=",
+        "showPhotoPlaceMap",
+    )) or "syncPhotoPlaceButton(state.detail)" not in viewer:
+        fail("大图缺少单张照片地图入口、0.2 倍聚焦或返回大图链路")
+    ok("大图到单张照片地图再返回大图的链路已接入")
     if not all(path in viewer for path in (
         "/api/face-label-bg/1.png",
         "/api/face-label-bg/2.png",

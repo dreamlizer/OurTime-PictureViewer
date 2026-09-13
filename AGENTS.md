@@ -35,6 +35,7 @@ smoke 至少要拦住这些：
 - `web/*.js` 不把 `undefined` 写进可见文案；`personLabel is not defined` 这类运行时缺口不能再出现。
 - `prettyPlace()` / `personLabel()` / `esc()` 先定义再调用，且定义在 `app.js`。
 - 照片流切换时先隐藏 `#no-results`，显示“正在加载照片”，不能先闪“没有照片”。
+- 大图照片地图入口只能使用真实经纬度；单张地图默认约 0.2 倍，只绘制该照片的定位针和缩略图，点击缩略图必须回到同一张大图。没有坐标时提示，禁止按地点文字猜造坐标。
 - 现役接口空闲时：`/api/photos/{id}` 有 `files` / `faces` / `effective_place`；`/api/people/{id}` 每张脸有数字 `asset_id`。人物详情按 `limit` 分页，默认 48 张脸；合并按钮必须是 `type=button`，提示要写在对话框内。
 - 合影详情卡片的快捷排除必须二次确认并使用 `display_only`，只退出展示，不清理缩略图、人脸或姓名关系；恢复仍走现有“已排除”入口。
 
