@@ -57,6 +57,21 @@ def main():
         group = fetch_photos(conn, filter='group:2', person='1,2', date_from='2025-05', date_to='2025-05')
         conn.commit()
         assert [item['id'] for item in group['items']] == [2, 1], group
+        interval = fetch_photos(conn, filter='group:1-2')
+        conn.commit()
+        assert [item['id'] for item in interval['items']] == [3, 2, 1, 4], interval
+        at_least = fetch_photos(conn, filter='group:2plus')
+        conn.commit()
+        assert [item['id'] for item in at_least['items']] == [2, 1], at_least
+        at_most = fetch_photos(conn, filter='group:upto1')
+        conn.commit()
+        assert [item['id'] for item in at_most['items']] == [3, 4], at_most
+        try:
+            fetch_photos(conn, filter='group:6-3')
+        except ValueError as exc:
+            assert '最少人数不能大于最多人数' in str(exc)
+        else:
+            raise AssertionError('invalid group range should fail')
         year_only = fetch_photos(conn, date_from='2025', date_to='2025', place='北京')
         conn.commit()
         assert sorted(item['id'] for item in year_only['items']) == [1, 2, 4], year_only

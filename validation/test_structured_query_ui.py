@@ -29,12 +29,18 @@ def main():
     assert 'body.is-people-view .view-chrome .toolbar > .section-heading { display: none; }' in css
     assert 'resolvePersonLabel' in ui
     assert 'rememberPersonLabel: rememberLabel' in ui
-    assert 'data-ot="group"' in ui
-    assert "['10plus', '10人及以上']" in ui
+    assert 'data-ot="group"' in ui and '>合影人数</button>' in ui
+    assert 'data-ot="group-min"' in ui and 'data-ot="group-max"' in ui
+    assert "min + '-' + max" in ui and "'upto' + max" in ui and "min + 'plus'" in ui
+    assert "'合影人数：' + groupLabel(s.group)" in ui
     assert 'applyGroup: async (group' in init
     assert 'data-ot="close"' in ui
     assert "if (destroyed) return;" in ui
     assert '.ot-home-popover .ot-home-close' in css
+    assert '.ot-home-range-fields' in css and '.ot-home-number-field' in css
+    assert '.ot-home-ui .ot-home-batch .ot-home-button { height: 42px; min-height: 42px; }' in css
+    assert '[data-ot="cancel-selection"]' in css
+    assert 'body.is-home-view #library-view > .view-chrome { padding-bottom: 6px; }' in css
     assert "if(view==='places'||isPhotoPlaceView(view))return $('#places-view');" in app
     assert 'function folderNormalize(' in app
     assert "list.dataset.currentPath=current;" in app

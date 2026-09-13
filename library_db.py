@@ -112,6 +112,12 @@ def init_schema(conn):
             'excluded': 'INTEGER NOT NULL DEFAULT 0',
             'auxiliary': 'INTEGER NOT NULL DEFAULT 0',
             'metadata_reads': 'INTEGER NOT NULL DEFAULT 0',
+            'total': 'INTEGER NOT NULL DEFAULT 0',
+            'phase': "TEXT NOT NULL DEFAULT ''",
+            'current_stage': "TEXT NOT NULL DEFAULT ''",
+            'face_photos': 'INTEGER NOT NULL DEFAULT 0',
+            'faces_found': 'INTEGER NOT NULL DEFAULT 0',
+            'face_seconds': 'REAL NOT NULL DEFAULT 0',
         },
         'people': {
             'alias': "TEXT NOT NULL DEFAULT ''",
@@ -127,6 +133,7 @@ def init_schema(conn):
                 conn.execute(f'ALTER TABLE {table} ADD COLUMN {name} {declaration}')
     conn.execute('CREATE INDEX IF NOT EXISTS files_asset_excluded ON files(asset_id,excluded)')
     conn.execute('CREATE INDEX IF NOT EXISTS assets_excluded ON assets(excluded)')
+    conn.execute('CREATE INDEX IF NOT EXISTS assets_active_location ON assets(excluded,latitude,longitude) WHERE latitude IS NOT NULL AND longitude IS NOT NULL')
     conn.execute('CREATE INDEX IF NOT EXISTS assets_favorite ON assets(favorite,id)')
     conn.execute('CREATE INDEX IF NOT EXISTS assets_browse_date ON assets(coalesce(manual_date,captured_at),id)')
     conn.execute('CREATE INDEX IF NOT EXISTS people_ignored ON people(ignored,confirmed,id)')

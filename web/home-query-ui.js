@@ -58,7 +58,7 @@
       + '<span class="ot-home-query-left">'
       + '<button data-ot="person" class="ot-home-button" type="button">人物</button>'
       + '<button data-ot="time" class="ot-home-button" type="button">时间</button>'
-      + '<button data-ot="group" class="ot-home-button" type="button">人数</button>'
+      + '<button data-ot="group" class="ot-home-button" type="button">合影人数</button>'
       + '<button data-ot="place" class="ot-home-button" type="button">地点</button>'
       + '<button data-ot="folder" class="ot-home-button" type="button">文件夹</button>'
       + '</span><span class="ot-home-query-right">'
@@ -105,7 +105,16 @@
       };
     }
     const isGroup = s => String(s.scopeKey || '').startsWith('group:');
-    const groupLabel = key => key === '10plus' ? '10人及以上' : key ? key + '人' : '';
+    const groupRange = key => {
+      key = text(key); if (key === '10plus') return { min: 10, max: null };
+      let match = key.match(/^(\d+)$/); if (match) return { min: Number(match[1]), max: Number(match[1]) };
+      match = key.match(/^(\d+)-(\d+)$/); if (match) return { min: Number(match[1]), max: Number(match[2]) };
+      match = key.match(/^(\d+)plus$/); if (match) return { min: Number(match[1]), max: null };
+      match = key.match(/^upto(\d+)$/); if (match) return { min: null, max: Number(match[1]) };
+      return { min: null, max: null };
+    };
+    const groupLabel = key => { const { min, max } = groupRange(key); if (min && max) return min === max ? min + '人' : min + '–' + max + '人'; if (min) return min + '人以上'; if (max) return max + '人以下'; return ''; };
+    const groupKey = (min, max) => min && max ? (min === max ? String(min) : min + '-' + max) : min ? (min === 10 ? '10plus' : min + 'plus') : max ? 'upto' + max : '';
     function report(error) {
       const el = all('error');
       el.textContent = error ? (text(error.message || error) || '操作未完成，请重试。') : '';
@@ -133,7 +142,7 @@
       if (time) entries.push(['time', time]);
       if (s.query.place) entries.push(['place', '地点：' + s.query.place]);
       if (s.query.directory) entries.push(['directory', '文件夹：' + shortPath(s.query.directory)]);
-      if (s.group) entries.push(['group', '人数：' + groupLabel(s.group)]);
+      if (s.group) entries.push(['group', '合影人数：' + groupLabel(s.group)]);
       box.hidden = !entries.length;
       for (const [key, display] of entries) {
         const button = document.createElement('button');
@@ -313,20 +322,26 @@
     }
     function openGroup(anchor) {
       const s = snapshot();
-      const choices = [['', '全部人数'], ...Array.from({ length: 9 }, (_, index) => [String(index + 1), (index + 1) + '人']), ['10plus', '10人及以上']];
-      setPopover('group', anchor, '<header class="ot-home-pop-header"><strong>照片人数</strong><button data-ot="close" class="ot-home-close" type="button" aria-label="关闭筛选">关闭</button></header><div data-ot="group-list" class="ot-home-option-list"></div>');
-      const list = popover.querySelector('[data-ot="group-list"]');
-      for (const [value, label] of choices) {
-        const button = document.createElement('button'); button.type = 'button';
-        button.className = 'ot-home-option' + (s.group === value ? ' is-current' : '');
-        button.dataset.groupSize = value; button.textContent = label; list.appendChild(button);
-      }
+      const range = groupRange(s.group);
+      setPopover('group', anchor, '<header class="ot-home-pop-header"><strong>合影人数</strong><button data-ot="close" class="ot-home-close" type="button" aria-label="关闭筛选">关闭</button></header>'
+        + '<form data-ot="group-form" class="ot-home-range-form"><div class="ot-home-range-fields">'
+        + '<label><span>从</span><span class="ot-home-number-field"><input data-ot="group-min" type="number" min="1" max="9999" step="1" inputmode="numeric" placeholder="不限" aria-label="最少人数"><b>人</b></span></label>'
+        + '<i aria-hidden="true">—</i><label><span>到</span><span class="ot-home-number-field"><input data-ot="group-max" type="number" min="1" max="9999" step="1" inputmode="numeric" placeholder="不限" aria-label="最多人数"><b>人</b></span></label></div>'
+        + '<p class="ot-home-help">包含起止人数。只填左侧表示该人数以上，只填右侧表示该人数以下。</p><p data-ot="group-error" class="ot-home-range-error" hidden></p>'
+        + '<div class="ot-home-range-actions"><button data-ot="group-clear" class="ot-home-button ot-home-quiet" type="button">清除</button><button class="ot-home-button ot-home-primary" type="submit">应用</button></div></form>');
+      const form = popover.querySelector('[data-ot="group-form"]'), minInput = popover.querySelector('[data-ot="group-min"]'), maxInput = popover.querySelector('[data-ot="group-max"]');
+      minInput.value = range.min || ''; maxInput.value = range.max || '';
       listen(popover.querySelector('[data-ot="close"]'), 'click', () => closePopover());
-      listen(list, 'click', event => {
-        const button = event.target.closest('[data-group-size]');
-        if (!button || typeof adapter.applyGroup !== 'function') return;
-        const before = snapshot(); void runAction(signal => adapter.applyGroup(button.dataset.groupSize, context(before, signal))).then(ok => { if (ok) closePopover(); });
+      const read = input => input.value === '' ? null : Number(input.value);
+      listen(form, 'submit', event => {
+        event.preventDefault(); if (typeof adapter.applyGroup !== 'function') return;
+        const min = read(minInput), max = read(maxInput), error = popover.querySelector('[data-ot="group-error"]');
+        const invalid = (min !== null && (!Number.isInteger(min) || min < 1 || min > 9999)) || (max !== null && (!Number.isInteger(max) || max < 1 || max > 9999));
+        if (invalid || (min !== null && max !== null && min > max)) { error.textContent = invalid ? '人数请填写 1–9999 的整数。' : '起始人数不能大于结束人数。'; error.hidden = false; return; }
+        error.hidden = true; const before = snapshot(); void runAction(signal => adapter.applyGroup(groupKey(min, max), context(before, signal))).then(ok => { if (ok) closePopover(); });
       });
+      listen(popover.querySelector('[data-ot="group-clear"]'), 'click', () => { const before = snapshot(); void runAction(signal => adapter.applyGroup('', context(before, signal))).then(ok => { if (ok) closePopover(); }); });
+      minInput.focus();
     }
     function renderPlaces() {
       if (openKind !== 'place') return;

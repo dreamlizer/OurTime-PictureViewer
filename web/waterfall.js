@@ -76,11 +76,20 @@ function streamSelection(){
 function streamVisibleIds(){return $$('#photo-grid [data-photo]').filter(c=>{const b=c.getBoundingClientRect();return b.bottom>0&&b.top<innerHeight;}).map(c=>Number(c.dataset.photo));}
 function restoreScrollInstant(top){scrollTo({top:Math.max(0,Number(top)||0),behavior:'instant'});}
 function waitWaterfallFrames(count=2){return new Promise(resolve=>{const next=()=>count--<=0?resolve():requestAnimationFrame(next);next();});}
-async function streamRemovePhoto(id,positionHint){
- id=Number(id);if(!id||!waterfall.query)return false;
- let startPage=Number.isFinite(positionHint)?Math.floor(Math.max(0,positionHint)/waterfall.pageSize):-1;
- if(startPage<0){for(const [index,page] of waterfall.cache){if(page.layout.some(point=>Number(point.a.id)===id)){startPage=index;break;}}}
- if(startPage<0)return false;
+async function streamRemovePhotos(ids,positionHints=[]){
+ const removed=new Set((ids||[]).map(Number).filter(Boolean));if(!removed.size||!waterfall.query)return false;
+ $$('#photo-grid [data-photo]').forEach(card=>{if(removed.has(Number(card.dataset.photo)))card.classList.add('group-exclude-removing');});
+ let startPage=Infinity;
+ for(const hint of positionHints||[])if(Number.isFinite(hint))startPage=Math.min(startPage,Math.floor(Math.max(0,hint)/waterfall.pageSize));
+ const located=new Set();
+ for(const [index,page] of waterfall.cache){
+  for(const point of page.layout)if(removed.has(Number(point.a.id))){located.add(Number(point.a.id));startPage=Math.min(startPage,index);}
+ }
+ // Selections survive card recycling. If an older selected page is no longer
+ // cached, rebuild the already discovered range from page zero without
+ // replacing the photo wall or entering its full-page loading state.
+ if(located.size<removed.size)startPage=0;
+ if(!Number.isFinite(startPage))return false;
  const lastPage=Math.max(startPage,waterfall.shapes.length-1);
  const animation=matchMedia('(prefers-reduced-motion: reduce)').matches?Promise.resolve():new Promise(resolve=>setTimeout(resolve,145));
  waterfall.abort?.abort();waterfall.abort=new AbortController();waterfall.generation++;waterfall.pending.clear();
@@ -92,7 +101,7 @@ async function streamRemovePhoto(id,positionHint){
  await animation;
  if(generation!==waterfall.generation)return false;
  const metrics=streamMetrics();let ends=waterfall.pageEnds[startPage]?.slice()||Array(metrics.columns).fill(0);
- let total=Math.max(0,waterfall.total-1),maxId=waterfall.maxId;
+ let total=Math.max(0,waterfall.total-removed.size),maxId=waterfall.maxId;
  for(const {index,data} of pages){
   total=Number(data.total);maxId=Number(data.max_id)||maxId;
   const items=data.items||[],shapes=items.map(streamShape),placed=streamPlace(shapes,ends,metrics);
@@ -103,13 +112,14 @@ async function streamRemovePhoto(id,positionHint){
  const pageCount=Math.ceil(total/waterfall.pageSize),knownPages=Math.min(waterfall.shapes.length,pageCount);
  waterfall.shapes.length=knownPages;waterfall.ranges.length=knownPages;waterfall.heights.length=knownPages;waterfall.pageEnds.length=knownPages+1;
  for(const index of [...waterfall.cache.keys()])if(index>=knownPages)waterfall.cache.delete(index);
- waterfall.total=total;waterfall.maxId=maxId;state.total=total;state.maxId=maxId;state.selected.delete(id);
+ waterfall.total=total;waterfall.maxId=maxId;state.total=total;state.maxId=maxId;for(const id of removed)state.selected.delete(id);
  $('#result-count').textContent=fmt(total)+' 张';
  if(typeof syncGroupResultCount==='function')syncGroupResultCount(state.view,{total});
  const grid=$('#photo-grid');grid.classList.add('stream-reflowing');void grid.offsetWidth;streamPaint();
  setTimeout(()=>grid.classList.remove('stream-reflowing'),230);
  return true;
 }
+async function streamRemovePhoto(id,positionHint){return streamRemovePhotos([id],[positionHint]);}
 function waterfallPageTop(index){return waterfall.ranges[index]?.top??index*(waterfall.heights[0]||1800);}
 async function restoreViewerPhotoPosition(exit){
  const fallback=()=>{if(exit&&Number.isFinite(exit.fallbackScroll))restoreScrollInstant(exit.fallbackScroll);streamSchedule();};

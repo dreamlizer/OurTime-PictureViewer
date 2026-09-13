@@ -1,6 +1,7 @@
 /* Deliberately scoped: no body, global button, gallery, viewer or caption overrides. */
 .ot-home-ui,
-.ot-home-filter-dialog {
+.ot-home-filter-dialog,
+.ot-home-popover {
   --ot-text: #253934;
   --ot-muted: #72817b;
   --ot-line: #dde5df;
@@ -12,15 +13,16 @@
   font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
   box-sizing: border-box;
 }
-.ot-home-ui *, .ot-home-filter-dialog * { box-sizing: border-box; }
+.ot-home-ui *, .ot-home-filter-dialog *, .ot-home-popover * { box-sizing: border-box; }
 .ot-home-ui[hidden], .ot-home-filter-dialog:not([open]),
 .ot-home-ui [hidden], .ot-home-filter-dialog [hidden] { display: none !important; }
-.ot-home-ui { width: 100%; min-width: 0; margin-block: 0 20px; }
+.ot-home-ui { width: 100%; min-width: 0; margin-block: 0 6px; }
 #home-query-host { flex: 1 1 100%; min-width: 0; }
 .masthead-title { display: flex; align-items: center; gap: 14px; min-width: 0; }
 .masthead-title .text-button { flex: 0 0 auto; color: var(--ot-accent); }
 .ot-home-ui button, .ot-home-ui input, .ot-home-ui select,
-.ot-home-filter-dialog button, .ot-home-filter-dialog input, .ot-home-filter-dialog select {
+.ot-home-filter-dialog button, .ot-home-filter-dialog input, .ot-home-filter-dialog select,
+.ot-home-popover button, .ot-home-popover input, .ot-home-popover select {
   font: inherit;
   letter-spacing: normal;
 }
@@ -55,8 +57,9 @@
   border-color: var(--ot-focus); box-shadow: 0 0 0 3px rgb(103 152 122 / 15%);
 }
 .ot-home-ui .ot-home-search input::placeholder,
-.ot-home-filter-dialog input::placeholder { color: #88948d; opacity: 1; }
-.ot-home-ui .ot-home-button, .ot-home-filter-dialog .ot-home-button {
+.ot-home-filter-dialog input::placeholder,
+.ot-home-popover input::placeholder { color: #88948d; opacity: 1; }
+.ot-home-ui .ot-home-button, .ot-home-filter-dialog .ot-home-button, .ot-home-popover .ot-home-button {
   display: inline-flex; align-items: center; justify-content: center; gap: 7px;
   flex: 0 0 auto; min-height: 42px; min-width: 64px;
   margin: 0; padding: 9px 14px;
@@ -66,7 +69,8 @@
   box-shadow: none; text-decoration: none;
 }
 .ot-home-ui .ot-home-button:hover:not(:disabled),
-.ot-home-filter-dialog .ot-home-button:hover:not(:disabled) { background: var(--ot-soft); border-color: #c0cec3; }
+.ot-home-filter-dialog .ot-home-button:hover:not(:disabled),
+.ot-home-popover .ot-home-button:hover:not(:disabled) { background: var(--ot-soft); border-color: #c0cec3; }
 .ot-home-ui .ot-home-button.ot-home-filter-active {
   color: var(--ot-accent); background: #edf4ed; border-color: #c8dacb;
 }
@@ -99,9 +103,11 @@
 .ot-home-ui .ot-home-link:hover:not(:disabled),
 .ot-home-filter-dialog .ot-home-link:hover:not(:disabled) { color: var(--ot-accent); background: var(--ot-soft); }
 .ot-home-ui .ot-home-batch {
-  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
   min-height: 42px; padding: 0; margin: 0;
 }
+.ot-home-ui .ot-home-batch .ot-home-button { height: 42px; min-height: 42px; }
+.ot-home-ui .ot-home-batch :is([data-ot="exclude"], [data-ot="restore"], [data-ot="edit"], [data-ot="cancel-selection"]) { min-width: 108px; }
 .ot-home-ui .ot-home-selected-count { padding-right: 8px; font-size: 14px; font-weight: 600; white-space: nowrap; }
 .ot-home-ui .ot-home-spacer, .ot-home-filter-dialog .ot-home-spacer { flex: 1 1 auto; }
 .ot-home-ui .ot-home-quiet { background: transparent; border-color: transparent; padding-inline: 8px; }
@@ -170,6 +176,8 @@
 }
 .ot-home-filter-dialog .ot-home-primary { color: #fff; background: var(--ot-accent); border-color: var(--ot-accent); }
 .ot-home-filter-dialog .ot-home-primary:hover:not(:disabled) { color: #fff; background: #274c3d; border-color: #274c3d; }
+.ot-home-popover .ot-home-primary { color: #fff; background: var(--ot-accent); border-color: var(--ot-accent); }
+.ot-home-popover .ot-home-primary:hover:not(:disabled) { color: #fff; background: #274c3d; border-color: #274c3d; }
 @media (max-width: 720px) {
   .ot-home-ui .ot-home-query { flex-wrap: wrap; gap: 8px; }
   .ot-home-ui .ot-home-query-left { flex: 1 1 100%; }
@@ -199,6 +207,7 @@ body.is-home-view .topbar { justify-content: flex-end; }
 body.is-home-view .masthead-title { flex: 1 1 auto; }
 body.is-home-view #home-query-host { flex: 1 1 100%; }
 body.is-home-view .view-chrome .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; }
+body.is-home-view #library-view > .view-chrome { padding-bottom: 6px; }
 body.is-home-view .view-chrome .toolbar > .section-heading { display: none; }
 body.is-group-query .view-chrome .toolbar > .section-heading { display: none; }
 body.is-people-view .view-chrome .toolbar > .section-heading { display: none; }
@@ -235,6 +244,17 @@ body.is-subpage .masthead .stats { display: none; }
 }
 .ot-home-option:hover, .ot-home-option.is-current { background: var(--ot-soft); }
 .ot-home-option input { margin: 0; }
+.ot-home-range-form { margin: 0; }
+.ot-home-range-fields { display: grid; grid-template-columns: minmax(0,1fr) 18px minmax(0,1fr); align-items: end; gap: 8px; }
+.ot-home-range-fields > label { display: grid; gap: 6px; min-width: 0; color: var(--ot-muted); font-size: 12px; }
+.ot-home-range-fields > i { align-self: end; height: 42px; display: grid; place-items: center; color: #9aa59f; font-style: normal; }
+.ot-home-number-field { display: flex; align-items: center; min-width: 0; height: 42px; padding-right: 10px; border: 1px solid var(--ot-line); border-radius: 10px; background: #fff; color: var(--ot-muted); }
+.ot-home-number-field:focus-within { border-color: var(--ot-focus); box-shadow: 0 0 0 3px rgb(103 152 122 / 15%); }
+.ot-home-number-field input { width: 100%; min-width: 0; height: 40px; padding: 8px 6px 8px 12px; border: 0; outline: 0; background: transparent; color: var(--ot-text); }
+.ot-home-number-field b { font-weight: 400; white-space: nowrap; }
+.ot-home-range-form .ot-home-help { margin: 12px 0 0; }
+.ot-home-range-error { margin: 8px 0 0; color: var(--ot-danger); font-size: 12px; }
+.ot-home-range-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 .nav-organize { margin: 8px 0 0; border: 0; background: transparent; }
 .nav-organize > summary {
   list-style: none; cursor: pointer; min-height: 36px; padding: 8px 12px;

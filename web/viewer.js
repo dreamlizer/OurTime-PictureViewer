@@ -14,6 +14,7 @@ const SIGNATURE_STYLES=[
 let signatureStyleIndex=0;
 let signaturePaletteSrc='';
 let signatureLayouts=null;
+const signatureInfo={sections:[],text:'',openTimer:null,closeTimer:null,copyTimer:null};
 const FACE_LABEL_IMAGES={
   ivory:{
     s:'/api/face-label-bg/1.png',
@@ -818,12 +819,14 @@ function updateToolVisuals(){
 function currentBrowseContext(){return {q:state.q,filter:state.view,person:state.person,directory:state.directory,sort:state.sort,date_from:state.dateFrom||'',date_to:state.dateTo||'',place:state.place||'',max_id:state.maxId};}
 function browseContextKey(context={}){
  const filter=String(context.filter||'all');
- return JSON.stringify({q:String(context.q||''),filter:filter==='all'?'timeline':filter,person:String(context.person||''),directory:String(context.directory||''),sort:String(context.sort||'date_desc'),date_from:String(context.date_from||''),date_to:String(context.date_to||''),place:String(context.place||''),max_id:Number(context.max_id||0)});
+ return JSON.stringify({q:String(context.q||''),filter:filter==='all'?'timeline':filter,person:String(context.person||''),directory:String(context.directory||''),sort:String(context.sort||'date_desc'),date_from:String(context.date_from||''),date_to:String(context.date_to||''),place:String(context.place||''),nearby:Number(context.nearby||0),radius_m:Number(context.radius_m||0),max_id:Number(context.max_id||0)});
 }
 function sameBrowseContext(a,b){return browseContextKey(a)===browseContextKey(b);}
-function contextLabel(c){const person=state.people.find(p=>String(p.id)===c.person);const filter=c.filter||'';const heading=c.person?(person?.name||'人物 '+c.person):filter.startsWith('year:')?(filter.slice(5)==='unknown'?'时间未记录':filter.slice(5)+' 年'):filter.startsWith('group:')?(filter.slice(6)==='10plus'?'10人及以上':Number(filter.slice(6))+'人合影'):filter.startsWith('place:')?(filter.slice(6)==='unknown'?'地点未记录':filter.slice(6)):titles[filter]?.[0]||'照片';return [heading,c.directory?basename(c.directory):'',c.place?prettyPlace(c.place):'',c.date_from||c.date_to?((c.date_from||'')+(c.date_to&&c.date_to!==c.date_from?' ~ '+c.date_to:'')):'',c.q?'搜索：'+c.q:''].filter(Boolean).join(' · ');}
+function contextLabel(c){const person=state.people.find(p=>String(p.id)===c.person);const filter=c.filter||'';const heading=c.nearby?`当前位置 ${Number(c.radius_m)||100} 米内`:c.person?(person?.name||'人物 '+c.person):filter.startsWith('year:')?(filter.slice(5)==='unknown'?'时间未记录':filter.slice(5)+' 年'):filter.startsWith('group:')?groupTitle(filter)[1]:filter.startsWith('place:')?(filter.slice(6)==='unknown'?'地点未记录':filter.slice(6)):titles[filter]?.[0]||'照片';return [heading,c.directory?basename(c.directory):'',c.place?prettyPlace(c.place):'',c.date_from||c.date_to?((c.date_from||'')+(c.date_to&&c.date_to!==c.date_from?' ~ '+c.date_to:'')):'',c.q?'搜索：'+c.q:''].filter(Boolean).join(' · ');}
 function viewerMessage(text){$('#viewer-message').textContent=text;}
 function clearViewerImage(){
+ hideSignatureInfo();
+ signatureInfo.sections=[];signatureInfo.text='';
  const img=$('#detail-img'),signature=$('#photo-signature'),faces=$('#face-name-layer');
  if(img){img.removeAttribute('src');img.hidden=true;img.style.width='';img.style.height='';}
  if(signature){signature.hidden=true;signature.replaceChildren();}
@@ -857,6 +860,7 @@ function viewerImageFailed(message){
 }
 function waitViewerFrames(count=2){return new Promise(resolve=>{const next=()=>count--<=0?resolve():requestAnimationFrame(next);next();});}
 function closePhotoViewer(){
+ hideSignatureInfo();
  const dialog=$('#detail-dialog');
  if(!dialog||!dialog.open)return;
  clearTimeout(viewer.closingTimer);
@@ -1027,6 +1031,7 @@ function updateZoom(reset=false){
   const navigationCenter=Math.min(photoCenter,photoCenter+h/2-arrowHalf-4);
   $('#detail-dialog').style.setProperty('--viewer-photo-center',Math.max(arrowHalf,navigationCenter)+'px');
   $('#zoom-level').textContent=Math.round(viewer.scale*100)+'%';
+  positionSignatureInfo();
   if(reset){area.scrollTop=0;area.scrollLeft=0;}
   if(state.detail&&viewer.faceNames!==false)requestAnimationFrame(()=>renderFaceNames(state.detail));
 }
@@ -1068,7 +1073,6 @@ function renderSignature(a,file){
  const exposureMarkup=exposure.map(value=>`<span class="signature-exposure-token">${esc(value)}</span>`).join('');
  const fileMarkup=[[dimensions,'dimensions'],[format,'format-token'],[fileSize,'size-token']].filter(([value])=>value).map(([value,kind])=>`<span class="signature-file-token signature-${kind}">${esc(value)}</span>`).join('');
  const placeMarkup=place?`<span id="signature-place" class="signature-place" title="${esc(place)}">${esc(place)}</span>`:'';
- const title=[shownDate&&`${timeKind}：${rawDate}`,place&&`地点：${place}`,camera&&`设备：${camera}`,exposure.join(' · '),basics.join(' · '),filename&&`文件名：${filename}`].filter(Boolean).join('\n');
 
  signature.innerHTML=`
   <div class="signature-v3 ${hasMemory?'has-memory':''} ${hasCapture?'has-capture':''} ${hasFile?'has-file':''}" data-has-memory="${hasMemory}" data-has-capture="${hasCapture}" data-has-file="${hasFile}">
@@ -1090,7 +1094,8 @@ function renderSignature(a,file){
    <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="4" width="14" height="12" rx="2"/><path d="M3 12h14M7 14h2m3 0h1"/></svg>
   </button>`;
  signature.hidden=false;
- signature.title=title;
+ signature.removeAttribute('title');
+ setSignatureInfo(a,file,{rawDate,timeKind,place,camera,exposure,dimensions,format,fileSize,filename,tags});
  const cameraLine=camera?`<strong class="caption-camera" title="${esc(camera)}">${esc(camera)}</strong>`:'';
  const dateLine=shownDate?`<span class="caption-date">${dateMarkup}${timeKindMarkup}</span>`:'';
  const placeLine=place?`<span class="caption-place" title="${esc(place)}">${esc(place)}</span>`:'';
@@ -1120,6 +1125,7 @@ function applySignatureStyle(){
  if(content&&signatureLayouts){
   content.innerHTML=signatureLayouts[style.key];
   content.classList.toggle('signature-designed',style.key!=='original');
+  content.querySelectorAll('[title]').forEach(node=>node.removeAttribute('title'));
  }
  $('#photo-mat').dataset.captionStyle=style.key;
  const next=SIGNATURE_STYLES[(signatureStyleIndex+1)%SIGNATURE_STYLES.length];
@@ -1131,6 +1137,150 @@ function applySignatureStyle(){
   if(signature.dataset.style===style.key&&!signature.hidden)updateZoom();
  }).catch(()=>{});
 }
+function setSignatureInfo(photo,file,values){
+ hideSignatureInfo();
+ const {rawDate,timeKind,place,camera,exposure,dimensions,fileSize,filename,tags}=values;
+ const tag=name=>Object.entries(tags).find(([key])=>key.split(':').at(-1)===name)?.[1];
+ const finite=value=>value!==null&&value!==undefined&&String(value).trim()!==''&&Number.isFinite(Number(value))?Number(value):null;
+ const coordinate=(value,ref,limit)=>{
+  let n=finite(value);if(n===null||Math.abs(n)>limit)return null;
+  if(/^[SW]$/i.test(String(ref||'')))n=-Math.abs(n);
+  return n;
+ };
+ const latitude=coordinate(photo.latitude??tag('GPSLatitude'),photo.latitude==null?tag('GPSLatitudeRef'):null,90);
+ const longitude=coordinate(photo.longitude??tag('GPSLongitude'),photo.longitude==null?tag('GPSLongitudeRef'):null,180);
+ let altitude=finite(tag('GPSAltitude'));
+ if(altitude!==null&&Number(tag('GPSAltitudeRef'))===1)altitude=-Math.abs(altitude);
+ const path=String(file?.path||'');
+ const split=Math.max(path.lastIndexOf('\\'),path.lastIndexOf('/'));
+ let directory=split>=0?path.slice(0,split):'';
+ if(/^[A-Za-z]:$/.test(directory))directory+='\\';
+ if(split===0&&path.startsWith('/'))directory='/';
+ const size=finite(file?.size);
+ const capture=[
+  [timeKind,rawDate.replace('T',' ')],
+  ['相机',camera],
+  ['参数',exposure.join(' · ')]
+ ];
+ const gps=[
+  latitude===null?'':`${Math.abs(latitude).toFixed(6)}°${latitude<0?'S':'N'}`,
+  longitude===null?'':`${Math.abs(longitude).toFixed(6)}°${longitude<0?'W':'E'}`,
+  altitude===null?'':`海拔 ${Number(altitude.toFixed(2))} m`
+ ].filter(Boolean).join('  ');
+ const location=[
+  ['地点',place],['GPS',gps]
+ ];
+ const files=[
+  ['图像', [dimensions,size===null?'':fileSize||`${size.toLocaleString('zh-CN')} 字节`].filter(Boolean).join(' · ')],
+  ['文件名',filename],['文件夹',directory]
+ ];
+ if(file?.modified_at&&String(file.modified_at)!==rawDate)files.push(['文件修改',String(file.modified_at).replace('T',' ')]);
+ const copies=[...new Set((photo.files||[]).map(f=>f.path).filter(p=>p&&p!==path))];
+ if(copies.length)files.push(['其他位置',copies.join('\n')]);
+ let sections=[['拍摄',capture],['地点与 GPS',location],['文件',files]];
+ if(photo.notes)sections.push(['照片说明',[['备注',String(photo.notes)]]]);
+ // Keep the visible card and clipboard identical; empty fields never reserve space.
+ sections=sections.map(([heading,rows])=>[heading,rows.map(([key,value])=>[key,String(value??'').trim()]).filter(([,value])=>value)]).filter(([,rows])=>rows.length);
+ signatureInfo.sections=sections;
+ signatureInfo.text=sections.length?['照片信息',...sections.map(([,rows])=>rows.map(([key,value])=>key+'：'+value.replace(/\r?\n/g,'\r\n  ')).join('\r\n'))].join('\r\n\r\n'):'';
+ const pop=ensureSignatureInfo();
+ pop.querySelector('.signature-info-body').innerHTML=sections.map(([,rows])=>`<dl class="signature-info-group">${rows.map(([key,value])=>`<div class="signature-info-row${key==='GPS'?' signature-info-gps':''}"><dt>${esc(key)}</dt><dd>${esc(value)}</dd></div>`).join('')}</dl>`).join('');
+ pop.querySelector('.signature-info-status').textContent='';
+ const caption=$('#photo-signature');
+ caption.tabIndex=0;caption.setAttribute('aria-label','照片标签，查看完整照片信息');
+ caption.setAttribute('aria-haspopup','dialog');caption.setAttribute('aria-controls','signature-info-popover');
+}
+function ensureSignatureInfo(){
+ let pop=$('#signature-info-popover');if(pop)return pop;
+ pop=document.createElement('div');pop.id='signature-info-popover';pop.className='signature-info-popover';pop.hidden=true;
+ pop.setAttribute('role','dialog');pop.setAttribute('aria-modal','false');pop.setAttribute('aria-labelledby','signature-info-heading');pop.tabIndex=-1;
+ pop.innerHTML='<header><h2 id="signature-info-heading">照片信息</h2><button type="button" class="signature-info-close" aria-label="关闭照片信息">×</button></header><div class="signature-info-body"></div><footer><button type="button" class="signature-info-copy"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="7" y="6" width="9" height="11" rx="1.5"/><path d="M12 6V3H4v11h3"/></svg><span>复制</span></button><span class="signature-info-status" role="status" aria-live="polite"></span></footer>';
+ $('#detail-dialog').appendChild(pop);
+ pop.addEventListener('pointerenter',()=>{clearTimeout(signatureInfo.closeTimer);});
+ pop.addEventListener('pointerleave',()=>scheduleSignatureInfoClose());
+ pop.addEventListener('focusin',()=>clearTimeout(signatureInfo.closeTimer));
+ pop.addEventListener('focusout',()=>scheduleSignatureInfoClose());
+ pop.addEventListener('keydown',event=>{
+  event.stopPropagation();
+  if(event.key==='Escape'){event.preventDefault();$('#photo-signature').focus({preventScroll:true});hideSignatureInfo();}
+ });
+ pop.querySelector('.signature-info-close').addEventListener('click',()=>{$('#photo-signature').focus({preventScroll:true});hideSignatureInfo();});
+ pop.querySelector('.signature-info-copy').addEventListener('click',async()=>{
+  const text=signatureInfo.text,status=pop.querySelector('.signature-info-status');
+  clearTimeout(signatureInfo.copyTimer);
+  try{
+   await navigator.clipboard.writeText(text);
+   if(text!==signatureInfo.text)return;
+   status.textContent='已复制';
+   signatureInfo.copyTimer=setTimeout(()=>status.textContent='',2400);
+  }catch(e){if(text===signatureInfo.text)status.textContent='复制失败，可选中文字后复制';}
+ });
+ return pop;
+}
+function positionSignatureInfo(){
+ const pop=$('#signature-info-popover'),caption=$('#photo-signature');
+ if(!pop||pop.hidden||caption.hidden)return;
+ const anchor=caption.getBoundingClientRect();
+ const above=Math.max(0,anchor.top-18),below=Math.max(0,innerHeight-anchor.bottom-18);
+ const useAbove=above>=Math.min(360,below);
+ const room=useAbove?above:below;
+ pop.style.width='max-content';
+ pop.style.maxWidth=Math.min(390,innerWidth-24)+'px';
+ pop.style.maxHeight=Math.min(460,Math.max(180,room),innerHeight-24)+'px';
+ const box=pop.getBoundingClientRect();
+ pop.style.left=Math.max(12,Math.min(anchor.left+8,innerWidth-box.width-12))+'px';
+ pop.style.top=Math.max(12,Math.min(useAbove?anchor.top-box.height-6:anchor.bottom+6,innerHeight-box.height-12))+'px';
+}
+function showSignatureInfo(){
+ clearTimeout(signatureInfo.openTimer);clearTimeout(signatureInfo.closeTimer);
+ signatureInfo.openTimer=null;
+ if(!signatureInfo.text||$('#photo-signature').hidden||!$('#detail-dialog').open)return;
+ const pop=ensureSignatureInfo();
+ if(pop.hidden)pop.querySelector('.signature-info-status').textContent='';
+ pop.hidden=false;
+ $('#photo-signature').setAttribute('aria-expanded','true');
+ positionSignatureInfo();
+}
+function hideSignatureInfo(){
+ clearTimeout(signatureInfo.openTimer);clearTimeout(signatureInfo.closeTimer);clearTimeout(signatureInfo.copyTimer);
+ signatureInfo.openTimer=null;
+ const pop=$('#signature-info-popover');if(pop)pop.hidden=true;
+ $('#photo-signature')?.setAttribute('aria-expanded','false');
+}
+function scheduleSignatureInfoClose(){
+ clearTimeout(signatureInfo.openTimer);clearTimeout(signatureInfo.closeTimer);
+ signatureInfo.openTimer=null;
+ signatureInfo.closeTimer=setTimeout(()=>{
+  const pop=$('#signature-info-popover'),caption=$('#photo-signature');
+  const focused=document.activeElement;
+  if(pop?.matches(':hover')||caption.matches(':hover')||((pop?.contains(focused)||caption===focused)&&focused.matches(':focus-visible')))return;
+  hideSignatureInfo();
+ },260);
+}
+$('#photo-signature').addEventListener('pointerover',event=>{
+ if(event.pointerType==='touch'||event.target.closest('button')||signatureInfo.openTimer)return;
+ clearTimeout(signatureInfo.closeTimer);
+ signatureInfo.openTimer=setTimeout(()=>{signatureInfo.openTimer=null;showSignatureInfo();},200);
+});
+$('#photo-signature').addEventListener('pointerleave',scheduleSignatureInfoClose);
+$('#photo-signature').addEventListener('focusin',event=>{if(event.target===$('#photo-signature'))showSignatureInfo();});
+$('#photo-signature').addEventListener('focusout',scheduleSignatureInfoClose);
+$('#photo-signature').addEventListener('keydown',event=>{
+ if(event.target!==$('#photo-signature'))return;
+ if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();showSignatureInfo();$('#signature-info-popover')?.focus();}
+});
+$('#photo-signature').addEventListener('click',event=>{if(!event.target.closest('button'))showSignatureInfo();});
+$('#detail-dialog').addEventListener('close',hideSignatureInfo);
+document.addEventListener('keydown',event=>{
+ const pop=$('#signature-info-popover');
+ if(event.key==='Escape'&&pop&&!pop.hidden&&$('#detail-dialog').open&&$$('dialog[open]').at(-1)?.id==='detail-dialog'){event.preventDefault();event.stopImmediatePropagation();$('#photo-signature').focus({preventScroll:true});hideSignatureInfo();}
+},true);
+$('#image-viewport').addEventListener('scroll',()=>{
+ const pop=$('#signature-info-popover');if(!pop||pop.hidden)return;
+ const anchor=$('#photo-signature').getBoundingClientRect();
+ if(anchor.bottom<0||anchor.top>innerHeight)hideSignatureInfo();else positionSignatureInfo();
+},{passive:true});
+window.addEventListener('resize',positionSignatureInfo);
 function updateSignaturePalette(){
  const signature=$('#photo-signature'),img=$('#detail-img');
  if(!signature||signature.dataset.style!=='tone'||!img?.complete||!img.naturalWidth)return;
@@ -1655,14 +1805,14 @@ document.addEventListener('keydown',action(async e=>{
  else if(e.key==='Home'||e.key==='End'){e.preventDefault();const total=viewer.total||viewer.ids.length;const current=Number.isFinite(viewer.absolute)?viewer.absolute:(viewer.offset||0)+(viewer.target||0);await movePhoto(e.key==='Home'?-current:total-1-current);}
 }));
 let drag=null;const viewport=$('#image-viewport');
-viewport.addEventListener('pointerdown',e=>{if(e.button!==0||e.target.closest('.face-name,button,a,input,textarea,select'))return;drag={x:e.clientX,y:e.clientY,left:viewport.scrollLeft,top:viewport.scrollTop};viewport.setPointerCapture(e.pointerId);});
+viewport.addEventListener('pointerdown',e=>{if(e.button!==0||e.target.closest('#photo-signature,.face-name,button,a,input,textarea,select'))return;drag={x:e.clientX,y:e.clientY,left:viewport.scrollLeft,top:viewport.scrollTop};viewport.setPointerCapture(e.pointerId);});
 viewport.addEventListener('pointermove',e=>{if(drag){viewport.scrollLeft=drag.left+drag.x-e.clientX;viewport.scrollTop=drag.top+drag.y-e.clientY;}});
 viewport.addEventListener('pointerup',()=>drag=null);viewport.addEventListener('pointercancel',()=>drag=null);
 new ResizeObserver(()=>{if($('#detail-dialog').open)updateZoom();}).observe(viewport);
 // Remember where a gesture began: dragging a zoomed photo onto the background
 // must not close it. Buttons, links and the detail drawer keep their own actions.
 let outsidePhotoDown=false;
- const keepOpenSelector='#detail-img,button,a,input,textarea,select,.detail-info,.face-name-layer,.face-name,.viewer-tools,.viewer-arrow,.dialog-close,#photo-mat,#photo-signature,.face-style-popover,.people-manage-popover,.face-action-popover';
+ const keepOpenSelector='#detail-img,button,a,input,textarea,select,.detail-info,.face-name-layer,.face-name,.viewer-tools,.viewer-arrow,.dialog-close,#photo-mat,#photo-signature,.signature-info-popover,.face-style-popover,.people-manage-popover,.face-action-popover';
 $('#detail-dialog').addEventListener('pointerdown',e=>{
  outsidePhotoDown=e.button===0&&!e.target.closest(keepOpenSelector);
 });

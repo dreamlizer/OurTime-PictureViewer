@@ -28,6 +28,7 @@ def main() -> int:
         page.on("pageerror", lambda error: errors.append(str(error)))
         page.goto(URL, wait_until="domcontentloaded")
         page.wait_for_selector("#photo-grid [data-photo]")
+        origin_view = page.evaluate("state.view")
         located = page.locator("#photo-grid [data-photo]").evaluate_all(
             """cards => cards.map(card => Number(card.dataset.photo))"""
         )
@@ -76,6 +77,26 @@ def main() -> int:
         page.wait_for_function(
             "document.querySelector('.photo-place-marker img').naturalWidth>0"
         )
+        def fills_thumbnail() -> bool:
+            return page.locator('.photo-place-thumb').evaluate('''frame=>{
+              const image=frame.querySelector('img'),r=frame.getBoundingClientRect(),i=image.getBoundingClientRect();
+              return Math.abs(i.width-frame.clientWidth)<.5&&Math.abs(i.height-frame.clientHeight)<.5
+                &&Math.abs(i.left-r.left-frame.clientLeft)<.5&&Math.abs(i.top-r.top-frame.clientTop)<.5
+                &&getComputedStyle(image).objectFit==='cover';
+            }''')
+        check(fills_thumbnail(), '真实地图缩略图铺满相框，右侧没有空白')
+        page.locator('.photo-place-marker').screenshot(path=str(REPORT.with_name('photo-place-thumbnail-fixed.png')))
+        real_src=page.locator('.photo-place-thumb img').get_attribute('src')
+        for viewport in [{'width':1440,'height':900},{'width':390,'height':844}]:
+            page.set_viewport_size(viewport)
+            for width,height in [(480,640),(640,480),(400,400)]:
+                page.locator('.photo-place-thumb img').evaluate('''async (image,size)=>{
+                  image.src='data:image/svg+xml,'+encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="${size[0]}" height="${size[1]}"><rect width="100%" height="100%" fill="#567563"/></svg>`);
+                  await image.decode();
+                }''',[width,height])
+                check(fills_thumbnail(),f'{viewport["width"]}px 窗口 / {width}×{height} 缩略图无空边且保持等比裁切')
+        page.set_viewport_size({'width':1440,'height':900})
+        page.locator('.photo-place-thumb img').evaluate('async (image,src)=>{image.src=src;await image.decode()}',real_src)
         single = page.evaluate(
             """() => ({
               layers:state.placeCluster.getLayers().length,
@@ -88,7 +109,8 @@ def main() -> int:
             })"""
         )
         check(single["layers"] == 1, "单张地图只绘制这一张照片的定位")
-        check(abs(single["zoom"] - 0.2) <= 0.02, "单张地图默认缩放倍数约为 0.2")
+        check(abs(single["zoom"] - 0.15) <= 0.02, "单张地图默认缩放倍数约为 0.15")
+        check(single["help"] == "", "单张地图不显示解释性废话")
         check(single["heading"] != "按地点看" and single["mapVisible"], "左侧地点状态打开单张照片地图并显示实际地点")
         check(single["backVisible"] and single["actionsHidden"], "单张地图隐藏聚合筛选并保留返回大图入口")
         page.screenshot(path=str(REPORT.with_name("photo-place-map.png")), full_page=False)
@@ -106,7 +128,20 @@ def main() -> int:
             "id => document.querySelector('#detail-dialog').open && Number(state.detail?.id)===id",
             arg=photo_id,
         )
-        check(True, "返回大图按钮也回到同一张照片")
+        check(page.evaluate("view => state.view===view", origin_view), "返回大图时先恢复进入地图前的照片页面")
+        dialog_box = page.locator("#detail-dialog").bounding_box()
+        assert dialog_box is not None
+        page.mouse.click(dialog_box["x"] + 8, dialog_box["y"] + 8)
+        page.wait_for_function("!document.querySelector('#detail-dialog').open")
+        check(
+            page.evaluate("view => state.view===view && document.querySelector('#places-view').hidden", origin_view),
+            "返回大图后点击空白关闭照片，回到原照片页面而不是再次回地图",
+        )
+        page.locator(f'#photo-grid [data-photo="{photo_id}"]').click()
+        page.wait_for_function(
+            "id => document.querySelector('#detail-dialog').open && Number(state.detail?.id)===id",
+            arg=photo_id,
+        )
         page.evaluate("state.detail.latitude=null;state.detail.longitude=null")
         page.locator("#photo-place-map").click()
         page.wait_for_function("document.querySelector('#toast').textContent.includes('没有定位坐标')")

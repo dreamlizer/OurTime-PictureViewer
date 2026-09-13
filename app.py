@@ -35,7 +35,7 @@ from library_db import (
     ACTIVE_ASSET, ASSET_LIST_COLUMNS, init_schema, load_place_rules,
     migrate_place_overrides, place_rules_version, register_collations, upsert_place_rule,
 )
-from browse_queries import directory_predicate as directory_clause, fetch_people, fetch_photos
+from browse_queries import directory_predicate as directory_clause, fetch_people, fetch_photos, nearby_photo_spec
 
 mimetypes.add_type('font/ttf', '.ttf')
 
@@ -72,7 +72,11 @@ GEO_LOCK=threading.Lock()
 RULE_LOCK=threading.RLock()
 RULES=[]
 PROGRESS_LOCK=threading.Lock()
-PROGRESS={'job_id':None,'samples':deque(maxlen=2000),'metadata_reads':0}
+PROGRESS={
+    'job_id':None,'samples':deque(maxlen=2000),'metadata_reads':0,
+    'phase':'','current_stage':'','current_path':'','total':0,
+    'discovered':0,'processed':0,'face_photos':0,'faces_found':0,'face_seconds':0.0,
+}
 STATUS_CACHE={'at':0,'payload':None}
 STATUS_CACHE_LOCK=threading.Lock()
 try:
@@ -554,7 +558,7 @@ def process_faces(asset_id,path):
     with db() as c:
         row=c.execute('SELECT face_state FROM assets WHERE id=?',(asset_id,)).fetchone()
         if row and int(row['face_state'] or 0)==1:
-            return
+            return None
     engine=get_face_engine()
     with Image.open(path) as original:
         pic=ImageOps.exif_transpose(original).convert('RGB')
@@ -603,6 +607,7 @@ def process_faces(asset_id,path):
                     confirmed=item['route']=='confirmed',
                     ignored=item['route']=='ignored',
                 )
+            return len(staged)
         except Exception:
             invalidate_face_index()
             for crop_path in created_crops:
@@ -613,18 +618,21 @@ def process_faces(asset_id,path):
                     pass
             raise
 
-def ingest(path,with_faces):
+def ingest(path,with_faces,stage=None):
+    notify = stage or (lambda _name: None)
+    notify('checking')
     if path_excluded(path):
-        return 'excluded',None,False
+        return 'excluded',None,False,False,0,0.0
     stat=path.stat()
     if not path.is_file():
-        return 'skipped',None,False
+        return 'skipped',None,False,False,0,0.0
     with db() as c:
         old=c.execute('SELECT f.*,a.sha256,a.face_state,a.error,a.excluded content_excluded FROM files f JOIN assets a ON a.id=f.asset_id WHERE path=?',(str(path),)).fetchone()
     unchanged=old and old['size']==stat.st_size and old['mtime_ns']==stat.st_mtime_ns
     if unchanged:
         digest=old['sha256']
     else:
+        notify('fingerprint')
         digest_hash=hashlib.sha256()
         with path.open('rb') as stream:
             for chunk in iter(lambda:stream.read(1024*1024),b''):
@@ -635,7 +643,7 @@ def ingest(path,with_faces):
         digest=digest_hash.hexdigest()
     with asset_lock(digest):
         if path_excluded(path):
-            return 'excluded',None,False
+            return 'excluded',None,False,False,0,0.0
         with db() as c:
             asset=c.execute('SELECT * FROM assets WHERE sha256=?',(digest,)).fetchone()
         metadata_read=False
@@ -644,8 +652,10 @@ def ingest(path,with_faces):
         elif asset and not asset['error']:
             aid=asset['id']; state=asset['face_state']; error=None
             if not thumbnail_path(digest).exists():
+                notify('thumbnail')
                 make_thumbnail(path,digest)
         else:
+            notify('metadata')
             metadata_read=True
             meta=metadata_for(path,stat,digest)
             error=meta['error']; state=asset['face_state'] if asset else 0
@@ -668,16 +678,25 @@ def ingest(path,with_faces):
                 active=c.execute('SELECT 1 FROM assets a WHERE id=? AND '+ACTIVE_ASSET,(aid,)).fetchone()
         if not active:
             cleanup_asset_cache(aid)
-            return 'excluded',error,metadata_read
+            return 'excluded',error,metadata_read,False,0,0.0
         status='skipped' if unchanged and not metadata_read else 'added'
+        face_processed=False
+        faces_found=0
+        face_seconds=0.0
         if with_faces and state!=1 and not error:
             try:
-                process_faces(aid,path)
+                notify('faces')
+                face_started=time.perf_counter()
+                found=process_faces(aid,path)
+                if found is not None:
+                    face_processed=True
+                    faces_found=int(found)
+                    face_seconds=time.perf_counter()-face_started
             except Exception as e:
                 with db() as c:
                     c.execute('UPDATE assets SET face_state=-1,face_error=? WHERE id=?',(str(e),aid))
                 error='人脸处理：'+str(e)
-        return status,error,metadata_read
+        return status,error,metadata_read,face_processed,faces_found,face_seconds
 
 def job_error(jid,path,stage,message):
     with db() as c:
@@ -691,10 +710,22 @@ def run_scan(jid):
         roots=json.loads(job['roots'])
         workers=1 if job['with_faces'] else job['workers']
         with PROGRESS_LOCK:
-            PROGRESS.update(job_id=jid,samples=deque([(time.monotonic(),0)],maxlen=2000),metadata_reads=0)
-        visited=set()
-        progress={'discovered':0,'processed':0,'added':0,'skipped':0,'excluded':0,'auxiliary':0,'metadata_reads':0,'current_path':'','dirty':0,'last_flush':0.0}
+            PROGRESS.update(
+                job_id=jid,samples=deque([(time.monotonic(),0)],maxlen=2000),metadata_reads=0,
+                phase='inventory',current_stage='inventory',current_path='',total=0,
+                discovered=0,processed=0,face_photos=0,faces_found=0,face_seconds=0.0,
+            )
+        progress={
+            'discovered':0,'total':0,'processed':0,'added':0,'skipped':0,'excluded':0,
+            'auxiliary':0,'metadata_reads':0,'face_photos':0,'faces_found':0,'face_seconds':0.0,
+            'phase':'inventory','current_stage':'inventory','current_path':'','dirty':0,'last_flush':0.0,
+        }
         progress_lock=threading.Lock()
+        def publish_live(payload):
+            with PROGRESS_LOCK:
+                if PROGRESS['job_id']==jid:
+                    for key in ('phase','current_stage','current_path','total','discovered','processed','face_photos','faces_found','face_seconds'):
+                        PROGRESS[key]=payload[key]
         def flush_job_progress(force=False):
             with progress_lock:
                 if not force and progress['dirty']<25 and time.monotonic()-progress['last_flush']<1:
@@ -702,12 +733,54 @@ def run_scan(jid):
                 payload=dict(progress)
                 progress['dirty']=0
                 progress['last_flush']=time.monotonic()
+            publish_live(payload)
             with db() as c:
-                c.execute('UPDATE jobs SET discovered=?,processed=?,added=?,skipped=?,excluded=?,auxiliary=?,metadata_reads=?,current_path=? WHERE id=?',
-                          (payload['discovered'],payload['processed'],payload['added'],payload['skipped'],payload['excluded'],payload['auxiliary'],payload['metadata_reads'],payload['current_path'],jid))
+                c.execute('''UPDATE jobs SET discovered=?,total=?,processed=?,added=?,skipped=?,excluded=?,auxiliary=?,metadata_reads=?,
+                          face_photos=?,faces_found=?,face_seconds=?,phase=?,current_stage=?,current_path=? WHERE id=?''',
+                          (payload['discovered'],payload['total'],payload['processed'],payload['added'],payload['skipped'],payload['excluded'],
+                           payload['auxiliary'],payload['metadata_reads'],payload['face_photos'],payload['faces_found'],payload['face_seconds'],
+                           payload['phase'],payload['current_stage'],payload['current_path'],jid))
+        def set_stage(stage,path):
+            with progress_lock:
+                progress['current_stage']=stage
+                progress['current_path']=str(path)
+                progress['dirty']+=1
+                payload=dict(progress)
+            publish_live(payload)
+        def candidates(root,visited,record_errors):
+            def walk_error(err):
+                if record_errors:
+                    job_error(jid,err.filename,'目录读取',err)
+            for folder,dirs,files in os.walk(root,topdown=True,onerror=walk_error,followlinks=False):
+                if STOP.is_set(): break
+                current=Path(folder)
+                if path_excluded(current):
+                    dirs[:]=[]
+                    continue
+                retained=[]
+                for d in dirs:
+                    child=current/d
+                    if not job['include_system'] and d.lower() in EXCLUDE: continue
+                    try:
+                        if child.is_symlink() or (getattr(child.stat(),'st_file_attributes',0)&0x400): continue
+                        if child.resolve() in {DATA,BASE}: continue
+                        retained.append(d)
+                    except OSError as e:
+                        if record_errors:
+                            job_error(jid,child,'目录读取',e)
+                dirs[:]=retained
+                for name in files:
+                    if STOP.is_set(): break
+                    path=current/name
+                    if path.suffix.lower() not in EXTENSIONS or path.is_symlink(): continue
+                    key=os.path.normcase(str(path))
+                    if key in visited: continue
+                    visited.add(key)
+                    yield path
         def process_one(path):
             metadata_read=False
             try:
+                set_stage('checking',path)
                 attributes=getattr(path.stat(),'st_file_attributes',0)
                 if attributes & (0x1000|0x400000|0x400):
                     raise RuntimeError('跳过离线占位文件或文件链接；请先在本机下载原文件再扫描')
@@ -724,7 +797,9 @@ def run_scan(jid):
                     if old:
                         cleanup_asset_cache(old[0])
                 else:
-                    status,error,metadata_read=ingest(path,bool(job['with_faces']))
+                    status,error,metadata_read,face_processed,faces_found,face_seconds=ingest(
+                        path,bool(job['with_faces']),lambda name:set_stage(name,path)
+                    )
                 if error:
                     job_error(jid,path,'图片读取 / 人脸',error)
                 with progress_lock:
@@ -732,6 +807,10 @@ def run_scan(jid):
                     if status in progress:
                         progress[status]+=1
                     progress['metadata_reads']+=int(metadata_read)
+                    if not auxiliary and face_processed:
+                        progress['face_photos']+=1
+                        progress['faces_found']+=faces_found
+                        progress['face_seconds']+=face_seconds
                     progress['current_path']=str(path)
                     progress['dirty']+=1
                 flush_job_progress()
@@ -747,46 +826,36 @@ def run_scan(jid):
                     progress['dirty']+=1
                 flush_job_progress()
 
+        inventory_seen=set()
+        for root in roots:
+            for path in candidates(root,inventory_seen,True):
+                with progress_lock:
+                    progress['discovered']+=1
+                    progress['current_path']=str(path)
+                    progress['dirty']+=1
+                flush_job_progress()
+            if STOP.is_set(): break
+        if not STOP.is_set():
+            with progress_lock:
+                progress['total']=progress['discovered']
+                progress['phase']='processing'
+                progress['current_stage']='checking'
+                progress['current_path']=''
+                progress['dirty']+=1
+            flush_job_progress(force=True)
+
         with ThreadPoolExecutor(max_workers=workers,thread_name_prefix='photo-scan') as pool:
+          visited=set()
           for root in roots:
             if STOP.is_set(): break
             root_path=Path(root)
             pending=set()
-            def walk_error(err):
-                job_error(jid,err.filename,'目录读取',err)
-            for folder,dirs,files in os.walk(root,topdown=True,onerror=walk_error,followlinks=False):
+            for path in candidates(root,visited,False):
                 if STOP.is_set(): break
-                current=Path(folder)
-                if path_excluded(current):
-                    dirs[:]=[]
-                    continue
-                retained=[]
-                for d in dirs:
-                    child=current/d
-                    if not job['include_system'] and d.lower() in EXCLUDE: continue
-                    try:
-                        if child.is_symlink() or (getattr(child.stat(),'st_file_attributes',0)&0x400): continue
-                        if child.resolve() in {DATA,BASE}: continue
-                        retained.append(d)
-                    except OSError as e:
-                        job_error(jid,child,'目录读取',e)
-                dirs[:]=retained
-                for name in files:
-                    if STOP.is_set(): break
-                    path=current/name
-                    if path.suffix.lower() not in EXTENSIONS or path.is_symlink(): continue
-                    key=os.path.normcase(str(path))
-                    if key in visited: continue
-                    visited.add(key)
-                    with progress_lock:
-                        progress['discovered']+=1
-                        progress['current_path']=str(path)
-                        progress['dirty']+=1
-                    flush_job_progress()
-                    pending.add(pool.submit(process_one,path))
-                    if len(pending)>=workers*2:
-                        finished,pending=wait(pending,return_when=FIRST_COMPLETED)
-                        for future in finished: future.result()
+                pending.add(pool.submit(process_one,path))
+                if len(pending)>=workers*2:
+                    finished,pending=wait(pending,return_when=FIRST_COMPLETED)
+                    for future in finished: future.result()
             if pending:
                 for future in pending: future.result()
             flush_job_progress(force=True)
@@ -805,6 +874,14 @@ def run_scan(jid):
                             c.execute('UPDATE files SET exists_now=0 WHERE id=?',(row['id'],))
                         except OSError:
                             pass
+        with progress_lock:
+            if not STOP.is_set():
+                progress['total']=progress['processed']
+                progress['phase']='complete'
+                progress['current_stage']='complete'
+            progress['current_path']=''
+            progress['dirty']+=1
+        flush_job_progress(force=True)
         close_readers()
         with db() as c:
             count=c.execute('SELECT errors FROM jobs WHERE id=?',(jid,)).fetchone()[0]
@@ -814,7 +891,7 @@ def run_scan(jid):
     except Exception as e:
         job_error(jid,'','扫描任务',e)
         with db() as c:
-            c.execute("UPDATE jobs SET status='failed',message=?,finished_at=? WHERE id=?",(str(e),now(),jid))
+            c.execute("UPDATE jobs SET status='failed',phase='failed',current_stage='failed',message=?,finished_at=? WHERE id=?",(str(e),now(),jid))
     finally:
         close_readers()
         SCAN_LOCK.release()
@@ -844,8 +921,8 @@ def begin_scan(body):
         STATUS_CACHE['payload']=None; STATUS_CACHE['at']=0
     try:
         with db() as c:
-            c.execute('INSERT INTO jobs(id,roots,with_faces,include_system,status,started_at,workers) VALUES (?,?,?,?,?,?,?)',
-                      (jid,json.dumps(roots,ensure_ascii=False),body.with_faces,body.include_system,'running',now(),1 if body.with_faces else body.workers))
+            c.execute('INSERT INTO jobs(id,roots,with_faces,include_system,status,started_at,workers,phase,current_stage) VALUES (?,?,?,?,?,?,?,?,?)',
+                      (jid,json.dumps(roots,ensure_ascii=False),body.with_faces,body.include_system,'running',now(),1 if body.with_faces else body.workers,'inventory','inventory'))
         threading.Thread(target=run_scan,args=(jid,),daemon=True).start()
     except Exception:
         SCAN_LOCK.release(); raise
@@ -860,10 +937,22 @@ def pause():
     with db() as c: c.execute("UPDATE jobs SET status='pausing',message='当前文件处理完后暂停' WHERE status='running'")
     return {'ok':True}
 
+@app.post('/api/scan/{jid}/cancel')
+def cancel_scan(jid:str):
+    with db() as c:
+        row=c.execute('SELECT status FROM jobs WHERE id=?',(jid,)).fetchone()
+        if not row: raise HTTPException(404,'任务不存在')
+        if row['status']!='paused': raise HTTPException(409,'只有已暂停的扫描可以取消')
+        c.execute("UPDATE jobs SET status='cancelled',finished_at=?,current_path='',message='已取消继续扫描' WHERE id=?",(now(),jid))
+    with STATUS_CACHE_LOCK:
+        STATUS_CACHE['payload']=None; STATUS_CACHE['at']=0
+    return {'ok':True,'id':jid,'status':'cancelled'}
+
 @app.post('/api/scan/{jid}/resume')
 def resume(jid:str):
     with db() as c: row=c.execute('SELECT * FROM jobs WHERE id=?',(jid,)).fetchone()
     if not row: raise HTTPException(404,'任务不存在')
+    if row['status']!='paused': raise HTTPException(409,'只有已暂停的扫描可以继续')
     return begin_scan(ScanRequest(roots=json.loads(row['roots']),with_faces=bool(row['with_faces']),include_system=bool(row['include_system']),workers=row['workers']))
 
 @app.get('/api/health')
@@ -900,13 +989,27 @@ def status():
         row=c.execute('SELECT * FROM jobs ORDER BY rowid DESC LIMIT 1').fetchone()
         job=dict(row) if row else None
         errors=[dict(r) for r in c.execute('SELECT path,stage,message FROM job_errors WHERE job_id=? ORDER BY id DESC LIMIT 30',(job['id'],))] if job else []
+        previous_face_totals=c.execute(
+            'SELECT coalesce(sum(face_photos),0),coalesce(sum(face_seconds),0) FROM jobs WHERE id<>?',
+            ((job['id'] if job else ''),),
+        ).fetchone()
     speed=0
+    live=None
     with PROGRESS_LOCK:
         if job and job['id']==PROGRESS['job_id'] and job['status'] in {'running','pausing'}:
+            live={key:PROGRESS[key] for key in ('phase','current_stage','current_path','total','discovered','processed','face_photos','faces_found','face_seconds')}
             current=time.monotonic()
             samples=[s for s in PROGRESS['samples'] if current-s[0]<=60]
             if len(samples)>1 and current-samples[0][0]>=2:
                 speed=(samples[-1][1]-samples[0][1])/(current-samples[0][0])
+    if job and live:
+        job.update(live)
+    face_average_seconds=0
+    if job:
+        face_sample_count=int(previous_face_totals[0] or 0)+int(job.get('face_photos') or 0)
+        face_sample_seconds=float(previous_face_totals[1] or 0)+float(job.get('face_seconds') or 0)
+        if face_sample_count:
+            face_average_seconds=face_sample_seconds/face_sample_count
     inventory=None
     inventory_path=DATA/'inventory-estimate.json'
     if inventory_path.exists():
@@ -915,7 +1018,8 @@ def status():
             inventory={'candidate_files':stored['total'],'status':stored['status'],'as_of':stored.get('updated_at'),'note':'原始候选文件计数，包含副本和素材，不等于个人照片数量'}
         except (OSError,ValueError,KeyError):
             pass
-    payload={'stats':{k:v or 0 for k,v in stats.items()},'job':job,'errors':errors,'metadata_per_second':round(speed,2),'inventory':inventory,
+    payload={'stats':{k:v or 0 for k,v in stats.items()},'job':job,'errors':errors,'metadata_per_second':round(speed,2),
+            'face_average_seconds':round(face_average_seconds,3),'inventory':inventory,
             'capabilities':{'heif':HEIF,'exiftool':bool(EXIFTOOL),'exiftool_mode':'常驻进程','face_model':(MODEL_ROOT/'models/buffalo_l/w600k_r50.onnx').exists(),'geo':(GEO_ROOT/'geonames/cities500.zip').exists(),'data_dir':str(DATA),'face_runtime':current_face_runtime(),'object_model':model_ready(),'object_runtime':object_runtime() if model_ready() else '未找到','version':'0.3','pid':os.getpid()}}
     with STATUS_CACHE_LOCK:
         STATUS_CACHE['at']=time.monotonic()
@@ -1055,13 +1159,13 @@ def asset_dict(row):
     return d
 
 @app.get('/api/photos')
-def photos(q:str='',filter:str='all',person:str='',offset:int=0,limit:int=60,directory:str='',sort:str='date_desc',sequence:bool=False,max_id:int=0,around:int=0,tail:bool=False,date_from:str='',date_to:str='',place:str=''):
+def photos(q:str='',filter:str='all',person:str='',offset:int=0,limit:int=60,directory:str='',sort:str='date_desc',sequence:bool=False,max_id:int=0,around:int=0,tail:bool=False,date_from:str='',date_to:str='',place:str='',nearby:int=0,radius_m:int=100):
     try:
         with db() as c:
             result=fetch_photos(
                 c, q=q, filter=filter, person=person, offset=offset, limit=limit,
                 directory=directory, sort=sort, sequence=sequence, max_id=max_id, around=around, tail=tail,
-                date_from=date_from, date_to=date_to, place=place,
+                date_from=date_from, date_to=date_to, place=place, nearby=nearby, radius_m=radius_m,
             )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
@@ -1073,6 +1177,91 @@ def photos(q:str='',filter:str='all',person:str='',offset:int=0,limit:int=60,dir
         return payload
     items=[dict(asset_dict(item), path=item.get('path')) for item in result.get('items') or []]
     return {'total':result['total'],'items':items,'max_id':result['max_id']}
+
+
+def nearby_distance_m(latitude, longitude, anchor):
+    latitude_scale=111_132.0
+    longitude_scale=max(1.0,111_320.0*abs(math.cos(math.radians(anchor['latitude']))))
+    north=(float(latitude)-anchor['latitude'])*latitude_scale
+    east=(float(longitude)-anchor['longitude'])*longitude_scale
+    return round(math.hypot(north,east),1)
+
+
+@app.get('/api/photos/{aid}/nearby')
+def nearby_photos(aid:int, radius_m:int=100):
+    try:
+        with db() as c:
+            clause,values,anchor=nearby_photo_spec(c,aid,radius_m)
+            where=ACTIVE_ASSET+' AND '+clause
+            total=c.execute('SELECT count(*) FROM assets a WHERE '+where,values).fetchone()[0]
+            rows=c.execute(
+                '''SELECT a.id,a.latitude,a.longitude,a.width,a.height,
+                          coalesce(nullif(a.manual_place,''),a.place) effective_place,
+                          coalesce(a.manual_date,a.captured_at) effective_date
+                   FROM assets a WHERE '''+where+
+                ''' ORDER BY CASE WHEN a.id=? THEN 0 ELSE 1 END,
+                            coalesce(a.manual_date,a.captured_at) DESC,a.id DESC LIMIT 500''',
+                values+[aid],
+            ).fetchall()
+    except ValueError as exc:
+        raise HTTPException(400,str(exc)) from exc
+    items=[]
+    for row in rows:
+        item=dict(row)
+        item['distance_m']=nearby_distance_m(row['latitude'],row['longitude'],anchor)
+        items.append(item)
+    return {
+        'anchor':anchor,
+        'radius_m':int(radius_m),
+        'total':int(total),
+        'points':items,
+        'samples':items[:9],
+        'points_truncated':total>len(items),
+    }
+
+
+class NearbyPlaceRequest(BaseModel):
+    place:str=Field(min_length=1,max_length=200)
+    radius_m:int=Field(default=100,ge=1,le=500)
+
+
+@app.post('/api/photos/{aid}/nearby-place')
+def set_nearby_place(aid:int, body:NearbyPlaceRequest):
+    place=(body.place or '').strip()
+    if not place:
+        raise HTTPException(400,'请填写地点名称')
+    try:
+        with db() as c:
+            clause,values,anchor=nearby_photo_spec(c,aid,body.radius_m)
+            rows=c.execute(
+                'SELECT a.id,a.manual_place FROM assets a WHERE '+ACTIVE_ASSET+' AND '+clause,
+                values,
+            ).fetchall()
+            changed=0
+            for row in rows:
+                before=row['manual_place']
+                if (before or '')==place:
+                    continue
+                c.execute('UPDATE assets SET manual_place=? WHERE id=?',(place,row['id']))
+                c.execute(
+                    'INSERT INTO edits(created_at,target,before_json,after_json) VALUES (?,?,?,?)',
+                    (now(),f'asset:{row["id"]}',json.dumps({'manual_place':before},ensure_ascii=False),json.dumps({
+                        'manual_place':place,
+                        'source_photo_id':aid,
+                        'radius_m':body.radius_m,
+                    },ensure_ascii=False)),
+                )
+                changed+=1
+    except ValueError as exc:
+        raise HTTPException(400,str(exc)) from exc
+    return {
+        'name':place,
+        'radius_m':body.radius_m,
+        'matched':len(rows),
+        'updated':changed,
+        'anchor':anchor,
+        'message':f'已把 {len(rows)} 张照片标为“{place}”',
+    }
 
 
 

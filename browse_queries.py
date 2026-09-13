@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import calendar
+import math
 import os
 import re
 from datetime import datetime
@@ -178,7 +179,8 @@ def photo_conditions(q='', filter='all', person='', directory='', max_id=0, date
     values = []
     year = ''
     filter_place = ''
-    group = 0
+    group_min = 0
+    group_max = 0
     current = filter
     if current.startswith('year:'):
         year = current.split(':', 1)[1]
@@ -189,14 +191,28 @@ def photo_conditions(q='', filter='all', person='', directory='', max_id=0, date
     elif current.startswith('group:'):
         raw = current.split(':', 1)[1]
         if raw == '10plus':
-            group = 10
+            group_min = 10
         else:
-            try:
-                group = int(raw)
-            except ValueError as exc:
-                raise ValueError('合影人数无效') from exc
-            if group < 2:
-                raise ValueError('合影从两人开始')
+            exact = re.fullmatch(r'(\d+)', raw)
+            interval = re.fullmatch(r'(\d+)-(\d+)', raw)
+            at_least = re.fullmatch(r'(\d+)plus', raw)
+            at_most = re.fullmatch(r'upto(\d+)', raw)
+            if exact:
+                group_min = group_max = int(exact.group(1))
+            elif interval:
+                group_min, group_max = map(int, interval.groups())
+            elif at_least:
+                group_min = int(at_least.group(1))
+            elif at_most:
+                group_max = int(at_most.group(1))
+            else:
+                raise ValueError('合影人数无效')
+        if group_min < 0 or group_max < 0 or group_min > 9999 or group_max > 9999:
+            raise ValueError('合影人数无效')
+        if (group_min and group_min < 1) or (group_max and group_max < 1):
+            raise ValueError('合影人数至少为 1')
+        if group_min and group_max and group_min > group_max:
+            raise ValueError('最少人数不能大于最多人数')
         current = 'all'
     path_condition = 'asset_id=a.id'
     path_values = []
@@ -257,12 +273,15 @@ def photo_conditions(q='', filter='all', person='', directory='', max_id=0, date
         else:
             conditions.append("coalesce(nullif(a.manual_place,''), a.place)=?")
             values.append(place_value)
-    if group:
-        if group >= 10:
-            conditions.append('a.id IN (SELECT asset_id FROM faces GROUP BY asset_id HAVING count(*)>=10)')
-        else:
-            conditions.append('a.id IN (SELECT asset_id FROM faces GROUP BY asset_id HAVING count(*)=?)')
-            values.append(group)
+    if group_min or group_max:
+        having = ['count(*)>=1']
+        if group_min:
+            having.append('count(*)>=?')
+            values.append(group_min)
+        if group_max:
+            having.append('count(*)<=?')
+            values.append(group_max)
+        conditions.append('a.id IN (SELECT asset_id FROM faces GROUP BY asset_id HAVING ' + ' AND '.join(having) + ')')
     if person:
         ids = parse_id_list(person, limit=100, label='人物编号')
         for pid in ids:
@@ -327,14 +346,64 @@ def photo_from_sql(path_sql, where, order_sql, metric_select=''):
     )
 
 
+def nearby_photo_spec(conn, anchor_id, radius_m):
+    """Return a small-radius SQL predicate centered on one stored GPS position."""
+    try:
+        anchor_id = int(anchor_id)
+        radius_m = float(radius_m)
+    except (TypeError, ValueError) as exc:
+        raise ValueError('照片编号或半径无效') from exc
+    if anchor_id < 1:
+        raise ValueError('照片编号无效')
+    if not 1 <= radius_m <= 500:
+        raise ValueError('地点范围必须在 1 到 500 米之间')
+    anchor = conn.execute(
+        'SELECT id,latitude,longitude FROM assets WHERE id=?',
+        (anchor_id,),
+    ).fetchone()
+    if not anchor:
+        raise ValueError('作为定位基准的照片不存在')
+    if anchor['latitude'] is None or anchor['longitude'] is None:
+        raise ValueError('这张照片没有定位坐标')
+    latitude = float(anchor['latitude'])
+    longitude = float(anchor['longitude'])
+    meters_per_latitude = 111_132.0
+    meters_per_longitude = max(1.0, 111_320.0 * abs(math.cos(math.radians(latitude))))
+    latitude_delta = radius_m / meters_per_latitude
+    longitude_delta = radius_m / meters_per_longitude
+    clause = (
+        'a.latitude BETWEEN ? AND ? AND a.longitude BETWEEN ? AND ? '
+        'AND (((a.latitude-?)*?)*((a.latitude-?)*?) '
+        '+ ((a.longitude-?)*?)*((a.longitude-?)*?)) <= ?'
+    )
+    params = [
+        latitude - latitude_delta, latitude + latitude_delta,
+        longitude - longitude_delta, longitude + longitude_delta,
+        latitude, meters_per_latitude, latitude, meters_per_latitude,
+        longitude, meters_per_longitude, longitude, meters_per_longitude,
+        radius_m * radius_m,
+    ]
+    return clause, params, {
+        'id': anchor_id,
+        'latitude': latitude,
+        'longitude': longitude,
+        'radius_m': radius_m,
+    }
+
+
 def fetch_photos(conn, *, q='', filter='all', person='', offset=0, limit=60, directory='', sort='date_desc',
-                 sequence=False, max_id=0, around=0, tail=False, date_from='', date_to='', place=''):
+                 sequence=False, max_id=0, around=0, tail=False, date_from='', date_to='', place='',
+                 nearby=0, radius_m=100):
     if sort not in PHOTO_ORDERS:
         raise ValueError('未知的照片排序方式')
     spec = photo_conditions(
         q=q, filter=filter, person=person, directory=directory, max_id=max_id,
         date_from=date_from, date_to=date_to, place=place,
     )
+    if nearby:
+        nearby_clause, nearby_values, _anchor = nearby_photo_spec(conn, nearby, radius_m)
+        spec['where'] += ' AND ' + nearby_clause
+        spec['values'].extend(nearby_values)
     conn.create_function('file_order', 1, file_order_key)
     conn.execute('BEGIN')
     upper = max_id or conn.execute('SELECT coalesce(max(id),0) FROM assets').fetchone()[0]

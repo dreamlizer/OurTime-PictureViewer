@@ -92,6 +92,7 @@ def main():
     home_ui = read(WEB / "home-query-ui.js")
     home_init = read(WEB / "home-query-init.js")
     backend = read(ROOT / "app.py")
+    browse_queries = read(ROOT / "browse_queries.py")
     waterfall = read(WEB / "waterfall.js")
     sources = {"app.js": app, "viewer.js": viewer, "viewer-overrides.css": viewer_overrides, "waterfall.js": waterfall, "index.html": html}
 
@@ -190,10 +191,13 @@ def main():
         fail("照片人物缺少上下标签位置、悬停指向、单张纠错或批量路人能力")
     if not all(value in home_ui for value in (
         'data-ot="group"',
-        "['10plus', '10人及以上']",
+        '>合影人数</button>',
+        'data-ot="group-min"',
+        'data-ot="group-max"',
+        "'upto' + max",
         'adapter.applyGroup',
-    )) or "applyGroup: async (group" not in home_init:
-        fail("全部照片缺少可与人物叠加的 1 至 10 人以上人数筛选")
+    )) or "applyGroup: async (group" not in home_init or "re.fullmatch(r'(\\d+)-(\\d+)'" not in browse_queries:
+        fail("全部照片或合影结果页缺少可与人物叠加的合影人数区间筛选")
     if not all(value in waterfall for value in (
         'data-group-exclude-arm',
         'data-group-exclude-confirm',
@@ -205,22 +209,33 @@ def main():
         'display_only:true',
         'await streamRemovePhoto(id,Number(card.dataset.position))',
     )) or not all(value in waterfall for value in (
+        'async function streamRemovePhotos',
         'async function streamRemovePhoto',
         "grid.classList.add('stream-reflowing')",
-    )) or 'display_only:bool=False' not in backend:
+    )) or 'locallyRemoved=await streamRemovePhotos(body.ids)' not in app or 'display_only:bool=False' not in backend:
         fail("全部照片或合影详情缺少局部退场的仅排除显示入口，或仍可能整页重载、清理识别缓存")
     if not all(value in html for value in (
         'id="photo-place-map"',
         'id="places-photo-back"',
         'id="places-heading"',
+        'id="places-photo-edit"',
+        'id="photo-place-editor"',
+        'id="photo-place-samples"',
     )) or not all(value in app for value in (
-        "const PHOTO_PLACE_FACTOR=.2",
+        "const PHOTO_PLACE_FACTOR=.15",
         "state.placeCluster.clearLayers()",
         "data-map-photo=",
         "showPhotoPlaceMap",
+        "radiusM:PHOTO_PLACE_RADIUS_DEFAULT",
+        "/nearby?radius_m=",
+        "/nearby-place",
+    )) or not all(value in backend for value in (
+        "def nearby_photos(",
+        "def set_nearby_place(",
+        "radius_m:int=Field(default=100,ge=1,le=500)",
     )) or "syncPhotoPlaceButton(state.detail)" not in viewer:
-        fail("大图缺少单张照片地图入口、0.2 倍聚焦或返回大图链路")
-    ok("大图到单张照片地图再返回大图的链路已接入")
+        fail("单张照片地图缺少 0.15 倍聚焦、500 米范围复核、九张预览或返回大图链路")
+    ok("单张照片地图已接入 500 米内复核、九张预览和完整大图浏览")
     if not all(path in viewer for path in (
         "/api/face-label-bg/1.png",
         "/api/face-label-bg/2.png",
@@ -360,6 +375,11 @@ def main():
         'id="scan-add-folder"',
         'id="start-scan"',
         'id="scan-view-errors"',
+        'id="scan-progress-track"',
+        'id="scan-remaining"',
+        'id="scan-face-photos"',
+        'id="scan-faces-found"',
+        'id="scan-face-average"',
         '添加并扫描',
     )) or 'id="last-scan-details"' in html:
         fail("添加照片页未收口为多目录极简流程，或仍显示最近一次扫描")
@@ -367,7 +387,10 @@ def main():
         or "const drives=await api('/api/drives')" not in app
         or "card.hidden=active" not in app
         or "继续上次扫描" not in app
-        or "await openAddPhotos(path)" not in app):
+        or "await openAddPhotos(path)" not in app
+        or "const scanStageLabels=" not in app
+        or "face_average_seconds" not in backend
+        or "progress['phase']='processing'" not in backend):
         fail("添加照片目录选择与文件夹页扫描入口尚未按用途统一")
     if not all(value in backend for value in (
         "FACE_GROUP_THRESHOLD = 0.50",
