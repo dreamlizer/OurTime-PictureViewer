@@ -790,6 +790,7 @@ function clearViewerImage(){
  if(img){img.removeAttribute('src');img.hidden=true;img.style.width='';img.style.height='';}
  if(signature){signature.hidden=true;signature.replaceChildren();}
  if(faces){faces.hidden=true;faces.replaceChildren();}
+ const favorite=$('#photo-favorite');if(favorite)favorite.hidden=true;
 }
 function setViewerLoading(loading){
  const dialog=$('#detail-dialog'),img=$('#detail-img'),signature=$('#photo-signature'),faces=$('#face-name-layer'),stage=document.querySelector('.viewer-stage');
@@ -839,6 +840,32 @@ function syncViewerTools(){
  const styleBtn=$('#face-style-button');if(styleBtn)styleBtn.disabled=viewer.faceNames===false;
  updateToolVisuals();
 }
+async function togglePhotoFavorite(){
+ const id=Number(state.detail?.id);if(!id)throw new Error('没有可收藏的照片');
+ const button=$('#photo-favorite');if(!button||button.disabled)return;
+ const favorite=!Boolean(state.detail?.favorite);
+ button.disabled=true;
+ try{
+  const result=await api('/api/photos/'+id+'/favorite',{method:'PUT',body:JSON.stringify({favorite})});
+  if(Number(state.detail?.id)===id){state.detail.favorite=Boolean(result.favorite);syncPhotoFavorite(state.detail);}
+  if(state.status?.stats)state.status.stats.favorite_photos=Number(result.favorite_count)||0;
+  setText('#favorites-count',fmt(result.favorite_count));
+  if(state.view==='favorites')state.favoriteViewDirty=true;
+  toast(result.favorite?'已收藏这张照片':'已取消收藏');
+ }finally{if(Number(state.detail?.id)===id&&button)button.disabled=false;}
+}
+function syncPhotoFavorite(photo=state.detail){
+ const button=$('#photo-favorite');if(!button)return;
+ const ready=Boolean(photo&&photo.id);
+ const favorite=Boolean(photo?.favorite);
+ button.hidden=!ready;
+ button.disabled=false;
+ button.setAttribute('aria-pressed',String(favorite));
+ button.setAttribute('aria-label',favorite?'取消收藏这张照片':'收藏这张照片');
+ button.title=favorite?'取消收藏':'收藏这张照片';
+ const label=button.querySelector('span');if(label)label.textContent=favorite?'已收藏':'收藏';
+}
+$('#photo-favorite')?.addEventListener('click',action(togglePhotoFavorite));
 function scheduleSlide(){clearTimeout(viewer.timer);viewer.timer=setTimeout(async()=>{try {await movePhoto(1,true);}catch(e){viewerMessage(e.message);stopSlides();}},Number($('#slide-delay').value)*1000);}
 function updatePosition(){
  const absolute=Number.isFinite(viewer.absolute)?viewer.absolute:(viewer.offset||0)+(viewer.index||0);
@@ -851,49 +878,61 @@ function signatureModeForWidth(width){
  return w>=980?'wide':w>=620?'medium':'narrow';
 }
 function signatureHeightForMode(mode){
- return mode==='narrow'?104:mode==='medium'?86:68;
+ return mode==='narrow'?88:80;
 }
-function applySignatureMode(mode){
+function signatureWidthForPhoto(width){
+ const signature=$('#photo-signature');
+ return signature&&!signature.hidden?Math.max(width,Math.min(280,$('#image-viewport').clientWidth)):width;
+}
+function applySignatureMode(mode,width){
  const dialog=$('#detail-dialog');
  if(!dialog)return 0;
- const height=signatureHeightForMode(mode);
  dialog.dataset.signatureMode=mode;
+ dialog.dataset.signatureSmall=String(signatureWidthForPhoto(width)<380);
+ const content=$('#photo-signature .signature-v3');
+ if(Number.isFinite(width))$('#photo-mat').style.width=signatureWidthForPhoto(width)+'px';
+ // Measure natural wrapped content; fixed heights used to clip long tokens.
+ const groups=content?.querySelectorAll(':scope > div:not([hidden])').length||0;
+ const minimum=groups<=1?64:signatureHeightForMode(mode);
+ // Layout height excludes the dialog's opening scale animation.
+ const height=Math.max(minimum,Math.ceil(content?parseFloat(getComputedStyle(content).height)||content.offsetHeight:0));
  dialog.style.setProperty('--viewer-signature-h',height+'px');
  return height;
-}
-function currentSignatureHeight(){
- const dialog=$('#detail-dialog'),signature=$('#photo-signature');
- if(!signature||signature.hidden)return 0;
- return Number.parseFloat(getComputedStyle(dialog||document.documentElement).getPropertyValue('--viewer-signature-h'))||68;
 }
 function updateZoom(reset=false){
  const img=$('#detail-img'),area=$('#image-viewport'),mat=$('#photo-mat');if(!img.naturalWidth)return;
  const signature=$('#photo-signature');
   let w=0,h=0;
-  for(let pass=0;pass<2;pass++){
-   const signatureHeight=currentSignatureHeight();
+  let reserved=0;
+  // Reserve monotonically within one fit operation so a breakpoint cannot
+  // oscillate between a wider/shorter and narrower/taller caption.
+  for(let pass=0;pass<10;pass++){
    if(viewer.fit){
     const width=Math.max(40,area.clientWidth);
-    const height=Math.max(40,area.clientHeight-signatureHeight);
-    viewer.scale=Math.max(.01,Math.min(width/img.naturalWidth,height/img.naturalHeight));
+    const height=Math.max(1,area.clientHeight-reserved);
+    viewer.scale=Math.min(width/img.naturalWidth,height/img.naturalHeight);
    }
    w=Math.max(1,Math.round(img.naturalWidth*viewer.scale));
    h=Math.max(1,Math.round(img.naturalHeight*viewer.scale));
    const mode=signatureModeForWidth(w);
-   const nextHeight=signature&&!signature.hidden?signatureHeightForMode(mode):0;
-   if(!signature||signature.hidden||nextHeight===signatureHeight){
-    if(signature&&!signature.hidden)applySignatureMode(mode);
-    break;
-   }
-   applySignatureMode(mode);
+   const nextHeight=signature&&!signature.hidden?applySignatureMode(mode,w):0;
+   if(!viewer.fit||nextHeight<=reserved)break;
+   reserved=nextHeight;
   }
   w=Math.max(1,Math.round(img.naturalWidth*viewer.scale));
   h=Math.max(1,Math.round(img.naturalHeight*viewer.scale));
-  if(signature&&!signature.hidden)applySignatureMode(signatureModeForWidth(w));
+  if(signature&&!signature.hidden)applySignatureMode(signatureModeForWidth(w),w);
   area.classList.toggle('zoomed',!viewer.fit);
-  mat.style.width=w+'px';
+  const matWidth=signatureWidthForPhoto(w);
+  mat.style.width=matWidth+'px';
+  mat.style.setProperty('--viewer-image-inset',((matWidth-w)/2)+'px');
   img.style.width=w+'px';
   img.style.height=h+'px';
+  const captionHeight=signature&&!signature.hidden?signature.offsetHeight:0;
+  const photoCenter=(area.clientHeight-captionHeight)/2;
+  const arrowHalf=($('#viewer-next').offsetHeight||56)/2;
+  const navigationCenter=Math.min(photoCenter,photoCenter+h/2-arrowHalf-4);
+  $('#detail-dialog').style.setProperty('--viewer-photo-center',Math.max(arrowHalf,navigationCenter)+'px');
   $('#zoom-level').textContent=Math.round(viewer.scale*100)+'%';
   if(reset){area.scrollTop=0;area.scrollLeft=0;}
   if(state.detail&&viewer.faceNames!==false)requestAnimationFrame(()=>renderFaceNames(state.detail));
@@ -910,6 +949,8 @@ function renderSignature(a,file){
  const timeKind=source.includes('修改')?'文件时间参考':source.includes('推测')?'推测时间':source==='人工确认'?'补录时间':'拍摄时间';
  const rawDate=clean(a.effective_date);
  const shownDate=/^\d{4}-\d\d-\d\dT/.test(rawDate)?rawDate.slice(0,16).replaceAll('-','.').replace('T','  '):rawDate;
+ const dateParts=shownDate.match(/^(\d{4}\.\d{2}\.\d{2})\s+(\d{2}:\d{2})$/);
+ const dateMarkup=dateParts?`<span>${esc(dateParts[1])}</span><span class="signature-clock">${esc(dateParts[2])}</span>`:esc(shownDate);
  const place=prettyPlace(a.effective_place)||'';
  const focal=number('FocalLengthIn35mmFormat')||number('FocalLength');
  const aperture=number('FNumber'),shutter=number('ExposureTime'),iso=number('ISO');
@@ -929,7 +970,7 @@ function renderSignature(a,file){
  const hasFile=basics.length>0;
  const timeKindMarkup=shownDate&&timeKind!=='拍摄时间'?`<small id="signature-primary-kind">${esc(timeKind)}</small>`:'';
  const exposureMarkup=exposure.map(value=>`<span class="signature-exposure-token">${esc(value)}</span>`).join('');
- const fileMarkup=basics.map((value,index)=>`<span class="signature-file-token ${index===0&&dimensions?'signature-dimensions':index===1&&format?'signature-format-token':'signature-size-token'}">${esc(value)}</span>`).join('');
+ const fileMarkup=[[dimensions,'dimensions'],[format,'format-token'],[fileSize,'size-token']].filter(([value])=>value).map(([value,kind])=>`<span class="signature-file-token signature-${kind}">${esc(value)}</span>`).join('');
  const placeMarkup=place?`<span id="signature-place" class="signature-place" title="${esc(place)}">${esc(place)}</span>`:'';
  const title=[shownDate&&`${timeKind}：${rawDate}`,place&&`地点：${place}`,camera&&`设备：${camera}`,exposure.join(' · '),basics.join(' · '),filename&&`文件名：${filename}`].filter(Boolean).join('\n');
 
@@ -938,7 +979,7 @@ function renderSignature(a,file){
    <span class="signature-seal-v3" aria-hidden="true">拾</span>
     <div id="signature-primary" class="signature-memory"${hasMemory?'':' hidden'}>
      <div class="signature-memory-main">
-      <strong id="signature-primary-value" class="signature-date"${shownDate?'':' hidden'}>${esc(shownDate)}</strong>
+      <strong id="signature-primary-value" class="signature-date"${shownDate?'':' hidden'}>${dateMarkup}</strong>
       ${timeKindMarkup}
      </div>
     ${placeMarkup}
@@ -1193,6 +1234,7 @@ async function displayPhoto(id){
   throw err;
  }
  if(ticket!==renderPhoto.ticket)return false;
+ syncPhotoFavorite(state.detail);
  const root=(viewer.context?.directory||'').replace(/[\/]+$/,'').toLowerCase();
  const files=[...state.detail.files].sort((a,b)=>a.excluded-b.excluded||b.exists_now-a.exists_now||a.id-b.id);
  const scoped=files.find(f=>!root||f.path.toLowerCase().startsWith(root+String.fromCharCode(92))||f.path.toLowerCase()===root);

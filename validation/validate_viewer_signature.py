@@ -89,6 +89,7 @@ def caption_state(page: Page) -> dict:
           return {
             mode: dialog.dataset.signatureMode || '',
             height: signature.getBoundingClientRect().height,
+            contentHeight: signature.firstElementChild.getBoundingClientRect().height,
             width: img.getBoundingClientRect().width,
             matWidth: mat.getBoundingClientRect().width,
             text: signature.textContent,
@@ -117,6 +118,7 @@ def assert_caption_fits(page: Page, label: str) -> dict:
     state = caption_state(page)
     check(state["width"] > 0 and state["matWidth"] > 0, f"{label} 照片已完成真实渲染")
     check(state["scrollWidth"] <= state["clientWidth"] + 1, f"{label} 题注栏没有横向溢出")
+    check(state["height"] >= state["contentHeight"], f"{label} 题注高度完整容纳实际排版")
     check(all(token["scrollWidth"] <= token["clientWidth"] + 1 for token in state["tokens"]), f"{label} 所有元数据 token 完整可见")
     check(all(token["overflow"] != "ellipsis" for token in state["tokens"]), f"{label} 元数据 token 未使用省略号")
     return state
@@ -171,21 +173,21 @@ def main() -> int:
                 break
         check(medium_state is not None and medium_state["mode"] == "medium", "竖图按实际渲染宽度进入 medium")
         medium_state = assert_caption_fits(page, "Medium")
-        check(medium_state["height"] >= 84 and medium_state["height"] <= 88, "Medium 题注高度约为 86px")
+        check(medium_state["height"] >= 80, "Medium 题注保留左右分区的阅读空间")
         check("..." not in medium_state["text"], "Medium 摄影参数没有被截断")
         memory_rect = medium_state["groups"]["signature-memory"]
         capture_rect = medium_state["groups"]["signature-capture"]
         file_rect = medium_state["groups"]["signature-file"]
         seal_rect = medium_state["groups"]["signature-seal-v3"]
         check(medium_state["viewportWidth"] > 979, "Medium 结构测试使用宽桌面 viewport")
-        check(capture_rect["top"] > memory_rect["top"], "Medium Capture 位于 Memory 下方第二带")
-        check(file_rect["top"] < capture_rect["top"], "Medium File 保持在第一带右上")
+        check(capture_rect["left"] >= memory_rect["left"] + memory_rect["width"], "Medium Capture 保持在 Memory 右侧")
+        check(file_rect["top"] >= capture_rect["bottom"], "Medium File 位于右侧 Capture 下方")
         seal_center = (seal_rect["top"] + seal_rect["bottom"]) / 2
-        content_top = min(memory_rect["top"], file_rect["top"])
-        content_bottom = max(capture_rect["bottom"], file_rect["bottom"])
+        content_top = min(memory_rect["top"], capture_rect["top"], file_rect["top"])
+        content_bottom = max(memory_rect["bottom"], capture_rect["bottom"], file_rect["bottom"])
         content_center = (content_top + content_bottom) / 2
-        check(abs(seal_center - content_center) <= 4, "Medium 拾印章跨两带居中")
-        check(capture_rect["width"] > 300, "Medium Capture 使用跨列后的完整宽度")
+        check(abs(seal_center - content_center) <= 4, "Medium 原圆形拾标志与两侧内容居中")
+        check(file_rect["left"] >= memory_rect["left"] + memory_rect["width"], "Medium 文件信息也保持在右侧")
         page.screenshot(path=str(REPORT_DIR / "02-medium.png"))
         results["medium"] = {"asset_id": medium_detail["id"], "state": medium_state}
 
@@ -194,7 +196,7 @@ def main() -> int:
         narrow_state = caption_state(page)
         check(narrow_state["mode"] == "narrow", "390px 窗口按实际渲染宽度进入 narrow")
         narrow_state = assert_caption_fits(page, "Narrow")
-        check(100 <= narrow_state["height"] <= 108, "Narrow 题注高度约为 104px")
+        check(narrow_state["height"] >= 88, "Narrow 题注允许左右分区内的完整参数换行")
         page.screenshot(path=str(REPORT_DIR / "03-narrow.png"))
         results["narrow"] = {"asset_id": medium_detail["id"], "state": narrow_state}
 
@@ -262,7 +264,7 @@ def main() -> int:
             page.wait_for_function("!document.querySelector('#detail-dialog').classList.contains('is-loading')")
             after = caption_state(page)
             check(after["mode"] == ("wide" if after["width"] >= 980 else "medium" if after["width"] >= 620 else "narrow"), "连续翻页后题注模式跟随新照片实际宽度")
-            check(abs(after["height"] - (68 if after["mode"] == "wide" else 86 if after["mode"] == "medium" else 104)) <= 1, "连续翻页后题注高度同步")
+            check(after["height"] >= after["contentHeight"], "连续翻页后题注高度容纳当前内容")
             results["next"] = {"before": before, "after": after}
         else:
             check(False, "连续翻页场景存在下一张照片")

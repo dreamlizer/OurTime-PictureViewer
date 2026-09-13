@@ -104,6 +104,11 @@ def face_state(fid: int):
         return conn.execute("SELECT person_id,ignored FROM faces WHERE id=?", (fid,)).fetchone()
 
 
+def favorite_state(aid: int) -> int:
+    with sqlite3.connect(DATA / "library.sqlite3") as conn:
+        return int(conn.execute("SELECT favorite FROM assets WHERE id=?", (aid,)).fetchone()[0])
+
+
 def main() -> int:
     seed()
     env = {**os.environ, "PHOTO_LIBRARY_DATA": str(DATA), "PHOTO_WEB_ROOT": str(ROOT / "web")}
@@ -145,6 +150,79 @@ def main() -> int:
             page.wait_for_selector("#detail-dialog[open]")
             page.wait_for_function("document.querySelector('#detail-img').naturalWidth>0")
             page.wait_for_selector('#face-name-layer [data-face-id="101"]')
+
+            favorite_geometry = page.locator("#photo-favorite").evaluate(
+                """button => {const image=document.querySelector('#detail-img').getBoundingClientRect();const signature=document.querySelector('#photo-signature').getBoundingClientRect();const box=button.getBoundingClientRect();return {left:box.left>=image.left-1&&box.left<image.left+140,bottom:box.bottom<=image.bottom-8&&box.bottom<signature.top};}"""
+            )
+            check(favorite_geometry["left"] and favorite_geometry["bottom"], "收藏印章位于照片左下角、原始数据栏上方")
+            check(page.locator("#photo-favorite").get_attribute("aria-pressed") == "false", "未收藏照片显示安静的收藏状态")
+            page.locator("#photo-favorite").click()
+            page.wait_for_function("document.querySelector('#photo-favorite').getAttribute('aria-pressed')==='true'")
+            check(favorite_state(1) == 1 and page.locator("#favorites-count").inner_text() == "1", "收藏立即写入资料库并更新左侧数量")
+            page.screenshot(path=str(RUN / "photo-favorite-active.png"), full_page=False)
+            page.locator("#photo-mat > .viewer-photo-close").click()
+            page.wait_for_selector("#detail-dialog", state="hidden")
+            page.locator('[data-view="favorites"]').click()
+            page.wait_for_selector('#photo-grid [data-photo="1"]')
+            check(page.locator("#page-title").inner_text() == "收藏的照片", "左侧收藏入口打开独立收藏照片流")
+            page.locator('#photo-grid [data-photo="1"]').click()
+            page.wait_for_selector("#detail-dialog[open]")
+            page.wait_for_function("document.querySelector('#photo-favorite').getAttribute('aria-pressed')==='true'")
+            page.locator("#photo-favorite").click()
+            page.wait_for_function("document.querySelector('#photo-favorite').getAttribute('aria-pressed')==='false'")
+            page.locator("#photo-mat > .viewer-photo-close").click()
+            page.wait_for_selector("#detail-dialog", state="hidden")
+            page.wait_for_function("document.querySelectorAll('#photo-grid [data-photo]').length===0")
+            check(favorite_state(1) == 0 and "还没有收藏照片" in page.locator("#no-results").inner_text(), "取消收藏后资料库和收藏页同时更新")
+            page.locator('[data-view="timeline"]').click()
+            page.evaluate("openPhoto(1,{q:'',filter:'all',person:'',directory:'',sort:'date_desc'})")
+            page.wait_for_selector("#detail-dialog[open]")
+            page.wait_for_function("document.querySelector('#detail-img').naturalWidth>0")
+            page.wait_for_selector('#face-name-layer [data-face-id="101"]')
+
+            page.locator('[data-face-id="201"]').click()
+            page.wait_for_selector("#quick-name-dialog[open]")
+            check(page.locator('#quick-name-dialog [data-close="quick-name-dialog"]').count() == 1, "快速命名只保留右上角关闭入口")
+            check(page.locator("#quick-name-confirm").inner_text() == "确认姓名", "姓名输入区下面使用含义明确的确认姓名按钮")
+            page.click("#quick-merge-toggle")
+            page.wait_for_selector("#quick-merge-panel:not([hidden])")
+            page.wait_for_function("!document.querySelector('#quick-merge-target').disabled")
+            quick_targets = page.locator("#quick-merge-target option").evaluate_all(
+                "options => options.map(option => option.value).filter(Boolean)"
+            )
+            check(quick_targets == ["1"], "快捷合并候选只包含已命名人物，不混入待命名分组或路人")
+            action_layout = page.evaluate(
+                """() => {
+                  const confirm=document.querySelector('#quick-name-confirm').getBoundingClientRect();
+                  const merge=document.querySelector('#quick-merge-submit').getBoundingClientRect();
+                  const ignore=document.querySelector('#quick-ignore-person').getBoundingClientRect();
+                  return {confirm,merge,ignore};
+                }"""
+            )
+            check(
+                abs(action_layout["confirm"]["width"] - action_layout["merge"]["width"]) < 1
+                and abs(action_layout["confirm"]["height"] - action_layout["merge"]["height"]) < 1,
+                "确认姓名与合并按钮同宽同高、视觉层级平等",
+            )
+            check(
+                action_layout["confirm"]["bottom"] < action_layout["merge"]["top"]
+                and action_layout["merge"]["bottom"] < action_layout["ignore"]["top"],
+                "确认、合并、路人三个动作按上下顺序独立排列",
+            )
+            page.screenshot(path=str(RUN / "quick-name-actions.png"), full_page=False)
+            page.locator('#quick-name-dialog [data-close="quick-name-dialog"]').click()
+            page.wait_for_selector("#quick-name-dialog", state="hidden")
+
+            page.locator('[data-face-id="401"]').click()
+            page.wait_for_selector("#quick-name-dialog[open]")
+            page.click("#quick-merge-toggle")
+            page.wait_for_function("!document.querySelector('#quick-merge-target').disabled")
+            passerby_targets = page.locator("#quick-merge-target option").evaluate_all(
+                "options => options.map(option => option.value).filter(Boolean)"
+            )
+            check(passerby_targets == ["1"], "从路人标记进入快捷命名时，合并候选仍只读取已命名人物")
+            page.locator('#quick-name-dialog [data-close="quick-name-dialog"]').click()
+            page.wait_for_selector("#quick-name-dialog", state="hidden")
 
             auto_side = page.locator('[data-face-id="101"]').evaluate("element => [...element.classList].find(x=>['left','right','top','bottom'].includes(x))")
             check(auto_side in {"left", "right"}, "竖排标签的原有自动算法仍选择左右侧")
@@ -197,6 +275,65 @@ def main() -> int:
             check(
                 bool(compact_box and compact_box["x"] >= 0 and compact_box["x"] + compact_box["width"] <= 390),
                 "390px 窄屏下人物整理卡完整留在可视区",
+            )
+
+            page.set_viewport_size({"width": 1440, "height": 920})
+            page.evaluate("document.querySelector('#detail-dialog').close()")
+            page.evaluate("window.__ourTimeApp.setView('timeline')")
+            page.wait_for_selector("#photo-grid [data-photo]")
+            check(page.locator("[data-group-exclude-arm]").count() == 0, "普通照片页不显示合影快捷排除按钮")
+
+            page.evaluate("window.__ourTimeApp.setView('group:5')")
+            page.wait_for_selector('#photo-grid [data-photo="1"] [data-group-exclude-arm]')
+            page.wait_for_function('document.querySelector(\'[data-photo="1"] img\').naturalWidth > 0')
+            check(page.locator('[data-photo="1"] [data-group-exclude-arm]').is_visible(), "合影详情每张照片右下角显示淡色排除按钮")
+            page.click('[data-photo="1"] [data-group-exclude-arm]')
+            check(page.locator('[data-photo="1"] .group-exclude-confirm').is_visible(), "第一次点击只展开确认和取消，不立即排除")
+            check(not page.locator("#detail-dialog").get_attribute("open"), "点击快捷排除不会误打开照片详情")
+            page.click('[data-photo="1"] [data-group-exclude-cancel]')
+            check(page.locator('[data-photo="1"] .group-exclude-confirm').is_hidden(), "取消后回到淡色排除按钮")
+
+            with sqlite3.connect(DATA / "library.sqlite3") as conn:
+                sha = conn.execute("SELECT sha256 FROM assets WHERE id=1").fetchone()[0]
+                faces_before = conn.execute("SELECT count(*) FROM faces WHERE asset_id=1").fetchone()[0]
+            thumb = DATA / "thumbs" / f"{sha}.jpg"
+            check(thumb.is_file() and (DATA / "faces" / "101.jpg").is_file(), "确认前缩略图和人脸识别缓存存在")
+            page.screenshot(path=str(RUN / "group-quick-exclude-rest.png"), full_page=False)
+            page.click('[data-photo="1"] [data-group-exclude-arm]')
+            page.screenshot(path=str(RUN / "group-quick-exclude-confirm.png"), full_page=False)
+            page.click('[data-photo="1"] [data-group-exclude-confirm]')
+            page.wait_for_function('!document.querySelector(\'[data-photo="1"]\') && waterfall.pending.size === 0')
+            with sqlite3.connect(DATA / "library.sqlite3") as conn:
+                excluded = conn.execute("SELECT excluded,exclude_reason FROM assets WHERE id=1").fetchone()
+                faces_after = conn.execute("SELECT count(*) FROM faces WHERE asset_id=1").fetchone()[0]
+            check(excluded == (1, "在合影页排除显示"), "确认后照片退出正常展示并记住合影页排除原因")
+            check(faces_after == faces_before and thumb.is_file() and (DATA / "faces" / "101.jpg").is_file(), "仅排除显示不会删除缩略图或人脸识别信息")
+            check((PHOTOS / "合影-1.jpg").is_file(), "仅排除显示不会删除原照片")
+            excluded_page = req("/api/photos?filter=excluded&limit=24")
+            check(any(item["id"] == 1 for item in excluded_page["items"]), "被排除照片仍可在已排除页面找到并恢复")
+            restored_display = req("/api/exclusions/assets", {"ids": [1], "excluded": False}, "POST")
+            with sqlite3.connect(DATA / "library.sqlite3") as conn:
+                restored_asset = conn.execute("SELECT excluded FROM assets WHERE id=1").fetchone()[0]
+                restored_faces = conn.execute("SELECT count(*) FROM faces WHERE asset_id=1").fetchone()[0]
+            check(
+                restored_asset == 0 and restored_faces == faces_before and thumb.is_file()
+                and "已恢复显示" in restored_display["message"],
+                "从已排除恢复后立即回到正常展示且不需要重做人脸识别",
+            )
+
+            with sqlite3.connect(DATA / "library.sqlite3") as conn:
+                sha_two = conn.execute("SELECT sha256 FROM assets WHERE id=2").fetchone()[0]
+                normal_faces = [row[0] for row in conn.execute("SELECT id FROM faces WHERE asset_id=2").fetchall()]
+            normal_thumb = DATA / "thumbs" / f"{sha_two}.jpg"
+            Image.new("RGB", (80, 60), "#887766").save(normal_thumb)
+            normal_result = req("/api/exclusions/assets", {"ids": [2], "excluded": True, "reason": "普通排除回归"}, "POST")
+            with sqlite3.connect(DATA / "library.sqlite3") as conn:
+                normal_faces_after = conn.execute("SELECT count(*) FROM faces WHERE asset_id=2").fetchone()[0]
+            check(
+                not normal_result["display_only"] and normal_result["released_bytes"] > 0
+                and not normal_thumb.exists() and normal_faces_after == 0
+                and all(not (DATA / "faces" / f"{fid}.jpg").exists() for fid in normal_faces),
+                "原有普通排除仍会清理派生缓存，没有被仅显示模式改变",
             )
             check(not errors, "真实浏览器交互没有 JavaScript 错误")
             browser.close()

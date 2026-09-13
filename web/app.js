@@ -1,7 +1,7 @@
 const $=s=>document.querySelector(s);
 const $$=s=>[...document.querySelectorAll(s)];
 const state={view:'timeline',q:'',person:'',place:'',dateFrom:'',dateTo:'',offset:0,total:0,items:[],people:[],passersby:[],selected:new Set(),peopleSelected:new Set(),peopleMerging:false,peoplePendingOnly:false,peopleSort:'photos',personLabels:{},selecting:false,detail:null,personId:null,status:null,folder:null,directory:'',sort:'date_desc',maxId:0,folderTarget:'scan',scanRoots:[],scanSubmitting:false,scanStartedThisVisit:false,scanShowCompletedResult:false,viewGeneration:0,viewAbort:null,folderNav:{generation:0,abort:null,parent:'',cache:{}},placeGeneration:0,placeAbort:null,groupsGeneration:0,timelineGeneration:0,personOpenToken:0,exclusion:null,thumbRevision:0,peopleStream:{people:{items:[],offset:0,baseOffset:0,total:0,more:true,loading:false,q:'',generation:0},passersby:{items:[],offset:0,baseOffset:0,total:0,more:true,loading:false,q:'',generation:0}}};
-const titles={all:['全部照片','全部照片'],folders:['文件夹','只看 I 盘。'],people:['人物档案','人物档案'],passersby:['路人','先不识别，以后还能找回来。'],timeline:['全部照片','全部照片'],years:['按年份查看','点某一年，只看那一年。'],places:['按地点','记得那是在哪里。'],objects:['物体','照片里有什么。'],groups:['合影','合影'],uncertain:['待确认时间','给记忆一个时间。'],no_place:['待补充地点','记得那是在哪里吗？'],duplicates:['重复副本','一张照片，多个来处。'],screenshots:['截图与小图','日常的片段，也有位置。'],errors:['读取问题','把未完成的部分看清楚。'],missing:['原文件缺失','寻找照片现在的位置。'],scan:['添加照片','添加照片'],excluded:['已排除','留下值得保存的记忆。']};
+const titles={all:['全部照片','全部照片'],folders:['文件夹','只看 I 盘。'],people:['人物档案','人物档案'],passersby:['路人','先不识别，以后还能找回来。'],timeline:['全部照片','全部照片'],years:['按年份查看','点某一年，只看那一年。'],places:['按地点','记得那是在哪里。'],objects:['物体','照片里有什么。'],groups:['合影','合影'],favorites:['收藏','收藏的照片'],uncertain:['待确认时间','给记忆一个时间。'],no_place:['待补充地点','记得那是在哪里吗？'],duplicates:['重复副本','一张照片，多个来处。'],screenshots:['截图与小图','日常的片段，也有位置。'],errors:['读取问题','把未完成的部分看清楚。'],missing:['原文件缺失','寻找照片现在的位置。'],scan:['添加照片','添加照片'],excluded:['已排除','留下值得保存的记忆。']};
 const statuses={running:'正在扫描',pausing:'正在暂停',paused:'已暂停',completed:'已完成',completed_with_errors:'完成，有读取问题',failed:'扫描失败'};
 function setText(sel,value){const el=$(sel); if(el) el.textContent=value;}
 function setHtml(sel,value){const el=$(sel); if(el) el.innerHTML=value;}
@@ -148,7 +148,7 @@ function updateChrome(){
   const stats=$('#stats'); if(stats) stats.hidden=!showStats;
   document.body.classList.toggle('is-subpage',!showStats);
   document.body.classList.toggle('is-people-view',view==='people');
-  const stickyBrowserView=view==='people'||['timeline','folders','places','groups'].includes(view)||String(view).startsWith('place:')||String(view).startsWith('group:');
+  const stickyBrowserView=view==='people'||['timeline','folders','places','groups','favorites'].includes(view)||String(view).startsWith('place:')||String(view).startsWith('group:');
   document.body.classList.toggle('is-sticky-browser-view',stickyBrowserView);
   const namedCount=$('#people-named-count'); if(namedCount) namedCount.hidden=view!=='people';
   document.body.classList.toggle('is-group-query',String(view).startsWith('group:'));
@@ -760,12 +760,11 @@ function resetQuickMerge(){
 }
 async function loadQuickMergeTargets(){
   const source=Number(state.quickNameId);if(!source)return;
-  const ignored=state.quickNameIgnored?1:0;
   const query=$('#quick-merge-search')?.value.trim()||'';
   const select=$('#quick-merge-target');if(!select)return;
   select.replaceChildren(new Option('正在读取人物…',''));select.disabled=true;
   try{
-    const data=await api(peopleQuery({ignored,q:query,limit:40}));
+    const data=await api(peopleQuery({ignored:0,named:1,q:query,limit:40}));
     if(source!==Number(state.quickNameId))return;
     quickMergeTargets=(data.items||[]).filter(p=>Number(p.id)!==source);
     select.replaceChildren(new Option('选择已有的人物…',''),...quickMergeTargets.map(p=>new Option(`${personLabel(p)} · ${p.photo_count||0} 张`,String(p.id))));
@@ -875,6 +874,33 @@ $('#clear-people-selection').addEventListener('click',()=>setPeopleMerging(false
 $('#merge-selected-people').addEventListener('click',async()=>{const button=$('#merge-selected-people');if(button?.disabled)return;const ids=[...state.peopleSelected].map(Number);if(ids.length<2){showNotice('请至少选择两组同一人',true);return;}if(ids.length>100){showNotice('一次最多选择 100 个人物',true);return;}button.disabled=true;const done=[];const pending=ids.slice();let backendError=null;let target=null;try{target=await resolveMergeTarget(ids);if(!ids.includes(Number(target.id)))throw new Error('合并目标必须属于当前选择');for(const id of ids.filter(x=>x!==Number(target.id))){await api('/api/people/'+id+'/merge',{method:'POST',body:JSON.stringify({target_id:target.id})});done.push(id);pending.splice(pending.indexOf(id),1);}}catch(err){backendError=err;}if(backendError){const leftover=pending.filter(id=>!done.includes(id));const msg=done.length?('已合并 '+done.length+' 组，未完成：'+leftover.join('、')+'。'+backendError.message):backendError.message;showNotice(msg,true);toast(msg,true);}else if(done.length){toast('已合并到 '+personLabel(target));}if(done.length){try{for(const id of done){state.peopleSelected.delete(id);removePersonFromLocalState(id);}await refreshPersonInLocalState(target.id);setPeopleMerging(false);}catch(uiError){showNotice('人物已合并，界面刷新未完成，请刷新页面',true);}}button.disabled=false;});
 $('#backup-button').addEventListener('click',action(async()=>{const data=await api('/api/backup',{method:'POST'});toast('备份已保存：'+data.path);}));
 document.addEventListener('click',action(async e=>{
+ const groupExcludeAction=e.target.closest('[data-group-exclude-arm],[data-group-exclude-cancel],[data-group-exclude-confirm]');
+ if(groupExcludeAction){
+  e.preventDefault();e.stopPropagation();
+  const card=groupExcludeAction.closest('[data-photo]');
+  if(!card)return;
+  if(groupExcludeAction.matches('[data-group-exclude-arm]')){
+   $$('#photo-grid .group-exclude-confirming').forEach(item=>item.classList.remove('group-exclude-confirming'));
+   card.classList.add('group-exclude-confirming');
+   card.querySelector('[data-group-exclude-confirm]')?.focus();
+   return;
+  }
+  if(groupExcludeAction.matches('[data-group-exclude-cancel]')){
+   card.classList.remove('group-exclude-confirming');
+   card.querySelector('[data-group-exclude-arm]')?.focus();
+   return;
+  }
+  const id=Number(card.dataset.photo);if(!id)return;
+  groupExcludeAction.disabled=true;
+  try{
+   await api('/api/exclusions/assets',{method:'POST',body:JSON.stringify({ids:[id],excluded:true,reason:'在合影页排除显示',display_only:true})});
+   card.classList.add('group-exclude-removing');
+   toast('已排除显示，原照片和识别信息均保留');
+   await loadPhotos();
+   refreshStatus().catch(()=>{});
+  }finally{groupExcludeAction.disabled=false;}
+  return;
+ }
  const photo=e.target.closest('[data-photo]');
  if(photo){
   const id=Number(photo.dataset.photo);

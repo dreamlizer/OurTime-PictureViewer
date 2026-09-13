@@ -62,7 +62,7 @@ function streamReflow(metrics=streamMetrics()){
   }
  }
 }
-function streamCard(p,offset){const a=p.a;const date=(a.effective_date||'').replace('T',' ').replace(/:\d\d$/,'')||'时间未知';return `<article class="photo-card ${state.selected.has(a.id)?'selected':''}" data-photo="${a.id}" data-position="${offset}" tabindex="0" role="button" aria-label="查看 ${esc(basename(a.path))}" style="left:${p.x}px;top:${p.y}px;width:${p.width}px"><div class="photo-frame" style="height:${p.picture}px">${state.selecting?`<input class="photo-check" type="checkbox" aria-label="选择照片" ${state.selected.has(a.id)?'checked':''}>`:''}<img loading="lazy" decoding="async" src="/api/thumb/${a.id}?v=${state.thumbRevision}" alt="${esc(basename(a.path))}">${a.copies>1?`<span class="copy-badge">${a.copies} 个位置</span>`:''}</div><div class="card-caption"><div class="card-meta"><b>${esc(a.effective_place||basename(a.path))}</b><span>${esc(date)}</span></div></div></article>`;}
+function streamCard(p,offset){const a=p.a;const date=(a.effective_date||'').replace('T',' ').replace(/:\d\d$/,'')||'时间未知';const groupExclude=String(state.view||'').startsWith('group:')?`<div class="group-card-exclude"><button type="button" class="group-exclude-trigger" data-group-exclude-arm aria-label="排除显示这张照片">排除</button><div class="group-exclude-confirm" role="group" aria-label="确认排除显示"><button type="button" data-group-exclude-cancel>取消</button><button type="button" data-group-exclude-confirm>确认</button></div></div>`:'';return `<article class="photo-card ${state.selected.has(a.id)?'selected':''}" data-photo="${a.id}" data-position="${offset}" tabindex="0" role="button" aria-label="查看 ${esc(basename(a.path))}" style="left:${p.x}px;top:${p.y}px;width:${p.width}px"><div class="photo-frame" style="height:${p.picture}px">${state.selecting?`<input class="photo-check" type="checkbox" aria-label="选择照片" ${state.selected.has(a.id)?'checked':''}>`:''}<img loading="lazy" decoding="async" src="/api/thumb/${a.id}?v=${state.thumbRevision}" alt="${esc(basename(a.path))}">${a.copies>1?`<span class="copy-badge">${a.copies} 个位置</span>`:''}${groupExclude}</div><div class="card-caption"><div class="card-meta"><b>${esc(a.effective_place||basename(a.path))}</b><span>${esc(date)}</span></div></div></article>`;}
 function streamSchedule(){if(!waterfall.raf)waterfall.raf=requestAnimationFrame(()=>{waterfall.raf=0;streamPaint();});}
 function streamSelection(){
  for(const card of $$('#photo-grid [data-photo]')){
@@ -175,8 +175,10 @@ function streamPaint(){
  const ready=Boolean(stats);
  const knownEmpty=ready&&Number(stats.assets||0)===0;
  const showEmpty=knownEmpty&&state.view==='timeline'&&!state.q&&!state.person&&!state.directory&&!state.place&&!state.dateFrom&&!state.dateTo&&!loading&&!waterfall.total;
+ const showFavoritesEmpty=state.view==='favorites'&&!state.q&&!state.person&&!state.directory&&!state.place&&!state.dateFrom&&!state.dateTo&&!loading&&!waterfall.total;
  $('#empty').hidden=!showEmpty;
- $('#no-results').hidden=true;
+ $('#no-results').textContent=showFavoritesEmpty?'还没有收藏照片。打开一张喜欢的照片，点左下角“收藏”。':'没有符合条件的照片。可以换个关键词，或调整筛选。';
+ $('#no-results').hidden=!showFavoritesEmpty;
  if(!ready||loading)$('#stream-status').textContent='正在加载照片';
  $('#stream-footer').hidden=showEmpty?true:(waterfall.total===0&&!waterfall.error&&!loading);
  $('#stream-top').hidden=scrollY<1200;
@@ -231,5 +233,5 @@ window.addEventListener('scroll',streamScroll,{passive:true});
 new ResizeObserver(()=>streamSchedule()).observe($('#photo-grid'));
 $('#stream-retry').addEventListener('click',()=>{waterfall.error=false;$('#stream-retry').hidden=true;streamSchedule();if(!waterfall.heights.length)streamPage(0);});
 $('#stream-top').addEventListener('click',()=>scrollTo({top:0,behavior:'smooth'}));
-$('#detail-dialog').addEventListener('close',()=>{void restoreViewerPhotoPosition(viewer.exit);});
-action(async()=>{await refreshStatus();loadPeopleOptions();await setView(state.view||'timeline');})();
+$('#detail-dialog').addEventListener('close',()=>{if(state.favoriteViewDirty){state.favoriteViewDirty=false;void loadPhotos();return;}void restoreViewerPhotoPosition(viewer.exit);});
+action(async()=>{const status=await refreshStatus();setText('#favorites-count',fmt(status?.stats?.favorite_photos));loadPeopleOptions();await setView(state.view||'timeline');})();

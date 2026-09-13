@@ -886,6 +886,7 @@ def status():
         stats['files']=c.execute('SELECT count(*) FROM files').fetchone()[0]
         stats['active_files']=c.execute('SELECT count(*) FROM files f JOIN assets a ON a.id=f.asset_id WHERE f.excluded=0 AND a.excluded=0').fetchone()[0]
         stats['excluded_assets']=c.execute('SELECT count(*) FROM assets a WHERE NOT ('+ACTIVE_ASSET+') AND EXISTS(SELECT 1 FROM files f WHERE f.asset_id=a.id)').fetchone()[0]
+        stats['favorite_photos']=c.execute('SELECT count(*) FROM assets a WHERE coalesce(a.favorite,0)=1 AND '+ACTIVE_ASSET).fetchone()[0]
         stats['duplicates']=c.execute('SELECT coalesce(sum(n-1),0) FROM (SELECT count(*) n FROM files f JOIN assets a ON a.id=f.asset_id WHERE f.exists_now=1 AND f.excluded=0 AND a.excluded=0 GROUP BY asset_id HAVING n>1)').fetchone()[0]
         active_person='EXISTS(SELECT 1 FROM faces pf JOIN assets a ON a.id=pf.asset_id WHERE pf.person_id=p.id AND '+ACTIVE_ASSET+')'
         stats['people']=c.execute('SELECT count(*) FROM people p WHERE coalesce(p.ignored,0)=0 AND '+active_person).fetchone()[0]
@@ -925,11 +926,14 @@ class ExclusionRequest(BaseModel):
     ids:list[int]=Field(min_length=1,max_length=1000)
     excluded:bool=True
     reason:str=Field(default='手工排除',max_length=200)
+    display_only:bool=False
 
 @app.post('/api/exclusions/assets')
 def exclude_assets(body:ExclusionRequest):
     released=0
-    for aid in dict.fromkeys(body.ids):
+    unique_ids=list(dict.fromkeys(body.ids))
+    display_only_restores=0
+    for aid in unique_ids:
         with db() as c:
             row=c.execute('SELECT * FROM assets WHERE id=?',(aid,)).fetchone()
         if not row:
@@ -937,12 +941,24 @@ def exclude_assets(body:ExclusionRequest):
         with asset_lock(row['sha256']):
             with db() as c:
                 old=c.execute('SELECT excluded,exclude_reason FROM assets WHERE id=?',(aid,)).fetchone()
+                if not body.excluded and old['exclude_reason']=='在合影页排除显示':
+                    display_only_restores+=1
                 c.execute('UPDATE assets SET excluded=?,exclude_reason=? WHERE id=?',(int(body.excluded),body.reason if body.excluded else '',aid))
                 c.execute('INSERT INTO edits(created_at,target,before_json,after_json) VALUES (?,?,?,?)',
-                          (now(),f'asset:{aid}',json.dumps(dict(old),ensure_ascii=False),json.dumps({'excluded':body.excluded,'reason':body.reason},ensure_ascii=False)))
-            if body.excluded:
+                          (now(),f'asset:{aid}',json.dumps(dict(old),ensure_ascii=False),json.dumps({'excluded':body.excluded,'reason':body.reason,'display_only':bool(body.excluded and body.display_only)},ensure_ascii=False)))
+            if body.excluded and not body.display_only:
                 released+=cleanup_asset_cache(aid)
-    return {'updated':len(set(body.ids)),'released_bytes':released,'message':'排除已记住，原文件保留' if body.excluded else '已撤销单张排除；若仍受目录规则影响，需要同时恢复目录。缩略图可按需重建，人脸需重扫。'}
+    with STATUS_CACHE_LOCK:
+        STATUS_CACHE['payload']=None; STATUS_CACHE['at']=0
+    if body.excluded and body.display_only:
+        message='已排除显示，原照片和识别信息保留'
+    elif body.excluded:
+        message='排除已记住，原文件保留'
+    elif display_only_restores==len(unique_ids):
+        message='已恢复显示，原照片和识别信息仍然保留'
+    else:
+        message='已撤销单张排除；若仍受目录规则影响，需要同时恢复目录。缩略图可按需重建，人脸需重扫。'
+    return {'updated':len(unique_ids),'released_bytes':released,'display_only':bool(body.excluded and body.display_only),'message':message}
 
 def directory_predicate(path):
     return directory_clause(path)
@@ -1183,6 +1199,28 @@ def photo_detail(aid:int):
         result['history']=[dict(x) for x in c.execute('SELECT * FROM edits WHERE target=? ORDER BY id DESC LIMIT 20',(f'asset:{aid}',))]
         result['in_library']=bool(c.execute('SELECT 1 FROM assets a WHERE id=? AND '+ACTIVE_ASSET,(aid,)).fetchone())
     return result
+
+class FavoriteRequest(BaseModel):
+    favorite:bool=True
+
+@app.put('/api/photos/{aid}/favorite')
+def set_photo_favorite(aid:int, body:FavoriteRequest):
+    with db() as c:
+        row=c.execute('SELECT favorite FROM assets WHERE id=?',(aid,)).fetchone()
+        if not row:
+            raise HTTPException(404,'照片不存在')
+        before=bool(row['favorite'])
+        favorite=bool(body.favorite)
+        if before!=favorite:
+            c.execute('UPDATE assets SET favorite=? WHERE id=?',(int(favorite),aid))
+            c.execute(
+                'INSERT INTO edits(created_at,target,before_json,after_json) VALUES (?,?,?,?)',
+                (now(),f'asset:{aid}',json.dumps({'favorite':before},ensure_ascii=False),json.dumps({'favorite':favorite},ensure_ascii=False)),
+            )
+        count=c.execute('SELECT count(*) FROM assets a WHERE coalesce(a.favorite,0)=1 AND '+ACTIVE_ASSET).fetchone()[0]
+    with STATUS_CACHE_LOCK:
+        STATUS_CACHE['payload']=None; STATUS_CACHE['at']=0
+    return {'id':aid,'favorite':favorite,'favorite_count':count,'changed':before!=favorite}
 
 @app.get('/api/timeline')
 def timeline():

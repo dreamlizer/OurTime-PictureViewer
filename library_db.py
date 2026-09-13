@@ -22,7 +22,7 @@ ASSET_LIST_COLUMNS = """
 a.id, a.sha256, a.width, a.height, a.format, a.captured_at, a.date_source, a.date_precision,
 a.latitude, a.longitude, a.place, a.place_source, a.camera, a.category, a.error,
 a.manual_date, a.manual_precision, a.manual_place, a.notes, a.face_state, a.face_error,
-a.created_at, a.excluded, a.exclude_reason, a.object_state, a.object_error
+a.created_at, a.excluded, a.exclude_reason, a.favorite, a.object_state, a.object_error
 """.strip()
 
 
@@ -101,7 +101,11 @@ def init_schema(conn):
           message TEXT NOT NULL DEFAULT '');
     ''')
     migrations = {
-        'assets': {'excluded': 'INTEGER NOT NULL DEFAULT 0', 'exclude_reason': "TEXT NOT NULL DEFAULT ''"},
+        'assets': {
+            'excluded': 'INTEGER NOT NULL DEFAULT 0',
+            'exclude_reason': "TEXT NOT NULL DEFAULT ''",
+            'favorite': 'INTEGER NOT NULL DEFAULT 0',
+        },
         'files': {'excluded': 'INTEGER NOT NULL DEFAULT 0'},
         'jobs': {
             'workers': 'INTEGER NOT NULL DEFAULT 2',
@@ -123,6 +127,7 @@ def init_schema(conn):
                 conn.execute(f'ALTER TABLE {table} ADD COLUMN {name} {declaration}')
     conn.execute('CREATE INDEX IF NOT EXISTS files_asset_excluded ON files(asset_id,excluded)')
     conn.execute('CREATE INDEX IF NOT EXISTS assets_excluded ON assets(excluded)')
+    conn.execute('CREATE INDEX IF NOT EXISTS assets_favorite ON assets(favorite,id)')
     conn.execute('CREATE INDEX IF NOT EXISTS assets_browse_date ON assets(coalesce(manual_date,captured_at),id)')
     conn.execute('CREATE INDEX IF NOT EXISTS people_ignored ON people(ignored,confirmed,id)')
     conn.execute('CREATE INDEX IF NOT EXISTS faces_asset ON faces(asset_id)')

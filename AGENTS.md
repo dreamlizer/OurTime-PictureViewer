@@ -36,6 +36,7 @@ smoke 至少要拦住这些：
 - `prettyPlace()` / `personLabel()` / `esc()` 先定义再调用，且定义在 `app.js`。
 - 照片流切换时先隐藏 `#no-results`，显示“正在加载照片”，不能先闪“没有照片”。
 - 现役接口空闲时：`/api/photos/{id}` 有 `files` / `faces` / `effective_place`；`/api/people/{id}` 每张脸有数字 `asset_id`。人物详情按 `limit` 分页，默认 48 张脸；合并按钮必须是 `type=button`，提示要写在对话框内。
+- 合影详情卡片的快捷排除必须二次确认并使用 `display_only`，只退出展示，不清理缩略图、人脸或姓名关系；恢复仍走现有“已排除”入口。
 
 ## 当前状态和下一步
 

@@ -87,6 +87,7 @@ def main():
     html = read(WEB / "index.html")
     app = read(WEB / "app.js")
     viewer = read(WEB / "viewer.js")
+    appearance = read(WEB / "appearance.css")
     viewer_overrides = read(WEB / "viewer-overrides.css")
     backend = read(ROOT / "app.py")
     waterfall = read(WEB / "waterfall.js")
@@ -158,6 +159,17 @@ def main():
         or "face-name.unnamed.passerby" not in viewer_overrides
     ):
         fail("照片快捷命名缺少路人操作，或路人淡色加号显示规则缺失")
+    quick_dialog = html.split('<dialog aria-label="快速命名"', 1)[-1].split('</dialog>', 1)[0]
+    if (
+        quick_dialog.count('data-close="quick-name-dialog"') != 1
+        or 'id="quick-name-confirm" class="primary quick-main-action">确认姓名</button>' not in quick_dialog
+        or 'id="quick-merge-submit" class="secondary quick-main-action">合并到所选人物</button>' not in quick_dialog
+        or '>取消</button>' in quick_dialog
+        or ".quick-name-dialog .quick-main-action" not in appearance
+        or "min-height: 44px" not in appearance
+        or "peopleQuery({ignored:0,named:1,q:query,limit:40})" not in app
+    ):
+        fail("照片快捷命名布局退化，或合并候选没有限定为已命名人物")
     if not all(value in viewer for value in (
         '<option value="top">优先上方</option>',
         '<option value="bottom">优先下方</option>',
@@ -168,6 +180,15 @@ def main():
         '/passersby`,',
     )) or "@app.post('/api/photos/{aid}/passersby')" not in backend:
         fail("照片人物缺少上下标签位置、悬停指向、单张纠错或批量路人能力")
+    if not all(value in waterfall for value in (
+        'data-group-exclude-arm',
+        'data-group-exclude-confirm',
+        'data-group-exclude-cancel',
+    )) or not all(value in app for value in (
+        "reason:'在合影页排除显示'",
+        'display_only:true',
+    )) or 'display_only:bool=False' not in backend:
+        fail("合影详情缺少二次确认的仅排除显示入口，或仍可能清理识别缓存")
     if not all(path in viewer for path in (
         "/api/face-label-bg/1.png",
         "/api/face-label-bg/2.png",
@@ -263,13 +284,24 @@ def main():
         fail("照片流缺少加载中文案")
     ok("切到时间/地点时先显示加载中，不先说没有照片")
 
-    for item in ["photo-grid", "people-grid", "person-dialog", "person-title", "person-notice", "person-faces-status", "merge-person", "quick-name-dialog", "quick-name-form", "quick-ignore-person", "detail-dialog", "no-results", "empty", "stream-status", "places-view", "timeline-tools", "groups-view", "groups-list"]:
+    for item in ["photo-grid", "people-grid", "person-dialog", "person-title", "person-notice", "person-faces-status", "merge-person", "quick-name-dialog", "quick-name-form", "quick-ignore-person", "detail-dialog", "photo-favorite", "favorites-count", "no-results", "empty", "stream-status", "places-view", "timeline-tools", "groups-view", "groups-list"]:
         if ('id="%s"' % item) not in html:
             fail("index.html 缺少必要节点: %s" % item)
     ok("人物页、大图、时间流、地点流的关键节点都在")
     if 'id="merge-person"' in html and 'id="merge-person" class' in html and 'type="button" id="merge-person"' not in html:
         fail("合并按钮缺少 type=button，详情页点击可能被表单吞掉")
     ok("人物详情合并按钮是 type=button")
+    if (
+        'data-view="favorites"' not in html
+        or "favorites:['收藏','收藏的照片']" not in app
+        or "@app.put('/api/photos/{aid}/favorite')" not in backend
+        or "coalesce(a.favorite,0)=1" not in read(ROOT / "browse_queries.py")
+        or "id=\"photo-favorite\"" not in html
+        or "togglePhotoFavorite" not in viewer
+        or "#detail-dialog #photo-favorite" not in viewer_overrides
+    ):
+        fail("收藏缺少左侧入口、照片按钮、持久化接口或独立筛选")
+    ok("照片收藏的入口、持久化、筛选和视觉控件已接入")
     if not all(value in html for value in (
         'id="scan-folder-picker"',
         'id="scan-root-list"',

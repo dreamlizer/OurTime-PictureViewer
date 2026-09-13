@@ -46,6 +46,9 @@ button:focus-visible, a:focus-visible, summary:focus-visible,
 .nav-label.lower, .nav-label.nav-section { margin: 20px 0 7px; }
 .nav { position: relative; min-height: 40px; padding: 8px 10px; gap: 10px; margin-bottom: 3px; border-radius: 7px; color: #52615a; font-size: 13px; }
 .nav .nav-icon { display: grid; place-items: center; width: 20px; color: inherit; }
+.nav[data-view="favorites"] .favorite-nav-icon circle { fill: currentColor; fill-opacity: .06; }
+.nav[data-view="favorites"].active .favorite-nav-icon { color: #8a4a3e; }
+.nav[data-view="favorites"].active .favorite-nav-icon circle { fill-opacity: .14; }
 .nav .nav-text { font: inherit; color: inherit; width: auto; text-align: left; min-width: 0; }
 .nav b { font: 11px/1.4 var(--sans); font-variant-numeric: tabular-nums; color: var(--muted); }
 .nav:hover { background: #e1e8e2; color: var(--ink); }
@@ -341,21 +344,59 @@ pre { font: 12px/1.7 Consolas, monospace; background: #f0f3f0; padding: 14px; bo
 dialog { border-color: #cbd6cf; border-radius: 14px; background: #fff; box-shadow: 0 20px 80px #172b2433; max-width: calc(100vw - 32px); max-height: calc(100dvh - 32px); }
 dialog::backdrop { background: #162b2466; backdrop-filter: blur(4px); }
 .compact-dialog { width: 560px; padding: 30px; }
-.quick-name-dialog { width: 420px; padding: 26px 26px 22px; z-index: 20; }
-.quick-name-dialog h2 { font-size: 18px; margin: 0 0 6px; padding-right: 32px; }
-.quick-name-form { display: grid; gap: 6px; margin-top: 16px; }
-.quick-name-form label { margin: 8px 0 0; font-size: 12px; color: var(--muted); }
-.quick-name-form input { width: 100%; }
+.quick-name-dialog { width: 400px; padding: 24px; z-index: 20; }
+.quick-name-dialog h2 { font-size: 18px; margin: 0; padding-right: 32px; }
+.quick-name-form { display: grid; gap: 12px; margin-top: 18px; }
+.quick-name-fields { display: grid; gap: 6px; }
+.quick-name-form label { margin: 4px 0 0; font-size: 12px; color: var(--muted); }
+.quick-name-form input, .quick-name-form select { width: 100%; min-width: 0; }
+.quick-name-dialog .quick-main-action,
+.quick-name-dialog .quick-merge-toggle {
+  width: 100%;
+  min-height: 44px;
+  justify-content: center;
+  padding: 9px 14px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.quick-name-dialog #quick-name-confirm { margin-top: 4px; }
+.quick-name-dialog .quick-merge-toggle {
+  border: 1px solid #9fb5a6;
+  background: #f7faf7;
+  color: #315e48;
+}
+.quick-name-dialog .quick-merge-toggle:hover { border-color: #6f907b; background: #eef5ef; }
+.quick-name-dialog .quick-merge-toggle[aria-expanded="true"] { border-color: #789582; background: #eaf3ec; }
 .quick-name-actions { display: flex; justify-content: flex-end; gap: 10px; align-items: center; margin-top: 16px; }
 .quick-name-actions .primary { min-width: 88px; }
 .quick-name-actions .quick-ignore-person { margin-right: auto; color: #866c63; }
 .quick-name-actions .quick-ignore-person:hover { color: #684a40; background: #f4ece8; }
-.quick-merge-toggle { justify-content: flex-start; padding-inline: 0; color: var(--muted); font-size: 11px; }
-.quick-merge-panel { display: grid; gap: 6px; margin-top: 2px; padding: 10px 0 4px; border-top: 1px solid var(--line); }
+.quick-merge-panel { display: grid; gap: 8px; margin-top: -4px; padding: 12px; border: 1px solid #d8e1da; border-radius: 10px; background: #f8faf7; }
 .quick-merge-panel[hidden] { display: none; }
 .quick-merge-panel label { margin: 0; color: var(--muted); font-size: 11px; }
 .quick-merge-panel select, .quick-merge-panel input { width: 100%; min-width: 0; }
-.quick-merge-panel button { justify-self: end; min-width: 72px; }
+.quick-name-dialog #quick-merge-submit {
+  width: calc(100% + 26px);
+  margin: 4px -13px -13px;
+  border-color: #6f8d79;
+  border-radius: 0 0 10px 10px;
+  background: #fff;
+  color: #315d48;
+}
+.quick-name-dialog #quick-merge-submit:hover { background: #edf4ef; }
+.quick-name-dialog .quick-ignore-person {
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 12px;
+  border: 0;
+  border-top: 1px solid #e6ded9;
+  border-radius: 0;
+  background: transparent;
+  color: #80645b;
+  font-size: 12px;
+}
+.quick-name-dialog .quick-ignore-person:hover { background: #f7efeb; color: #65483f; }
 
 .compact-dialog h2, .person-dialog h2 { font-size: 18px; line-height: 1.3; padding-right: 32px; overflow-wrap: anywhere; }
 .dialog-close, #close-info { display: grid; place-items: center; width: 34px; height: 34px; top: 12px; right: 12px; padding: 0; border-radius: 50%; background: #edf2ee; color: #476151; font: 24px/1 var(--sans); }

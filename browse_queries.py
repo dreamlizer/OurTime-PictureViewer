@@ -230,6 +230,8 @@ def photo_conditions(q='', filter='all', person='', directory='', max_id=0, date
         conditions.append('NOT EXISTS(SELECT 1 FROM files f WHERE f.asset_id=a.id AND exists_now=1)')
     if current == 'screenshots':
         conditions.append("a.category IN ('截图','小图 / 素材')")
+    if current == 'favorites':
+        conditions.append('coalesce(a.favorite,0)=1')
     if current == 'no_place':
         conditions.append("a.latitude IS NULL AND coalesce(a.manual_place,'')=''")
     if year:
