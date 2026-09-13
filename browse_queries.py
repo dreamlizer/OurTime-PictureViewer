@@ -241,7 +241,7 @@ def photo_conditions(q='', filter='all', person='', directory='', max_id=0, date
     if current == 'duplicates':
         conditions.append('(SELECT count(*) FROM files f WHERE f.asset_id=a.id AND exists_now=1 AND excluded=0)>1')
     if current == 'errors':
-        conditions.append('(a.error IS NOT NULL OR a.face_state=-1)')
+        conditions.append('(a.error IS NOT NULL OR a.face_state IN (-1,2))')
     if current == 'missing':
         conditions.append('NOT EXISTS(SELECT 1 FROM files f WHERE f.asset_id=a.id AND exists_now=1)')
     if current == 'screenshots':

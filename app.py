@@ -136,6 +136,11 @@ async def local_only(request: Request, call_next):
 def now():
     return datetime.now().isoformat(timespec='seconds')
 
+def invalidate_status_cache():
+    with STATUS_CACHE_LOCK:
+        STATUS_CACHE['payload']=None
+        STATUS_CACHE['at']=0
+
 def asset_lock(digest):
     return ASSET_LOCKS[int(digest[:8],16)%len(ASSET_LOCKS)]
 
@@ -176,6 +181,31 @@ def remove_generated(path,folder):
     except FileNotFoundError:
         return 0
 
+def owned_face_derivative_paths(face):
+    """Return only managed crop files whose ownership is encoded by one face row."""
+    face_id=int(face['id'])
+    face_dir=DATA/'faces'
+    candidates=[
+        face_dir/(face['crop'] or f'{face_id}.jpg'),
+        face_dir/f'.pending-{face_id}.jpg',
+    ]
+    recover_prefix=f'.recover-{face_id}-'
+    try:
+        candidates.extend(
+            path for path in face_dir.iterdir()
+            if path.name.startswith(recover_prefix) and path.suffix.lower()=='.jpg'
+        )
+    except FileNotFoundError:
+        pass
+    unique=[]
+    seen=set()
+    for path in candidates:
+        key=str(path)
+        if key not in seen:
+            seen.add(key)
+            unique.append(path)
+    return unique
+
 def cleanup_asset_cache(aid):
     with db() as c:
         row=c.execute('SELECT * FROM assets WHERE id=?',(aid,)).fetchone()
@@ -191,10 +221,11 @@ def cleanup_asset_cache(aid):
             active=c.execute('SELECT 1 FROM assets a WHERE a.id=? AND '+ACTIVE_ASSET,(aid,)).fetchone()
             if active:
                 return 0
-            faces=c.execute('SELECT id FROM faces WHERE asset_id=?',(aid,)).fetchall()
+            faces=c.execute('SELECT id,crop FROM faces WHERE asset_id=?',(aid,)).fetchall()
         released=remove_generated(thumbnail_path(row['sha256']),'thumbs')
         for face in faces:
-            released+=remove_generated(DATA/'faces'/f'{face[0]}.jpg','faces')
+            for path in owned_face_derivative_paths(face):
+                released+=remove_generated(path,'faces')
         with db() as c:
             current=c.execute(
                 'SELECT derivative_policy FROM assets WHERE id=?',(aid,)
@@ -212,6 +243,7 @@ def cleanup_asset_cache(aid):
             c.execute('DELETE FROM faces WHERE asset_id=?',(aid,))
             c.execute('UPDATE assets SET face_state=0,face_error=NULL WHERE id=?',(aid,))
         invalidate_face_index()
+        invalidate_status_cache()
         return released
 
 def jsonable(value):
@@ -648,12 +680,24 @@ class FaceIndexChanged(RuntimeError):
 def recover_asset_face_crops(asset_id,path):
     """Finish a committed crop publication without rerunning face inference."""
     with db() as c:
+        asset=c.execute(
+            'SELECT face_state FROM assets WHERE id=?',
+            (asset_id,),
+        ).fetchone()
         rows=c.execute(
             'SELECT id,bbox,crop FROM faces WHERE asset_id=? ORDER BY id',
             (asset_id,),
         ).fetchall()
     if not rows:
-        return False
+        if not asset or int(asset['face_state'] or 0)!=2:
+            return False
+        with db() as c:
+            c.execute(
+                'UPDATE assets SET face_state=1,face_error=NULL WHERE id=? AND face_state=2',
+                (asset_id,),
+            )
+        invalidate_status_cache()
+        return True
     pic=None
     recovery_files=[]
     try:
@@ -681,6 +725,7 @@ def recover_asset_face_crops(asset_id,path):
                 (asset_id,),
             )
         invalidate_face_index()
+        invalidate_status_cache()
         return True
     finally:
         for staged in recovery_files:
@@ -741,8 +786,17 @@ def process_faces(asset_id,path):
                 with db() as c:
                     c.execute(
                         'UPDATE assets SET face_state=2,face_error=? WHERE id=?',
-                        ('人脸裁剪待恢复：'+str(error),asset_id),
+                        (
+                            (
+                                '人脸裁剪待恢复：'
+                                if state_row['has_faces']
+                                else '人脸识别结果已提交，完成状态待恢复：'
+                            )
+                            +str(error),
+                            asset_id,
+                        ),
                     )
+                invalidate_status_cache()
                 raise FacePublishPending(
                     '人脸已提交，裁剪发布待恢复'
                 ) from error
@@ -834,12 +888,18 @@ def process_faces(asset_id,path):
                 os.replace(crop_path,DATA/'faces'/f"{item['fid']}.jpg")
             with db() as c:
                 c.execute('UPDATE assets SET face_state=1,face_error=NULL WHERE id=?',(asset_id,))
+            invalidate_status_cache()
         except Exception as error:
             with db() as c:
                 c.execute(
                     'UPDATE assets SET face_state=2,face_error=? WHERE id=?',
-                    ('人脸裁剪待恢复：'+str(error),asset_id),
+                    (
+                        ('人脸裁剪待恢复：' if staged else '人脸识别结果已提交，完成状态待恢复：')
+                        +str(error),
+                        asset_id,
+                    ),
                 )
+            invalidate_status_cache()
             invalidate_face_index()
             raise FacePublishPending('人脸已提交，裁剪发布待恢复') from error
 
@@ -1226,7 +1286,10 @@ def status():
           sum(CASE WHEN manual_date IS NULL AND (date_source NOT LIKE 'EXIF%' OR date_source IS NULL) THEN 1 ELSE 0 END) uncertain_dates,
           sum(CASE WHEN latitude IS NULL AND coalesce(manual_place,'')='' THEN 1 ELSE 0 END) no_place,
           sum(CASE WHEN error IS NOT NULL THEN 1 ELSE 0 END) unreadable,
-          sum(CASE WHEN face_state=0 THEN 1 ELSE 0 END) faces_pending FROM assets a
+          sum(CASE WHEN face_state=0 THEN 1 ELSE 0 END) faces_pending,
+          sum(CASE WHEN face_state=2 THEN 1 ELSE 0 END) face_publish_pending,
+          sum(CASE WHEN face_state=2 AND face_error IS NOT NULL THEN 1 ELSE 0 END) face_publish_errors
+          FROM assets a
           WHERE '''+ACTIVE_ASSET).fetchone())
         stats['files']=c.execute('SELECT count(*) FROM files').fetchone()[0]
         stats['active_files']=c.execute('SELECT count(*) FROM files f JOIN assets a ON a.id=f.asset_id WHERE f.excluded=0 AND a.excluded=0').fetchone()[0]
@@ -1425,6 +1488,7 @@ def folders(path:str='',scope:str='browse'):
 
 def asset_dict(row):
     d=dict(row)
+    d['face_status']='committed_pending_publish' if d.get('face_state')==2 else None
     d['effective_date']=d['manual_date'] or d['captured_at']
     d['effective_place']=(d['manual_place'] or d['place'] or '').replace('附近','') or None
     d['effective_precision']=d['manual_precision'] if d['manual_date'] else d['date_precision']
