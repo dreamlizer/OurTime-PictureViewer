@@ -190,8 +190,8 @@ def main():
     )) or "@app.post('/api/photos/{aid}/passersby')" not in backend:
         fail("照片人物缺少上下标签位置、悬停指向、单张纠错或批量路人能力")
     if not all(value in home_ui for value in (
-        'data-ot="group"',
-        '>合影人数</button>',
+        'const filterButton',
+        "filterButton('group', '合影人数')",
         'data-ot="group-min"',
         'data-ot="group-max"',
         "'upto' + max",

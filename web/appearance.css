@@ -175,15 +175,17 @@ input:disabled, select:disabled, textarea:disabled { background-color: #e9eeea; 
 .batch-bar, #people-merge-bar { flex-wrap: wrap; gap: 8px 12px; padding: 12px 14px; background: #e5efe8; border: 1px solid #b5cdbd; border-radius: 9px; font-size: 13px; }
 #selected-count, #people-selected-count { font-weight: 600; color: #214b39; }
 #people-merge-bar { margin-bottom: 20px; }
-#photo-grid .photo-frame { background: transparent; border-radius: 8px; }
-#photo-grid .photo-card { border-radius: 8px; }
+#photo-grid .photo-frame { background: transparent; border: 1px solid rgb(37 52 47 / 6%); border-radius: 10px; transition: transform 150ms ease, box-shadow 150ms ease, border-color 150ms ease; }
+#photo-grid .photo-card { border-radius: 10px; }
 #photo-grid .photo-card:hover .photo-frame img { transform: none; }
-#photo-grid .photo-card:hover .photo-frame { box-shadow: 0 0 0 2px #829b8b; }
+#photo-grid .photo-card:hover .photo-frame { transform: translateY(-1px); border-color: rgb(37 52 47 / 12%); box-shadow: 0 4px 12px rgb(24 45 35 / 10%); }
 #photo-grid .photo-card.selected .photo-frame { outline: 3px solid var(--green); outline-offset: 2px; }
+#photo-grid .photo-card.selected:hover .photo-frame { transform: none; box-shadow: 0 0 0 1px rgb(40 92 73 / 14%); }
+#photo-grid .photo-card:focus-visible { outline: 2px solid var(--ui-focus); outline-offset: 4px; }
 /* Keep the 42px caption height required by the virtual masonry layout. */
 #photo-grid .card-caption { height: var(--caption-h); padding: 7px 1px 9px; }
 #photo-grid .card-caption .card-meta { display: flex; gap: 8px; align-items: baseline; }
-#photo-grid .card-caption b { font-size: 12px; color: #415048; line-height: 20px; flex: 1 1 auto; }
+#photo-grid .card-caption b { font-size: 12px; font-weight: 500; color: #415048; line-height: 20px; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #photo-grid .card-caption span { color: var(--muted); font-size: 11px; flex: 0 1 auto; min-width: 0; max-width: 56%; text-overflow: ellipsis; }
 .copy-badge { padding: 2px 7px; color: #3c5445; background: #fffffff0; border: 1px solid #dce2de; border-radius: 5px; font-size: 11px; }
 #photo-grid .stream-motion { transform: none; transition: opacity 140ms ease; }

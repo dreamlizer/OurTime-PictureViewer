@@ -2,13 +2,13 @@
 .ot-home-ui,
 .ot-home-filter-dialog,
 .ot-home-popover {
-  --ot-text: #253934;
-  --ot-muted: #72817b;
-  --ot-line: #dde5df;
-  --ot-soft: #f3f6f2;
-  --ot-accent: #315c49;
-  --ot-focus: #67987a;
-  --ot-danger: #934e46;
+  --ot-text: var(--ui-text, #25342f);
+  --ot-muted: var(--ui-muted, #65756d);
+  --ot-line: var(--ui-border, #d9e1dc);
+  --ot-soft: var(--ui-soft, #edf3ef);
+  --ot-accent: var(--ui-accent, #285c49);
+  --ot-focus: var(--ui-focus, #33745b);
+  --ot-danger: var(--ui-danger, #a13e36);
   color: var(--ot-text);
   font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
   box-sizing: border-box;
@@ -31,14 +31,17 @@
   fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round;
 }
 .ot-home-ui .ot-home-query {
-  display: flex; flex-wrap: nowrap; align-items: center; justify-content: space-between; gap: 16px;
+  display: flex; flex-wrap: nowrap; align-items: center; justify-content: space-between; gap: 12px;
   padding: 0; margin: 0; border: 0; background: transparent;
 }
 .ot-home-ui .ot-home-query-left,
 .ot-home-ui .ot-home-query-right {
-  display: flex; align-items: center; gap: 10px; min-width: 0;
+  display: flex; align-items: center; gap: 8px; min-width: 0;
 }
-.ot-home-ui .ot-home-query-left { flex: 1 1 auto; }
+.ot-home-ui .ot-home-query-left {
+  display: flex; align-items: center; gap: 2px; min-width: 0; flex: 1 1 auto; padding: 4px;
+  background: var(--ot-soft); border: 1px solid #e1e8e3; border-radius: 12px;
+}
 .ot-home-ui .ot-home-query-right { flex: 0 0 auto; margin-left: auto; }
 .ot-home-ui .ot-home-search {
   display: flex; align-items: center; gap: 10px;
@@ -61,26 +64,39 @@
 .ot-home-popover input::placeholder { color: #88948d; opacity: 1; }
 .ot-home-ui .ot-home-button, .ot-home-filter-dialog .ot-home-button, .ot-home-popover .ot-home-button {
   display: inline-flex; align-items: center; justify-content: center; gap: 7px;
-  flex: 0 0 auto; min-height: 42px; min-width: 64px;
-  margin: 0; padding: 9px 14px;
+  flex: 0 0 auto; min-height: 40px; min-width: 64px;
+  margin: 0; padding: 8px 12px;
   color: var(--ot-text); background: #fff;
-  border: 1px solid var(--ot-line); border-radius: 10px;
+  border: 1px solid var(--ot-line); border-radius: 9px;
   font-weight: 500; white-space: nowrap; cursor: pointer;
   box-shadow: none; text-decoration: none;
 }
 .ot-home-ui .ot-home-button:hover:not(:disabled),
 .ot-home-filter-dialog .ot-home-button:hover:not(:disabled),
 .ot-home-popover .ot-home-button:hover:not(:disabled) { background: var(--ot-soft); border-color: #c0cec3; }
-.ot-home-ui .ot-home-button.ot-home-filter-active {
-  color: var(--ot-accent); background: #edf4ed; border-color: #c8dacb;
+.ot-home-ui .ot-home-filter { min-width: 0; border-color: transparent; border-radius: 8px; background: transparent; }
+.ot-home-ui .ot-home-filter:hover:not(:disabled) { background: #fbfdfb; border-color: transparent; }
+.ot-home-ui .ot-home-filter.ot-home-filter-active:not([aria-expanded="true"]) {
+  color: var(--ot-accent); background: var(--ui-selected, #dce9e1); border-color: transparent; font-weight: 600;
 }
+.ot-home-ui .ot-home-filter[aria-expanded="true"] {
+  color: var(--ot-text); background: #fff; border-color: var(--ui-selected-border, #b7ccbe);
+  box-shadow: 0 2px 6px rgb(24 45 35 / 8%);
+}
+.ot-home-ui .ot-home-filter .ot-home-caret { width: 14px; height: 14px; margin-left: 1px; color: var(--ot-muted); transition: transform 140ms ease, color 140ms ease; }
+.ot-home-ui .ot-home-filter[aria-expanded="true"] .ot-home-caret { color: var(--ot-accent); transform: rotate(180deg); }
+.ot-home-ui .ot-home-filter > svg:not(.ot-home-caret) { color: #52655b; }
+.ot-home-ui .ot-home-filter.ot-home-filter-active > svg:not(.ot-home-caret),
+.ot-home-ui .ot-home-filter[aria-expanded="true"] > svg:not(.ot-home-caret) { color: var(--ot-accent); }
+.ot-home-ui .ot-home-filter > span { overflow: hidden; text-overflow: ellipsis; }
+.ot-home-ui .ot-home-query-right .ot-home-button { min-height: 40px; }
 .ot-home-ui .ot-home-badge {
   min-width: 18px; height: 18px; padding-inline: 4px; border-radius: 9px;
   color: var(--ot-accent); background: #dbe9dc; font-size: 11px; line-height: 18px; text-align: center;
 }
 .ot-home-ui .ot-home-sort { display: block; flex: 0 0 auto; margin: 0; }
 .ot-home-ui .ot-home-sort select {
-  display: block; width: auto; min-width: 123px; min-height: 42px; margin: 0;
+  display: block; width: auto; min-width: 123px; min-height: 40px; margin: 0;
   padding: 8px 12px; color: var(--ot-text); background: #fff;
   border: 1px solid var(--ot-line); border-radius: 10px; cursor: pointer;
 }
@@ -190,8 +206,9 @@
 }
 @media (max-width: 420px) {
   .ot-home-ui .ot-home-button { padding-inline: 11px; }
-  .ot-home-ui .ot-home-query-left { gap: 6px; }
-  .ot-home-ui .ot-home-query-left .ot-home-button { flex: 1 1 0; min-width: 0; padding-inline: 7px; }
+  .ot-home-ui .ot-home-query-left { gap: 2px; overflow-x: auto; overscroll-behavior-inline: contain; scrollbar-width: none; }
+  .ot-home-ui .ot-home-query-left::-webkit-scrollbar { display: none; }
+  .ot-home-ui .ot-home-query-left .ot-home-filter { flex: 0 0 auto; min-width: max-content; padding-inline: 10px; }
   .ot-home-filter-dialog { border-radius: 0; border-left: 0; }
   .ot-home-filter-dialog .ot-home-filter-header { padding: 22px 18px 18px; }
   .ot-home-filter-dialog .ot-home-filter-body { padding: 20px 18px; }
@@ -223,7 +240,7 @@ body.is-people-view .people-search { margin-left: auto; }
 .ot-home-ui.ot-home-group [data-ot="select"] { display: none !important; }
 body.is-subpage .masthead .stats { display: none; }
 .ot-home-popover {
-  position: fixed; z-index: 40; max-height: min(68vh, 520px); overflow: auto;
+  position: fixed; z-index: 40; max-width: calc(100vw - 24px); max-height: min(68vh, 520px); overflow: auto;
   padding: 14px 14px 12px; background: #fcfdfb; border: 1px solid var(--ot-line);
   border-radius: 12px; box-shadow: 0 16px 40px rgb(24 45 35 / 16%);
 }

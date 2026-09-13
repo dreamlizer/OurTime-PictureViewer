@@ -28,9 +28,17 @@
   };
   const svg = body => '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">' + body + '</svg>';
   const ICONS = {
+    person: svg('<circle cx="12" cy="8" r="4"/><path d="M5 21v-2a7 7 0 0 1 14 0v2"/>'),
+    time: svg('<rect x="4" y="5" width="16" height="15" rx="2"/><path d="M8 3v4m8-4v4M4 10h16"/>'),
+    group: svg('<circle cx="9" cy="8" r="3"/><circle cx="17" cy="10" r="2.5"/><path d="M3 21v-1.5a6 6 0 0 1 12 0V21m1-5a5 5 0 0 1 5 4v1"/>'),
+    place: svg('<path d="M19 10c0 5-7 11-7 11S5 15 5 10a7 7 0 1 1 14 0Z"/><circle cx="12" cy="10" r="2.4"/>'),
+    folder: svg('<path d="M3 7h6l2 2h10v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/><path d="M3 10h18"/>'),
+    chevron: svg('<path d="m8 10 4 4 4-4"/>'),
     select: svg('<rect x="4" y="4" width="16" height="16" rx="4"/><path d="m8 12 3 3 5-6"/>'),
     close: svg('<path d="m7 7 10 10M17 7 7 17"/>')
   };
+  const filterButton = (kind, label) => '<button data-ot="' + kind + '" class="ot-home-button ot-home-filter" type="button">'
+    + ICONS[kind] + '<span>' + label + '</span>' + ICONS.chevron + '</button>';
   function personIds(raw) { return text(raw).split(',').map(item => item.trim()).filter(Boolean); }
   function dateLabel(from, to) {
     from = text(from); to = text(to);
@@ -56,11 +64,11 @@
     root.setAttribute('aria-label', '照片查询与选择');
     root.innerHTML = '<div class="ot-home-query" role="toolbar" aria-label="照片筛选">'
       + '<span class="ot-home-query-left">'
-      + '<button data-ot="person" class="ot-home-button" type="button">人物</button>'
-      + '<button data-ot="time" class="ot-home-button" type="button">时间</button>'
-      + '<button data-ot="group" class="ot-home-button" type="button">合影人数</button>'
-      + '<button data-ot="place" class="ot-home-button" type="button">地点</button>'
-      + '<button data-ot="folder" class="ot-home-button" type="button">文件夹</button>'
+      + filterButton('person', '人物')
+      + filterButton('time', '时间')
+      + filterButton('group', '合影人数')
+      + filterButton('place', '地点')
+      + filterButton('folder', '文件夹')
       + '</span><span class="ot-home-query-right">'
       + '<button data-ot="select" class="ot-home-button" type="button">' + ICONS.select + '<span>选择</span></button>'
       + '<label class="ot-home-sort"><span class="ot-home-sr-only">照片排序</span><select data-ot="sort" aria-label="照片排序"></select></label>'
@@ -84,8 +92,17 @@
     popover.setAttribute('role', 'dialog');
     do { popover.id = 'ot-home-pop-' + (++instanceCounter); } while (document.getElementById(popover.id));
     const all = name => root.querySelector('[data-ot="' + name + '"]') || popover.querySelector('[data-ot="' + name + '"]');
+    for (const key of ['person', 'time', 'group', 'place']) {
+      const control = all(key);
+      control.setAttribute('aria-haspopup', 'dialog');
+      control.setAttribute('aria-expanded', 'false');
+      control.setAttribute('aria-controls', popover.id);
+    }
+    const folderControl = all('folder');
+    folderControl.setAttribute('aria-haspopup', 'dialog');
+    folderControl.setAttribute('aria-controls', 'folder-dialog');
     for (const [value, label] of SORTS) all('sort').add(new window.Option(label, value));
-    let destroyed = false, busy = false, lastScope = null, lastFocus = null, openKind = '';
+    let destroyed = false, busy = false, lastScope = null, lastFocus = null, openKind = '', openAnchor = null;
     let people = [], peopleLabels = new Map(), places = [], timeline = { years: [], months: [] };
     let peopleTimer = null, placeTimer = null, peopleController = null, placeController = null, folderPending = false, timeYear = '';
     function listen(el, event, handler) { if (el) el.addEventListener(event, handler, { signal: life.signal }); }
@@ -200,17 +217,23 @@
       return runAction(signal => adapter.applyQuery(Object.freeze(query), context(before, signal)));
     }
      function closePopover(force) {
-      if (destroyed) return;
-       openKind = '';
+       if (destroyed) return;
+        if (openAnchor && openAnchor.isConnected) openAnchor.setAttribute('aria-expanded', 'false');
+        openAnchor = null;
+        openKind = '';
        if (peopleController) peopleController.abort();
        if (placeController) placeController.abort();
       peopleController = null; placeController = null;
       popover.hidden = true; popover.replaceChildren();
       if (lastFocus && lastFocus.isConnected && !destroyed) lastFocus.focus({ preventScroll: true });
     }
-    function positionPopover(anchor) {
+    const popoverPreferredWidths = { person: 288, time: 196, group: 280, place: 288 };
+    function positionPopover(anchor, kind) {
       const rect = anchor.getBoundingClientRect();
-      const width = Math.min(360, Math.max(260, window.innerWidth - 24));
+      // Each filter has a different natural density.  Keep list/search filters
+      // comfortable, but do not give a seven-item year list the same wide panel.
+      // 288px is 80% of the previous 360px desktop ceiling.
+      const width = Math.min(popoverPreferredWidths[kind] || 288, Math.max(160, window.innerWidth - 24));
       popover.style.width = width + 'px';
       popover.style.left = Math.max(12, Math.min(rect.left, window.innerWidth - width - 12)) + 'px';
       popover.style.top = (rect.bottom + 8) + 'px';
@@ -218,9 +241,12 @@
       const box = popover.getBoundingClientRect();
       if (box.bottom > window.innerHeight - 12) popover.style.top = Math.max(12, rect.top - box.height - 8) + 'px';
     }
-     function setPopover(kind, anchor, html) {
-       openKind = kind; lastFocus = document.activeElement;
-       popover.innerHTML = html; positionPopover(anchor);
+      function setPopover(kind, anchor, html) {
+        if (openAnchor && openAnchor !== anchor && openAnchor.isConnected) openAnchor.setAttribute('aria-expanded', 'false');
+        openAnchor = anchor;
+        openAnchor.setAttribute('aria-expanded', 'true');
+        openKind = kind; lastFocus = document.activeElement;
+       popover.innerHTML = html; positionPopover(anchor, kind);
      }
     async function loadPeople(q) {
       if (peopleController) peopleController.abort();
