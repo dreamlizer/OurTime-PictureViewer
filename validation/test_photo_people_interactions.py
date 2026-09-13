@@ -160,6 +160,9 @@ def main() -> int:
                   const toolsBox=tools.getBoundingClientRect();
                   const firstGroup=document.querySelector('.viewer-tool-group');
                   const favorite=document.querySelector('#photo-favorite');
+                  const image=document.querySelector('#detail-img').getBoundingClientRect();
+                  const signature=document.querySelector('#photo-signature').getBoundingClientRect();
+                  const matStyle=getComputedStyle(document.querySelector('#photo-mat'));
                   const alpha=value=>{const match=String(value).match(/rgba?\\([^,]+,[^,]+,[^,]+(?:,\\s*([\\d.]+))?\\)/);return match&&match[1]!==undefined?Number(match[1]):1;};
                   const arrowStyle=getComputedStyle(document.querySelector('#viewer-next'));
                   const favoriteStyle=getComputedStyle(favorite);
@@ -172,7 +175,11 @@ def main() -> int:
                     arrowAlpha:alpha(arrowStyle.backgroundColor),
                     arrowOpacity:parseFloat(arrowStyle.opacity),
                     favoriteAlpha:alpha(favoriteStyle.backgroundColor),
-                    favoriteTextAlpha:alpha(favoriteStyle.color)
+                    favoriteTextAlpha:alpha(favoriteStyle.color),
+                    favoriteBorder:parseFloat(favoriteStyle.borderTopWidth),
+                    favoriteLabelCount:favorite.querySelectorAll('span').length,
+                    photoCaptionGap:signature.top-image.bottom,
+                    matAlpha:alpha(matStyle.backgroundColor)
                   };
                 }"""
             )
@@ -180,7 +187,9 @@ def main() -> int:
             check(viewer_controls["toolsInset"] >= 28, "右侧工具条离开详情页边缘至少半个按钮宽度")
             check(viewer_controls["toolsGap"] <= 5 and viewer_controls["groupGap"] <= 1, "右侧工具条组间和按钮间距已收紧")
             check(viewer_controls["arrowAlpha"] <= .32 and viewer_controls["arrowOpacity"] <= .7, "翻页箭头使用更轻、更透明的承载层")
-            check(viewer_controls["favoriteAlpha"] <= .3 and viewer_controls["favoriteTextAlpha"] <= .65, "未收藏按钮降低背景和文字存在感")
+            check(viewer_controls["favoriteAlpha"] <= .16 and viewer_controls["favoriteTextAlpha"] <= .52, "未收藏图标进一步降低存在感")
+            check(viewer_controls["favoriteBorder"] == 0 and viewer_controls["favoriteLabelCount"] == 0, "收藏控件只保留无边框图标")
+            check(abs(viewer_controls["photoCaptionGap"]) <= 1 and viewer_controls["matAlpha"] == 1, "照片与元数据条无黑缝连接")
             page.screenshot(path=str(RUN / "viewer-controls-muted.png"), full_page=False)
 
             favorite_geometry = page.locator("#photo-favorite").evaluate(
