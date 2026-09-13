@@ -22,7 +22,7 @@ FastAPI + uvicorn + SQLite WAL；前端是 `web/` 静态 HTML/CSS/JS，无构建
 - `app.js` 先于 `viewer.js` 加载。`esc` / `prettyPlace` / `personLabel` 等公共函数必须放在 `app.js` 前部，禁止只写在 `viewer.js`。
 - 用户合同看 [README.md](README.md)。不要把用户照片路径写入文档或记忆。
 
-首页和合影详情用结构化筛选：人物、时间、地点、文件夹，条件之间为 AND。/api/photos 支持 person、date_from、date_to、place、directory，可与 filter=group:N 组合。人物筛选默认只取已命名人物，不要一次把全部人物下载到浏览器。
+首页和合影详情用结构化筛选：人物、时间、地点、文件夹，条件之间为 AND。/api/photos 支持 person、date_from、date_to、place、directory，可与 filter=group:N 或 filter=favorites 组合。人物筛选默认只取已命名人物，不要一次把全部人物下载到浏览器。
 
 ## 改完怎么查错（两档，不要每次全量）
 
@@ -41,4 +41,4 @@ smoke 至少要拦住这些：
 ## 当前状态和下一步
 
 版本 0.3。2026-09-10：正式六盘元数据已入库（D–I，不含 C；G 盘整盘排除）。人脸 GPU 补扫已结束（`completed_with_errors`），已识别 `face_state=1` 不重算。2026-09-10 曾按 0.50 收回未命名散组，并把 1–2 张脸的未命名组人工整理为路人；这是历史整理，不是自动路人规则。备份 data/backups/library-20260910-160440-before-face-merge.sqlite3。库存和任务状态以 `/api/status` 为准。物体识别已接但工作台入口已隐藏；库内旧标签保留不删，不继续扫描。默认首页为时间线；原全部照片入口改为文件夹，按盘符勾选，取消勾走现有排除（不删原文件）。文件夹浏览仍只看 I 盘；“添加照片”目录选择器可看本机固定磁盘和可移动磁盘，普通界面统一在添加照片页提交扫描。扫描新照片走增量，已入库会跳过。新脸按人物级分数保守分流：高置信度且与第二候选差距足够时进入已命名人物或用户确认的路人，中等置信度仅给候选提示，陌生人进入待确认；不得按出现次数自动判断路人。下一步仍是人工核对人物。地点细名以离线库 + 少量手填覆盖为准，不要让用户补完全库。地点页 Leaflet 用 `web/vendor/` 本地脚本，底图仍需联网。人物详情默认分页返回人脸，合并后不要一次渲染整组。
-浏览器的全部照片、文件夹、地点、合影和人物档案视图统一固定顶栏、标题和工具区；390px 等窄屏不得横向溢出。大图“素笺”主题使用 `web/vendor/fonts/` 内置屏幕阅读版文楷；“茶棕”主题只提供同目录内置的 Ma Shan Zheng、Long Cang、Liu Jian Mao Cao 三款毛笔字体并默认 Ma Shan Zheng；“暗朱”主题只提供 ZCOOL XiaoWei、Noto Serif SC、Zhi Mang Xing 三款题签字体并默认 ZCOOL XiaoWei。图片标签的字号和底牌透明度可调，其他主题和固定样式控件按 `viewer.js` 的主题合同执行。
+浏览器的全部照片、文件夹、地点、合影、收藏和人物档案视图统一固定顶栏、标题和工具区；390px 等窄屏不得横向溢出。大图左下角、资料栏上方的收藏状态写入 SQLite，不回写原照片。大图“素笺”主题使用 `web/vendor/fonts/` 内置屏幕阅读版文楷；“茶棕”主题只提供同目录内置的 Ma Shan Zheng、Long Cang、Liu Jian Mao Cao 三款毛笔字体并默认 Ma Shan Zheng；“暗朱”主题只提供 ZCOOL XiaoWei、Noto Serif SC、Zhi Mang Xing 三款题签字体并默认 ZCOOL XiaoWei。图片标签的字号和底牌透明度可调，其他主题和固定样式控件按 `viewer.js` 的主题合同执行。

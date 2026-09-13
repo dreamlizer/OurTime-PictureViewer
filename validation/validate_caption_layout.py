@@ -26,6 +26,11 @@ def check(page, name, fit=True):
     c=s['caption']
     assert s['seal']=={'background':'rgb(185, 46, 49)','radius':'50%'},(name,'original logo changed',s)
     memory=next((g for g in s['groups'] if g['kind']=='signature-memory'),None)
+    right=[g for g in s['groups'] if g['kind'] in ['signature-capture','signature-file']]
+    if memory and right:
+        assert abs(memory['bottom']-max(g['bottom'] for g in right))<=1,(name,'caption groups must align at the bottom',s)
+        if name.startswith('real-'):
+            assert abs(memory['height']-(max(g['bottom'] for g in right)-min(g['top'] for g in right)))<=4,(name,'right block visually taller than left',s)
     for group in s['groups']:
         if memory and group['kind'] in ['signature-capture','signature-file']:
             assert group['left']>=memory['right']-1,(name,'details must stay to the right of memory',s)
