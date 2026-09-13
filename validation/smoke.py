@@ -184,7 +184,8 @@ def main():
         'face-action-popover',
         'face-action-photos',
         'face-action-edit-name',
-        'rememberPersonName(Number(face.person_id)',
+        "viewerCaptureEntityWrite('photo'",
+        "queueEntityWrite('person',personId,()=>rememberPersonName(",
         'photo-people-popover',
         '/passersby`,',
     )) or "@app.post('/api/photos/{aid}/passersby')" not in backend:

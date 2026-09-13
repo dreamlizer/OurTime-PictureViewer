@@ -55,7 +55,10 @@
     },
     reloadPhotos: ({ signal } = {}) => {
       if (signal && signal.aborted) return Promise.reject(new DOMException('Aborted', 'AbortError'));
-      return global.loadPhotos();
+      return global.loadPhotos({ signal }).then(ok => {
+        if (!ok && !(signal && signal.aborted)) throw new Error('照片查询加载失败');
+        return ok;
+      });
     },
     getPeople: async ({ signal, q } = {}) => {
       const ids = String(app.state.person || '').split(',').filter(Boolean).join(',');
@@ -135,6 +138,7 @@
     selectionKind: source => source.view === 'excluded' ? 'restore' : 'exclude',
     onStateChange: sync
   });
+  global.__ourTimeHomeAdapter = adapter;
 
   try {
     homeUI = global.OurTimeHomeUI.mount({ host, adapter });

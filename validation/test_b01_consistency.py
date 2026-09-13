@@ -1059,9 +1059,11 @@ def main() -> int:
 
     import app
     from fastapi.testclient import TestClient
+    from validation.db_gates import gate_failures
 
     if app.DATA.resolve() != work:
         raise AssertionError(f"app DATA mismatch: {app.DATA} != {work}")
+    app.initialize_application()
     client = TestClient(app.app)
     status = client.get("/api/status").json()
     if Path(status["capabilities"]["data_dir"]).resolve() != work:
@@ -1116,7 +1118,11 @@ def main() -> int:
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(text + "\n", encoding="utf-8")
-    return 0 if all(row["status"] == "PASS" for row in results) else 1
+    failures = gate_failures(results, integrity, foreign_keys)
+    client.close()
+    if not app.shutdown_application():
+        failures.append("application shutdown timed out")
+    return 0 if not failures else 1
 
 
 if __name__ == "__main__":

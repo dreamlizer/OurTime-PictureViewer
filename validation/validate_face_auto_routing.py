@@ -66,6 +66,7 @@ def main() -> int:
         sys.path.insert(0, str(ROOT))
         import app
         from fastapi.testclient import TestClient
+        app.initialize_application()
 
         query = np.array([1, 0, 0, 0], dtype=np.float32)
 
@@ -261,6 +262,9 @@ def main() -> int:
         }
         REPORT.parent.mkdir(parents=True, exist_ok=True)
         REPORT.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+        client.close()
+        if not app.shutdown_application():
+            raise RuntimeError("isolated application shutdown timed out")
     print("FACE_AUTO_ROUTING_OK", len(checks), "checks", flush=True)
     return 0
 

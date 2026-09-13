@@ -215,6 +215,8 @@ def case_r2_t02_fresh_process_zero_recovery(app, _client, work: Path):
         command,
         cwd=ROOT,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         capture_output=True,
         timeout=60,
         env={**os.environ, "PHOTO_LIBRARY_DATA": str(work)},
@@ -661,9 +663,11 @@ def run_suite(output: Path | None) -> int:
 
     import app
     from fastapi.testclient import TestClient
+    from validation.db_gates import gate_failures
 
     if app.DATA.resolve() != work or app.DATA.resolve() == FORMAL_DATA:
         raise AssertionError(f"unsafe app DATA: {app.DATA}")
+    app.initialize_application()
     client = TestClient(app.app)
     status = client.get("/api/status").json()
     if Path(status["capabilities"]["data_dir"]).resolve() != work:
@@ -716,7 +720,11 @@ def run_suite(output: Path | None) -> int:
     if output:
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(text + "\n", encoding="utf-8")
-    return 0 if all(row["status"] == "PASS" for row in results) else 1
+    failures = gate_failures(results, integrity, foreign_keys)
+    client.close()
+    if not app.shutdown_application():
+        failures.append("application shutdown timed out")
+    return 0 if not failures else 1
 
 
 def main() -> int:

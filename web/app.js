@@ -1,6 +1,17 @@
 const $=s=>document.querySelector(s);
 const $$=s=>[...document.querySelectorAll(s)];
 const state={view:'timeline',q:'',person:'',place:'',dateFrom:'',dateTo:'',offset:0,total:0,items:[],people:[],passersby:[],selected:new Set(),peopleSelected:new Set(),peopleMerging:false,peoplePendingOnly:false,peopleSort:'photos',personLabels:{},selecting:false,detail:null,personId:null,status:null,folder:null,directory:'',sort:'date_desc',maxId:0,folderTarget:'scan',scanRoots:[],scanSubmitting:false,scanStartedThisVisit:false,scanShowCompletedResult:false,scanStatusAt:0,viewGeneration:0,viewAbort:null,folderNav:{generation:0,abort:null,parent:'',cache:{}},placeGeneration:0,placeAbort:null,placeReturn:null,placeMapFilter:null,photoMap:null,groupsGeneration:0,timelineGeneration:0,personOpenToken:0,exclusion:null,thumbRevision:0,peopleStream:{people:{items:[],offset:0,baseOffset:0,total:0,more:true,loading:false,q:'',generation:0},passersby:{items:[],offset:0,baseOffset:0,total:0,more:true,loading:false,q:'',generation:0}}};
+const operationRuntime=window.OurTimeOperationRuntime;
+const entitySessions=operationRuntime.createEntitySessions();
+const queueEntityWrite=operationRuntime.createWriteQueue();
+let entitySession={person:null,quickName:null,photo:null};
+let draftRevision={person:0,quickName:0,photo:new Map()};
+function captureEntityWrite(kind,id,payload,revision){
+ const session=entitySession[kind]&&Number(entitySession[kind].id)===Number(id)
+  ?entitySession[kind]:entitySessions.open(kind,id);
+ entitySession[kind]=session;
+ return operationRuntime.captureEntityWrite(session,payload,revision);
+}
 const titles={all:['全部照片','全部照片'],folders:['文件夹','只看 I 盘。'],people:['人物档案','人物档案'],passersby:['路人','先不识别，以后还能找回来。'],timeline:['全部照片','全部照片'],years:['按年份查看','点某一年，只看那一年。'],places:['按地点','记得那是在哪里。'],objects:['物体','照片里有什么。'],groups:['合影','合影'],favorites:['收藏','收藏的照片'],uncertain:['待确认时间','给记忆一个时间。'],no_place:['待补充地点','记得那是在哪里吗？'],duplicates:['重复副本','一张照片，多个来处。'],screenshots:['截图与小图','日常的片段，也有位置。'],errors:['读取问题','把未完成的部分看清楚。'],missing:['原文件缺失','寻找照片现在的位置。'],scan:['添加照片','添加照片'],excluded:['已排除','留下值得保存的记忆。']};
 const statuses={running:'正在扫描',pausing:'正在暂停',paused:'已暂停',cancelled:'已取消',completed:'已完成',completed_with_errors:'完成，有读取问题',failed:'扫描失败'};
 function setText(sel,value){const el=$(sel); if(el) el.textContent=value;}
@@ -19,8 +30,45 @@ function toast(message,error=false){const el=$('#toast');if(!el)return;el.textCo
 function showNotice(message,error=false){const notice=$('#person-notice');if(notice&&$('#person-dialog')&&$('#person-dialog').open){notice.hidden=false;notice.textContent=message;notice.className='person-notice'+(error?' error':'');}toast(message,error);}
 function hideNotice(){const notice=$('#person-notice');if(notice){notice.hidden=true;notice.textContent='';notice.className='person-notice';}}
 function apiError(value,text,status){const detail=value&&value.detail;if(typeof detail==='string')return detail;if(Array.isArray(detail)){return detail.map(x=>{if(typeof x==='string')return x;const loc=Array.isArray(x&&x.loc)?x.loc:[];if(x&&x.msg==='Field required'&&(loc.includes('target_id')||loc.includes('body')))return '请先选择要合并到的人';return (x&&(x.msg||x.message))||JSON.stringify(x);}).filter(Boolean).join('；');}if(detail)return JSON.stringify(detail);return (text||'').slice(0,180)||('请求失败 '+status);}
-async function api(url,options={}){const headers={'Accept':'application/json',...(options.headers||{})};if(options.body!=null&&!headers['Content-Type'])headers['Content-Type']='application/json';const timeoutMs=options.timeoutMs;const extra={...options};delete extra.timeoutMs;let timer=null;let timedOut=false;if(timeoutMs&&!extra.signal){const controller=new AbortController();extra.signal=controller.signal;timer=setTimeout(()=>{timedOut=true;controller.abort();},timeoutMs);}try{const res=await fetch(url,{...extra,headers});const text=await res.text();let value={};if(text){try{value=JSON.parse(text);}catch(err){throw new Error(res.ok?'服务器返回了无法解析的内容':((text||'').slice(0,180)||('请求失败 '+res.status)));}}if(!res.ok)throw new Error(apiError(value,text,res.status));return value;}catch(err){if(err&&err.name==='AbortError'){if(timedOut)throw new Error('后台响应超时，请稍后刷新');const abortErr=new Error('Aborted');abortErr.name='AbortError';throw abortErr;}throw err;}finally{if(timer)clearTimeout(timer);}}
+function combineAbortSignals(external,timeoutMs){
+ const controller=new AbortController();let timer=null,timedOut=false;
+ const abort=()=>controller.abort(external&&external.reason);
+ if(external){if(external.aborted)abort();else external.addEventListener('abort',abort,{once:true});}
+ if(timeoutMs)timer=setTimeout(()=>{timedOut=true;controller.abort();},timeoutMs);
+ return {signal:controller.signal,timedOut:()=>timedOut,cleanup:()=>{if(timer)clearTimeout(timer);if(external)external.removeEventListener('abort',abort);}};
+}
+async function api(url,options={}){
+ const headers={'Accept':'application/json',...(options.headers||{})};if(options.body!=null&&!headers['Content-Type'])headers['Content-Type']='application/json';
+ const extra={...options};delete extra.timeoutMs;const timeoutMs=Object.prototype.hasOwnProperty.call(options,'timeoutMs')?options.timeoutMs:30000;const scope=combineAbortSignals(extra.signal,timeoutMs);extra.signal=scope.signal;
+ try{
+  const res=await fetch(url,{...extra,headers});const text=await res.text();let value={};
+  if(text){try{value=JSON.parse(text);}catch(parseError){const error=new Error(res.ok?'服务器返回了无法解析的内容':((text||'').slice(0,180)||('请求失败 '+res.status)));error.status=res.status;error.errorCode='invalid_json';throw error;}}
+  if(!res.ok){const error=new Error(apiError(value,text,res.status));error.status=res.status;error.errorCode=value&&value.error_code;error.operationId=value&&value.operation_id;error.response=value;throw error;}
+  return value;
+ }catch(error){
+  if(error&&error.name==='AbortError'){if(scope.timedOut()){const timeoutError=new Error('后台响应超时，请稍后刷新');timeoutError.status=0;timeoutError.errorCode='timeout';throw timeoutError;}const abortError=new Error('Aborted');abortError.name='AbortError';abortError.status=0;abortError.errorCode='aborted';throw abortError;}
+  throw error;
+ }finally{scope.cleanup();}
+}
 function action(fn){return async(...args)=>{try{await fn(...args);}catch(e){if(e&&e.name==='AbortError')return;showNotice(e.message,true);}};}
+async function mergePeopleRequest(source,target){
+ const operationId=operationRuntime.operationId(),headers={'Idempotency-Key':operationId};
+ try{return await operationRequest('/api/people/'+source+'/merge',{method:'POST',headers,body:JSON.stringify({target_id:target,operation_id:operationId})},operationId);}
+ catch(error){
+  if(error.errorCode!=='same_photo_confirmation_required')throw error;
+  if(!confirm('这两个人物在同一张照片中都出现过。确认确实是同一个人并继续合并吗？'))throw new Error('已取消合并');
+  return operationRequest('/api/people/'+source+'/merge',{method:'POST',headers,body:JSON.stringify({target_id:target,operation_id:operationId,confirmation_token:error.response&&error.response.confirmation_token})},operationId);
+ }
+}
+async function operationRequest(url,options,operationId=operationRuntime.operationId()){
+ const headers={...(options&&options.headers||{}),'Idempotency-Key':operationId};
+ try{return await api(url,{...(options||{}),headers});}
+ catch(error){
+  if(error.status&&error.status<500)throw error;
+  try{const receipt=await api('/api/operations/'+encodeURIComponent(operationId),{timeoutMs:5000});receipt.recoveredAfterResponseLoss=true;return receipt;}
+  catch(receiptError){error.operationId=operationId;error.errorCode=error.errorCode||'operation_status_unknown';throw error;}
+ }
+}
 
 function viewPanel(view=state.view){
   if(view==='people')return $('#people-view');
@@ -476,17 +524,18 @@ function patchPersonInStream(id, patch){id=Number(id);const stream=state.peopleS
    dialog.oncancel=e=>{e.preventDefault();finish('cancel');};dialog.onclose=()=>finish('cancel');showDialog('#person-name-conflict-dialog');
   });
  }
- async function mergePersonFromNaming(source,target,match){
-  await api('/api/people/'+source+'/merge',{method:'POST',body:JSON.stringify({target_id:target})});
-  try{
-   state.peopleSelected.delete(Number(source));removePersonFromLocalState(source);
-   await refreshPersonInLocalState(target);
-   if(state.detail&&Array.isArray(state.detail.faces))state.detail.faces.forEach(face=>{if(Number(face.person_id)===Number(source)){face.person_id=Number(target);face.name=match.name;face.alias=match.alias||'';}});
-   if(Number(state.personId)===Number(source)&&$('#person-dialog')?.open)await globalThis['openPerson'](Number(target));else applyNamedPersonToOpenPhoto(Number(target),match.name,match.alias||'');
-   updatePeopleMerge();
-  }catch(e){showNotice('人物已合并，界面刷新未完成，请刷新页面',true);}
-  return {merged:true,target:Number(target)};
- }
+ async function mergePersonFromNaming(source,target,match,session=null){
+  await mergePeopleRequest(source,target);
+   try{
+    state.peopleSelected.delete(Number(source));removePersonFromLocalState(source);
+    await refreshPersonInLocalState(target);
+    if(state.detail&&Array.isArray(state.detail.faces))state.detail.faces.forEach(face=>{if(Number(face.person_id)===Number(source)){face.person_id=Number(target);face.name=match.name;face.alias=match.alias||'';}});
+    updatePeopleMerge();
+    if(session&&!entitySessions.current(session))return {merged:true,target:Number(target),stale:true};
+    if(Number(state.personId)===Number(source)&&$('#person-dialog')?.open)await globalThis['openPerson'](Number(target));else applyNamedPersonToOpenPhoto(Number(target),match.name,match.alias||'');
+   }catch(e){if(!session||entitySessions.current(session))showNotice('人物已合并，界面刷新未完成，请刷新页面',true);}
+   return {merged:true,target:Number(target)};
+  }
 function applyNamedPersonToOpenPhoto(id,name,alias){
  id=Number(id);
  if(!state.detail||!Array.isArray(state.detail.faces))return;
@@ -515,21 +564,23 @@ function applyIgnoredPersonToOpenPhoto(id){
  if(changed)renderOpenPhotoPeople();
  if(state.personDetail&&Number(state.personDetail.id)===id)state.personDetail.ignored=1;
 }
-async function rememberPersonName(id,name,alias){
+async function rememberPersonName(id,name,alias,write=null){
  const peopleScroll=scrollY;
  name=normalizePersonText(name);
  alias=normalizePersonText(alias);
  const matches=await api(personNameMatchesUrl(name,alias,id));
  const exact=(matches.exact||[])[0];
  if(exact){
+  if(write&&!entitySessions.current(write.entitySession))return {cancelled:true,stale:true};
   const choice=await confirmPersonNameConflict(exact);
   if(choice==='cancel')return {cancelled:true};
-  if(choice==='merge')return mergePersonFromNaming(Number(id),Number(exact.id),exact);
- }else if((matches.same_name||[]).length){
+   if(choice==='merge')return mergePersonFromNaming(Number(id),Number(exact.id),exact,write&&write.entitySession);
+ }else if((matches.same_name||[]).length&&(!write||entitySessions.current(write.entitySession))){
   const same=(matches.same_name||[])[0];
   showNotice(`已有同名人物：${personLabel(same)} · ${fmt(same.photo_count||0)} 张照片`);
  }
- await api('/api/people/'+id,{method:'PATCH',body:JSON.stringify({name:name,alias:alias})});
+ await api('/api/people/'+id,{method:'PATCH',headers:write?{'Idempotency-Key':write.operationId}:{},body:JSON.stringify({name:name,alias:alias})});
+ if(write&&!entitySessions.current(write.entitySession))return {saved:true,stale:true};
  let item=patchPersonInStream(id,{name:name,alias:alias,confirmed:1,ignored:0});
  if(!item){
   const data=await api(peopleQuery({limit:1,ids:String(id)}));
@@ -639,10 +690,13 @@ async function togglePendingPeople(){
  if(first)requestAnimationFrame(()=>first.focus({preventScroll:true}));
 }
 async function loadPassersby(viewToken=null){state.peopleStream.passersby.q=($('#passersby-search')?.value||'').trim(); await fetchPeoplePage('passersby',true,viewToken); loadPeopleOptions();}
-async function fillMergeTargets(query, selectedId){
-  const ignored=state.personDetail?.ignored?1:0;
-  const data=await api(peopleQuery({ignored,q:query||'',limit:40,ids:selectedId?String(selectedId):''}));
-  const items=(data.items||[]).filter(p=>p.id!==state.personId);
+async function fillMergeTargets(query, selectedId,session=entitySession.person){
+   const generation=(state.mergeTargetsGeneration||0)+1;state.mergeTargetsGeneration=generation;
+   const sourceId=Number(session&&session.id||state.personId);
+   const ignored=state.personDetail?.ignored?1:0;
+   const data=await api(peopleQuery({ignored,q:query||'',limit:40,ids:selectedId?String(selectedId):''}));
+   if(generation!==state.mergeTargetsGeneration||!entitySessions.current(session)||Number(state.personId)!==sourceId)return;
+   const items=(data.items||[]).filter(p=>p.id!==sourceId);
   const select=$('#merge-target');
   if(!select)return;
   select.innerHTML='<option value="">选择已有的人物…</option>'+items.map(p=>`<option value="${p.id}" ${Number(selectedId)===p.id?'selected':''}>${esc(personLabel(p))} · ${p.photo_count} 张照片</option>`).join('');
@@ -943,7 +997,14 @@ function updateBatch(){$('#batch-bar').hidden=!state.selecting;$('#selected-coun
 function renderOpenPhotoPeople(){const people=$('#detail-people');if(!people||!state.detail||!Array.isArray(state.detail.faces))return;people.innerHTML=state.detail.faces.map(p=>{const label=p.ignored?'路人':(p.alias?((p.name||'待命名 '+p.person_id)+' / '+p.alias):(p.name||'待命名 '+p.person_id));return `<button type="button" data-person="${p.person_id}"><img src="/api/face/${p.id}" alt="">${esc(label)}</button>`;}).join('');}
 async function renderPhoto(id){const ticket=++renderPhoto.ticket;const a=await api('/api/photos/'+id);if(ticket!==renderPhoto.ticket)return false;state.detail=a;$('#exclude-photo').hidden=!a.in_library;$('#restore-photo').hidden=a.in_library||!a.excluded;$('#exclusion-detail-note').textContent=a.in_library?'':a.excluded?'排除原因：'+a.exclude_reason:'此图片受目录排除规则影响，请到“已排除”恢复对应目录。';$('#detail-name').textContent=basename(a.files[0]?.path)||'照片 '+id;$('#original-link').href='/api/original/'+id;$('#detail-facts').innerHTML=`<div class="fact"><span>当前时间</span><p>${esc(a.effective_date||'未知')}<small>${esc(dateSource(a.effective_source)||'无来源')} · ${esc(a.effective_precision||'未知精度')}</small></p></div><div class="fact"><span>原始时间</span><p>${esc(a.captured_at||'未读取到')}<small>${esc(dateSource(a.date_source))}</small></p></div><div class="fact"><span>地点</span><p>${esc(prettyPlace(a.effective_place)||'待补充')}<small>${esc(a.manual_place?'人工补录':a.place_source||'未记录地点')}</small></p></div>${a.latitude!==null?`<div class="fact"><span>定位坐标</span><p>${a.latitude.toFixed(6)}, ${a.longitude.toFixed(6)}</p></div>`:''}<div class="fact"><span>照片信息</span><p>${esc(a.format)} · ${a.width||'?'} × ${a.height||'?'}<small>${esc(a.camera||'未记录设备')} · ${esc(a.category)}</small></p></div>${a.error||a.face_error?`<div class="fact"><span>读取问题</span><p class="tag error">${esc(readableError(a.error||a.face_error))}</p></div><details><summary>原始诊断（技术信息）</summary><pre>${esc(a.error||a.face_error)}</pre></details>`:''}`;renderOpenPhotoPeople();$('#edit-date').value=a.manual_date||'';$('#edit-precision').value=a.manual_precision||'年';$('#edit-place').value=a.manual_place||'';$('#edit-notes').value=a.notes||'';$('#raw-metadata').textContent=JSON.stringify(a.metadata,null,2);$('#file-paths').innerHTML=a.files.map(f=>`<div class="file-row">${esc(f.path)}<br>${fmt(f.size)} 字节 · 修改于 ${esc(f.modified_at)} · ${f.exists_now?'上次扫描存在':'原文件缺失'}${f.excluded?' · 所在目录已排除':''}</div>`).join('');$('#edit-history').innerHTML=a.history.map(e=>`<div class="file-row">${esc(e.created_at)}<br>${esc(e.after_json)}</div>`).join('');showDialog('#detail-dialog');return true;}
 function setPersonSaveState(message='',stateName='saved'){const status=$('#person-save-state');if(!status)return;status.textContent=message;status.hidden=!message;if(message)status.dataset.state=stateName;else delete status.dataset.state;}
-async function openPerson(id){state.personId=id;hideNotice();setPersonSaveState();state.personFaces={generation:0,offset:0,loading:false};const p=await api('/api/people/'+id+'?limit=48');state.personDetail=p;state.personFaces.offset=(p.faces||[]).length;$('#person-eyebrow').textContent=p.ignored?'路人':'熟悉的面孔';$('#person-title').textContent=personLabel(p);const count=p.face_count||(p.faces||[]).length;$('#person-help').hidden=true;$('#person-title').dataset.count=fmt(count);$('#person-name').value=p.ignored?'':((p.name&&p.name!=='待核对')?p.name:'');$('#person-alias').value=p.alias||'';if(!p.ignored&&p.confirmed&&p.name&&p.name!=='待核对')setPersonSaveState('已标记为：'+p.name);$('#ignore-person').textContent=p.ignored?'恢复到人物档案':'标为路人';await fillMergeTargets('', p.suggested_person_id);renderPersonFaces(true);showDialog('#person-dialog');bindPersonFaceScroll();maybeLoadMorePersonFaces();}
+async function openPerson(id){
+ id=Number(id);const session=entitySessions.open('person',id);entitySession.person=session;state.personId=id;hideNotice();setPersonSaveState();state.personFaces={generation:0,offset:0,loading:false};
+ const mergeButton=$('#merge-person'),ignoreButton=$('#ignore-person');if(mergeButton)mergeButton.disabled=false;if(ignoreButton)ignoreButton.disabled=false;
+ const p=await api('/api/people/'+id+'?limit=48');if(!entitySessions.current(session)||Number(state.personId)!==id)return false;
+ state.personDetail=p;state.personFaces.offset=(p.faces||[]).length;$('#person-eyebrow').textContent=p.ignored?'路人':'熟悉的面孔';$('#person-title').textContent=personLabel(p);const count=p.face_count||(p.faces||[]).length;$('#person-help').hidden=true;$('#person-title').dataset.count=fmt(count);$('#person-name').value=p.ignored?'':((p.name&&p.name!=='待核对')?p.name:'');$('#person-alias').value=p.alias||'';draftRevision.person=0;if(!p.ignored&&p.confirmed&&p.name&&p.name!=='待核对')setPersonSaveState('已标记为：'+p.name);$('#ignore-person').textContent=p.ignored?'恢复到人物档案':'标为路人';
+ await fillMergeTargets('',p.suggested_person_id,session);if(!entitySessions.current(session)||Number(state.personId)!==id)return false;
+ renderPersonFaces(true);showDialog('#person-dialog');bindPersonFaceScroll();maybeLoadMorePersonFaces();return true;
+}
 async function openFolder(path=''){const scope=state.folderTarget==='scan'?'scan':'browse';let data;if(scope==='scan'&&!path){const drives=await api('/api/drives');data={path:'',parent:null,scope,items:(drives.roots||[]).map(root=>({name:root,path:root}))};}else data=await api('/api/folders?scope='+scope+'&path='+encodeURIComponent(path));state.folder=data.path;$('#folder-current').textContent=data.path||'本机磁盘';$('#folder-list').innerHTML=(data.parent!==null?`<button data-folder="${esc(data.parent)}">↑ 返回上一级</button>`:'')+data.items.map(x=>`<button data-folder="${esc(x.path)}">▱ ${esc(x.name)}</button>`).join('');$('#use-folder').disabled=!data.path;showDialog('#folder-dialog');}
 document.addEventListener('click',action(async e=>{
  if(e.target.closest('[data-folder-toggle]'))return;
@@ -981,16 +1042,16 @@ function resetQuickMerge(){
   if(select)select.replaceChildren(new Option('选择已有的人物…',''));
 }
 async function loadQuickMergeTargets(){
-  const source=Number(state.quickNameId);if(!source)return;
+  const source=Number(state.quickNameId),session=entitySession.quickName,generation=(state.quickMergeGeneration||0)+1;state.quickMergeGeneration=generation;if(!source)return;
   const query=$('#quick-merge-search')?.value.trim()||'';
   const select=$('#quick-merge-target');if(!select)return;
   select.replaceChildren(new Option('正在读取人物…',''));select.disabled=true;
   try{
     const data=await api(peopleQuery({ignored:0,named:1,q:query,limit:40}));
-    if(source!==Number(state.quickNameId))return;
+    if(generation!==state.quickMergeGeneration||source!==Number(state.quickNameId)||!entitySessions.current(session))return;
     quickMergeTargets=(data.items||[]).filter(p=>Number(p.id)!==source);
     select.replaceChildren(new Option('选择已有的人物…',''),...quickMergeTargets.map(p=>new Option(`${personLabel(p)} · ${p.photo_count||0} 张`,String(p.id))));
-  }finally{if(source===Number(state.quickNameId))select.disabled=false;}
+  }finally{if(generation===state.quickMergeGeneration&&source===Number(state.quickNameId)&&entitySessions.current(session))select.disabled=false;}
 }
 async function openQuickName(id){
  id=Number(id);
@@ -1004,24 +1065,28 @@ async function openQuickName(id){
  }
  if(!person) person=personStubFromOpenPhoto(id);
  if(!person) throw new Error('人物不存在');
- state.quickNameId=id;
+  const session=entitySessions.open('quickName',id);entitySession.quickName=session;state.quickNameId=id;
+  const mergeSubmit=$('#quick-merge-submit'),ignoreSubmit=$('#quick-ignore-person');if(mergeSubmit)mergeSubmit.disabled=false;if(ignoreSubmit)ignoreSubmit.disabled=false;
  state.quickNameIgnored=Boolean(person.ignored);
  resetQuickMerge();
  $('#quick-name-title').textContent=state.quickNameIgnored?'给这位路人命名':(person.name?personLabel(person):'给这个人一个名字');
  $('#quick-name-input').value=state.quickNameIgnored?'':displayNameValue(person.name);
  $('#quick-alias-input').value=person.alias||'';
  const ignoreButton=$('#quick-ignore-person');if(ignoreButton)ignoreButton.hidden=state.quickNameIgnored;
- showDialog('#quick-name-dialog');
+  if(!entitySessions.current(session))return;
+  draftRevision.quickName=0;showDialog('#quick-name-dialog');
  loadQuickMergeTargets().catch(err=>toast(err.message||'人物列表读取失败',true));
  requestAnimationFrame(()=>{$('#quick-name-input').focus();$('#quick-name-input').select();});
 }
 document.addEventListener('click',action(async e=>{const quick=e.target.closest('[data-quick-name]');if(!quick)return;e.preventDefault();e.stopPropagation();await openQuickName(Number(quick.dataset.quickName));}));
 $('#quick-name-dialog')&&$('#quick-name-dialog').addEventListener('click',e=>{if(e.target===$('#quick-name-dialog'))$('#quick-name-dialog').close();});
-$('#quick-name-dialog')&&$('#quick-name-dialog').addEventListener('close',resetQuickMerge);
+$('#quick-name-dialog')&&$('#quick-name-dialog').addEventListener('close',()=>{entitySessions.close('quickName');resetQuickMerge();});
+$('#person-dialog')&&$('#person-dialog').addEventListener('close',()=>entitySessions.close('person'));
+$('#detail-dialog')&&$('#detail-dialog').addEventListener('close',()=>entitySessions.close('photo'));
 $('#quick-merge-search')&&$('#quick-merge-search').addEventListener('input',()=>{clearTimeout(quickMergeTimer);quickMergeTimer=setTimeout(()=>loadQuickMergeTargets().catch(err=>toast(err.message||'人物列表读取失败',true)),250);});
-$('#quick-merge-submit')&&$('#quick-merge-submit').addEventListener('click',action(async()=>{const source=Number(state.quickNameId),target=Number($('#quick-merge-target')?.value);const match=quickMergeTargets.find(p=>Number(p.id)===target);if(!source||!target||!match){toast('请先选择要合并到的人物',true);return;}const button=$('#quick-merge-submit');if(button.disabled)return;button.disabled=true;try{await mergePersonFromNaming(source,target,match);$('#quick-name-dialog').close();}catch(err){toast(err.message||'人物合并失败',true);}finally{button.disabled=false;}}));
-$('#quick-ignore-person')&&$('#quick-ignore-person').addEventListener('click',action(async()=>{const id=Number(state.quickNameId);if(!id)throw new Error('没有要标为路人的人物');const button=$('#quick-ignore-person');if(button.disabled||state.quickNameIgnored)return;button.disabled=true;try{await api('/api/people/'+id+'/ignore',{method:'POST',body:JSON.stringify({ignored:true})});state.quickNameIgnored=true;state.peopleSelected.delete(id);removePersonFromLocalState(id,'people');updatePeopleMerge();applyIgnoredPersonToOpenPhoto(id);$('#quick-name-dialog').close();toast('已标为路人；照片中只保留淡色加号');loadPeopleOptions().catch(()=>{});}finally{button.disabled=false;}}));
-$('#quick-name-form')&&$('#quick-name-form').addEventListener('submit',async e=>{e.preventDefault();const id=state.quickNameId;if(!id){toast('没有要命名的人',true);return;}const submit=e.submitter||$('#quick-name-form button[type="submit"]');if(submit)submit.disabled=true;try{const result=await rememberPersonName(id,$('#quick-name-input').value,$('#quick-alias-input').value);if(result?.cancelled)return;$('#quick-name-dialog').close();if(!result?.merged)toast('人物名字已保存');}catch(err){toast(err.message||'人物名字保存失败',true);}finally{if(submit)submit.disabled=false;}});
+$('#quick-merge-submit')&&$('#quick-merge-submit').addEventListener('click',action(async()=>{const source=Number(state.quickNameId),session=entitySession.quickName,target=Number($('#quick-merge-target')?.value);const match=quickMergeTargets.find(p=>Number(p.id)===target);if(!source||!target||!match){toast('请先选择要合并到的人物',true);return;}const button=$('#quick-merge-submit');if(button.disabled)return;button.disabled=true;try{await mergePersonFromNaming(source,target,match,session);if(entitySessions.current(session)&&Number(state.quickNameId)===source)$('#quick-name-dialog').close();}catch(err){if(entitySessions.current(session))toast(err.message||'人物合并失败',true);}finally{if(entitySessions.current(session))button.disabled=false;}}));
+$('#quick-ignore-person')&&$('#quick-ignore-person').addEventListener('click',action(async()=>{const id=Number(state.quickNameId),session=entitySession.quickName;if(!id)throw new Error('没有要标为路人的人物');const button=$('#quick-ignore-person');if(button.disabled||state.quickNameIgnored)return;button.disabled=true;try{await queueEntityWrite('person',id,()=>api('/api/people/'+id+'/ignore',{method:'POST',body:JSON.stringify({ignored:true})}));state.peopleSelected.delete(id);removePersonFromLocalState(id,'people');updatePeopleMerge();applyIgnoredPersonToOpenPhoto(id);loadPeopleOptions().catch(()=>{});if(entitySessions.current(session)&&Number(state.quickNameId)===id){state.quickNameIgnored=true;$('#quick-name-dialog').close();toast('已标为路人；照片中只保留淡色加号');}}catch(err){if(entitySessions.current(session))throw err;}finally{if(entitySessions.current(session))button.disabled=false;}}));
+$('#quick-name-form')&&$('#quick-name-form').addEventListener('submit',async e=>{e.preventDefault();const id=Number(state.quickNameId);if(!id){toast('没有要命名的人',true);return;}const payload={name:$('#quick-name-input').value,alias:$('#quick-alias-input').value},write=captureEntityWrite('quickName',id,payload,draftRevision.quickName),submit=e.submitter||$('#quick-name-form button[type="submit"]');if(submit)submit.disabled=true;try{const result=await queueEntityWrite('person',id,()=>rememberPersonName(id,write.payload.name,write.payload.alias,write));if(!entitySessions.current(write.entitySession))return;if(result?.cancelled)return;$('#quick-name-dialog').close();if(!result?.merged)toast('人物名字已保存');}catch(err){if(entitySessions.current(write.entitySession))toast(err.message||'人物名字保存失败',true);}finally{if(submit&&entitySessions.current(write.entitySession))submit.disabled=false;}});
 
 $('#person-dialog').addEventListener('click',async e=>{
   if(e.target===$('#person-dialog')){$('#person-dialog').close();return;}
@@ -1033,15 +1098,18 @@ $('#person-dialog').addEventListener('click',async e=>{
   const fid=ignoreFace.dataset.ignoreFace;
   const sourceId=Number(p.id);
   const sourceKind=p.ignored?'passersby':'people';
+  const session=entitySession.person;
+  const write=captureEntityWrite('person',sourceId,{face_id:Number(fid),ignored},0);
   ignoreFace.disabled=true;
   try{
-    await api('/api/faces/'+fid+'/ignore',{method:'POST',body:JSON.stringify({ignored})});
-    await removePersonFaceLocally(fid);
+    await queueEntityWrite('face',fid,()=>operationRequest('/api/faces/'+fid+'/ignore',{method:'POST',body:JSON.stringify({ignored})},write.operationId));
     const remaining=await refreshPersonInLocalState(sourceId,sourceKind);
+    if(!entitySessions.current(session)||Number(state.personId)!==sourceId)return;
+    await removePersonFaceLocally(fid);
     if(!remaining || !(state.personDetail&&state.personDetail.face_count)) $('#person-dialog').close();
-  }catch(err){ toast(err.message||'这张没能标为路人', true); }
-  finally{ ignoreFace.disabled=false; }
-});
+  }catch(err){ if(entitySessions.current(session))toast(err.message||'这张没能标为路人', true); }
+  finally{ if(entitySessions.current(session))ignoreFace.disabled=false; }
+ });
 $('#search').addEventListener('input',()=>{clearTimeout(state.searchTimer);state.searchTimer=setTimeout(action(async()=>{state.q=$('#search').value.trim();state.offset=0;await loadPhotos();}),250);});
 $('#place-detail-back').addEventListener('click',action(()=>returnToPlacesMap()));
 $('#place-detail-edit').addEventListener('click',action(()=>openPlaceDetailEditor()));
@@ -1085,7 +1153,7 @@ $('#clear-selection').addEventListener('click',action(async()=>{state.selected.c
 $('#batch-edit').addEventListener('click',()=>{$('#batch-description').textContent=`将补录 ${state.selected.size} 张照片。原始元数据会完整保留。`;$('#batch-form').reset();showDialog('#batch-dialog');});
 $('#batch-form').addEventListener('submit',action(async e=>{e.preventDefault();const body={ids:[...state.selected]};if($('#batch-date-enabled').checked){body.manual_date=$('#batch-date').value;body.manual_precision=$('#batch-precision').value;}if($('#batch-place-enabled').checked)body.manual_place=$('#batch-place').value;if($('#batch-notes-enabled').checked)body.notes=$('#batch-notes').value;await api('/api/photos',{method:'PATCH',body:JSON.stringify(body)});$('#batch-dialog').close();toast('补录已保存，原照片未修改');await refreshStatus();await loadPhotos();}));
 
-$('#detail-form').addEventListener('submit',action(async e=>{e.preventDefault();await api('/api/photos',{method:'PATCH',body:JSON.stringify({ids:[state.detail.id],manual_date:$('#edit-date').value,manual_precision:$('#edit-precision').value,manual_place:$('#edit-place').value,notes:$('#edit-notes').value})});viewer.drafts.delete(state.detail.id);toast('补录已保存，原始信息仍然保留');await openPhoto(state.detail.id);await refreshStatus();await loadPhotos();}));
+$('#detail-form').addEventListener('submit',action(async e=>{e.preventDefault();const id=Number(state.detail&&state.detail.id),payload={ids:[id],manual_date:$('#edit-date').value,manual_precision:$('#edit-precision').value,manual_place:$('#edit-place').value,notes:$('#edit-notes').value},revision=draftRevision.photo.get(id)||0,write=captureEntityWrite('photo',id,payload,revision);await queueEntityWrite('photo',id,()=>api('/api/photos',{method:'PATCH',headers:{'Idempotency-Key':write.operationId},body:JSON.stringify(write.payload)}));const submittedRevisionIsLatest=(draftRevision.photo.get(id)||0)===write.draftRevision;if(submittedRevisionIsLatest)viewer.drafts.delete(id);if(submittedRevisionIsLatest&&entitySessions.current(write.entitySession)&&Number(state.detail&&state.detail.id)===id){toast('补录已保存，原始信息仍然保留');await openPhoto(id);await refreshStatus();await loadPhotos();}}));
 $('#reveal-button').addEventListener('click',action(async()=>{await api('/api/reveal/'+state.detail.id,{method:'POST'});}));
 $('#all-drives').addEventListener('click',action(async()=>{const d=await api('/api/drives');d.roots.filter(p=>!/^c:/i.test(p)).forEach(addScanRoot);toast('已添加本机磁盘；点击“开始扫描”后才会运行');}));
 $('#choose-folder').addEventListener('click',action(()=>{state.folderTarget='scan';return openFolder();}));$$('#scan-folder-picker,#scan-add-folder').forEach(button=>button?.addEventListener('click',action(()=>{state.folderTarget='scan';return openFolder();})));$('#use-folder').addEventListener('click',()=>{if(state.folderTarget==='home-query'){const path=state.folder||'';window.__ourTimeHomeFolderResolve?.(path);$('#folder-dialog').close();return;}if(state.folderTarget==='browse'){$('#directory-filter').value=state.folder;$('#folder-dialog').close();$('#apply-directory').click();return;}if(state.folderTarget==='exclude'){$('#exclude-root').value=state.folder;$('#folder-dialog').close();return;}addScanRoot(state.folder);$('#folder-dialog').close();});document.addEventListener('click',e=>{const remove=e.target.closest('[data-remove-scan-root]');if(remove){e.preventDefault();removeScanRoot(remove.dataset.removeScanRoot);}});
@@ -1093,15 +1161,16 @@ $('#choose-folder').addEventListener('click',action(()=>{state.folderTarget='sca
 $('#probe-objects').addEventListener('click',action(async()=>{const status=$('#object-probe-status'); if(status) status.textContent='正在试扫物体标签…'; const data=await api('/api/objects/probe',{method:'POST',body:JSON.stringify({limit:24})}); const ok=(data.items||[]).filter(x=>x.tags&&x.tags.length); if(status) status.textContent='试扫 '+data.count+' 张，约 '+data.per_image+' 秒/张 · '+data.runtime; toast('物体试扫完成：'+ok.length+' 张打上标签');}));
 
 $('#start-objects')&&$('#start-objects').addEventListener('click',action(async()=>{await api('/api/objects/scan',{method:'POST',body:JSON.stringify({limit:200})});toast('object scan started');await loadObjects();}));
-$('#start-scan').addEventListener('click',action(async()=>{const roots=[...(state.scanRoots||[])];if(!roots.length)throw new Error('请先选择照片文件夹');if(state.scanSubmitting)return;const previousJobId=state.status?.job?.id;state.scanStartedThisVisit=true;state.scanShowCompletedResult=false;state.scanSubmitting=true;renderScanRoots();try{await api('/api/scan',{method:'POST',body:JSON.stringify({roots,with_faces:true,include_system:false,workers:1})});state.scanRoots=[];toast('开始添加照片，已处理过的会自动跳过');const status=await refreshStatus();if(status.job&&status.job.id!==previousJobId&&['completed','completed_with_errors','failed'].includes(status.job.status)){state.scanShowCompletedResult=true;renderScanStatus(status);} }finally{state.scanSubmitting=false;renderScanRoots();}}));$('#scan-view-all').addEventListener('click',action(()=>setView('timeline')));$('#scan-view-errors')?.addEventListener('click',action(()=>setView('errors')));
-['#person-name','#person-alias'].forEach(selector=>$(selector)?.addEventListener('input',()=>setPersonSaveState()));
-$('#person-form').addEventListener('submit',async e=>{e.preventDefault();const pid=state.personId;const submit=e.submitter||$('#person-form button[type="submit"]');const name=normalizePersonText($('#person-name').value);if(submit)submit.disabled=true;setPersonSaveState('正在保存…','saving');try{const result=await rememberPersonName(pid,name,$('#person-alias').value);if(result?.cancelled){setPersonSaveState();return;}if(!result?.merged){setPersonSaveState('已标记为：'+name);toast('人物名字已保存');if($('#person-dialog').open){const item=((state.peopleStream.people||{}).items||[]).find(p=>p.id===Number(pid));if(item){$('#person-title').textContent=personLabel(item);state.personDetail=Object.assign({},state.personDetail,item);}}}}catch(err){setPersonSaveState('未保存','error');showNotice(err.message||'人物名字保存失败',true);}finally{if(submit)submit.disabled=false;}});
-$('#merge-person').addEventListener('click',async e=>{e.preventDefault();e.stopPropagation();const button=$('#merge-person');const target=Number($('#merge-target').value);if(!target){showNotice('请先在下拉框里选择要合并到的人',true);return;}if(target===Number(state.personId)){showNotice('不能合并到自己',true);return;}const source=Number(state.personId);if(button?.disabled)return;button.disabled=true;try{await api('/api/people/'+source+'/merge',{method:'POST',body:JSON.stringify({target_id:target})});try{state.peopleSelected.delete(source);removePersonFromLocalState(source);await refreshPersonInLocalState(target);await openPerson(target);showNotice('人物分组已合并');}catch(uiError){showNotice('人物已合并，界面刷新未完成，请刷新页面',true);}}catch(err){showNotice(err.message||'人物合并失败',true);}finally{button.disabled=false;}});
+$('#start-scan').addEventListener('click',action(async()=>{const roots=[...(state.scanRoots||[])];if(!roots.length)throw new Error('请先选择照片文件夹');if(state.scanSubmitting)return;const previousJobId=state.status?.job?.id;state.scanStartedThisVisit=true;state.scanShowCompletedResult=false;state.scanSubmitting=true;renderScanRoots();const operationId=operationRuntime.operationId();try{await operationRequest('/api/scan',{method:'POST',body:JSON.stringify({roots,with_faces:true,include_system:false,workers:1,operation_id:operationId})},operationId);state.scanRoots=[];toast('开始添加照片，已处理过的会自动跳过');const status=await refreshStatus();if(status.job&&status.job.id!==previousJobId&&['completed','completed_with_errors','failed'].includes(status.job.status)){state.scanShowCompletedResult=true;renderScanStatus(status);} }finally{state.scanSubmitting=false;renderScanRoots();}}));$('#scan-view-all').addEventListener('click',action(()=>setView('timeline')));$('#scan-view-errors')?.addEventListener('click',action(()=>setView('errors')));
+['#person-name','#person-alias'].forEach(selector=>$(selector)?.addEventListener('input',()=>{draftRevision.person++;setPersonSaveState();}));
+['#quick-name-input','#quick-alias-input'].forEach(selector=>$(selector)?.addEventListener('input',()=>{draftRevision.quickName++;}));
+$('#person-form').addEventListener('submit',async e=>{e.preventDefault();const pid=Number(state.personId),payload={name:normalizePersonText($('#person-name').value),alias:$('#person-alias').value},write=captureEntityWrite('person',pid,payload,draftRevision.person),submit=e.submitter||$('#person-form button[type="submit"]');if(submit)submit.disabled=true;setPersonSaveState('正在保存…','saving');try{const result=await queueEntityWrite('person',pid,()=>rememberPersonName(pid,write.payload.name,write.payload.alias,write));if(!entitySessions.current(write.entitySession))return;if(result?.cancelled){setPersonSaveState();return;}if(!result?.merged&&draftRevision.person===write.draftRevision){setPersonSaveState('已标记为：'+write.payload.name);toast('人物名字已保存');if($('#person-dialog').open){const item=((state.peopleStream.people||{}).items||[]).find(p=>p.id===pid);if(item){$('#person-title').textContent=personLabel(item);state.personDetail=Object.assign({},state.personDetail,item);}}}}catch(err){if(entitySessions.current(write.entitySession)){setPersonSaveState('未保存','error');showNotice(err.message||'人物名字保存失败',true);}}finally{if(submit&&entitySessions.current(write.entitySession))submit.disabled=false;}});
+$('#merge-person').addEventListener('click',async e=>{e.preventDefault();e.stopPropagation();const button=$('#merge-person');const target=Number($('#merge-target').value);if(!target){showNotice('请先在下拉框里选择要合并到的人',true);return;}if(target===Number(state.personId)){showNotice('不能合并到自己',true);return;}const source=Number(state.personId),session=entitySession.person;if(button?.disabled)return;button.disabled=true;try{await mergePeopleRequest(source,target);try{state.peopleSelected.delete(source);removePersonFromLocalState(source);await refreshPersonInLocalState(target);if(entitySessions.current(session)&&Number(state.personId)===source){await openPerson(target);showNotice('人物分组已合并');}}catch(uiError){if(entitySessions.current(session))showNotice('人物已合并，界面刷新未完成，请刷新页面',true);}}catch(err){if(entitySessions.current(session))showNotice(err.message||'人物合并失败',true);}finally{if(entitySessions.current(session))button.disabled=false;}});
 $('#show-person-photos').addEventListener('click',action(async()=>{$('#person-dialog').close();const person=state.personDetail||{id:state.personId};rememberPersonLabel(person);state.person=String(state.personId);$('#person-filter').value=state.person;await setView('timeline');}));
-$('#ignore-person').addEventListener('click',action(async()=>{const ignored=!(state.personDetail&&state.personDetail.ignored);const id=Number(state.personId);const sourceKind=state.personDetail&&state.personDetail.ignored?'passersby':'people';await api('/api/people/'+id+'/ignore',{method:'POST',body:JSON.stringify({ignored})});toast(ignored?'这组已标为路人，不再参与识别':'已恢复到人物档案');$('#person-dialog').close();removePersonFromLocalState(id,sourceKind);const targetKind=ignored?'passersby':'people';const moved=await fetchPersonById(id,targetKind);if(moved)appendPersonToLocalState(moved,targetKind);state.peopleSelected.delete(id);updatePeopleMerge();}));
+$('#ignore-person').addEventListener('click',action(async()=>{const ignored=!(state.personDetail&&state.personDetail.ignored);const id=Number(state.personId),session=entitySession.person;const sourceKind=state.personDetail&&state.personDetail.ignored?'passersby':'people';try{await queueEntityWrite('person',id,()=>api('/api/people/'+id+'/ignore',{method:'POST',body:JSON.stringify({ignored})}));removePersonFromLocalState(id,sourceKind);const targetKind=ignored?'passersby':'people';const moved=await fetchPersonById(id,targetKind);if(moved)appendPersonToLocalState(moved,targetKind);state.peopleSelected.delete(id);updatePeopleMerge();if(entitySessions.current(session)&&Number(state.personId)===id){toast(ignored?'这组已标为路人，不再参与识别':'已恢复到人物档案');$('#person-dialog').close();}}catch(err){if(entitySessions.current(session))throw err;}}));
 $('#people-merge-toggle')?.addEventListener('click',()=>setPeopleMerging(!state.peopleMerging));
 $('#clear-people-selection').addEventListener('click',()=>setPeopleMerging(false));
-$('#merge-selected-people').addEventListener('click',async()=>{const button=$('#merge-selected-people');if(button?.disabled)return;const ids=[...state.peopleSelected].map(Number);if(ids.length<2){showNotice('请至少选择两组同一人',true);return;}if(ids.length>100){showNotice('一次最多选择 100 个人物',true);return;}button.disabled=true;const done=[];const pending=ids.slice();let backendError=null;let target=null;try{target=await resolveMergeTarget(ids);if(!ids.includes(Number(target.id)))throw new Error('合并目标必须属于当前选择');for(const id of ids.filter(x=>x!==Number(target.id))){await api('/api/people/'+id+'/merge',{method:'POST',body:JSON.stringify({target_id:target.id})});done.push(id);pending.splice(pending.indexOf(id),1);}}catch(err){backendError=err;}if(backendError){const leftover=pending.filter(id=>!done.includes(id));const msg=done.length?('已合并 '+done.length+' 组，未完成：'+leftover.join('、')+'。'+backendError.message):backendError.message;showNotice(msg,true);toast(msg,true);}else if(done.length){toast('已合并到 '+personLabel(target));}if(done.length){try{for(const id of done){state.peopleSelected.delete(id);removePersonFromLocalState(id);}await refreshPersonInLocalState(target.id);setPeopleMerging(false);}catch(uiError){showNotice('人物已合并，界面刷新未完成，请刷新页面',true);}}button.disabled=false;});
+$('#merge-selected-people').addEventListener('click',async()=>{const button=$('#merge-selected-people');if(button?.disabled)return;const ids=[...state.peopleSelected].map(Number);if(ids.length<2){showNotice('请至少选择两组同一人',true);return;}if(ids.length>100){showNotice('一次最多选择 100 个人物',true);return;}button.disabled=true;const done=[];const pending=ids.slice();let backendError=null;let target=null;try{target=await resolveMergeTarget(ids);if(!ids.includes(Number(target.id)))throw new Error('合并目标必须属于当前选择');for(const id of ids.filter(x=>x!==Number(target.id))){await mergePeopleRequest(id,target.id);done.push(id);pending.splice(pending.indexOf(id),1);}}catch(err){backendError=err;}if(backendError){const leftover=pending.filter(id=>!done.includes(id));const msg=done.length?('已合并 '+done.length+' 组，未完成：'+leftover.join('、')+'。'+backendError.message):backendError.message;showNotice(msg,true);toast(msg,true);}else if(done.length){toast('已合并到 '+personLabel(target));}if(done.length){try{for(const id of done){state.peopleSelected.delete(id);removePersonFromLocalState(id);}await refreshPersonInLocalState(target.id);setPeopleMerging(false);}catch(uiError){showNotice('人物已合并，界面刷新未完成，请刷新页面',true);}}button.disabled=false;});
 $('#backup-button').addEventListener('click',action(async()=>{const data=await api('/api/backup',{method:'POST'});toast('备份已保存：'+data.path);}));
 document.addEventListener('click',action(async e=>{
  const groupExcludeAction=e.target.closest('[data-group-exclude-arm],[data-group-exclude-cancel],[data-group-exclude-confirm]');
@@ -1124,7 +1193,7 @@ document.addEventListener('click',action(async e=>{
   groupExcludeAction.disabled=true;
   try{
    const reason=String(state.view||'').startsWith('group:')?'在合影页排除显示':'在全部照片页排除显示';
-   await api('/api/exclusions/assets',{method:'POST',body:JSON.stringify({ids:[id],excluded:true,reason,display_only:true})});
+   const operationId=operationRuntime.operationId();await operationRequest('/api/exclusions/assets',{method:'POST',body:JSON.stringify({ids:[id],excluded:true,reason,display_only:true,operation_id:operationId})},operationId);
    card.classList.add('group-exclude-removing');
    toast('已排除显示，原照片和识别信息均保留');
    await streamRemovePhoto(id,Number(card.dataset.position));
@@ -1193,17 +1262,18 @@ document.addEventListener('click',action(async e=>{
  const coverButton=e.target.closest('[data-set-cover]');
  if(coverButton){
   e.preventDefault();e.stopPropagation();
-  const faceId=Number(coverButton.dataset.setCover),personId=Number(state.personId);
+  const faceId=Number(coverButton.dataset.setCover),personId=Number(state.personId),session=entitySession.person;
   if(!faceId||!personId)return;
   coverButton.disabled=true;
   try{
-   await api('/api/people/'+personId+'/cover',{method:'PUT',body:JSON.stringify({face_id:faceId})});
+   await queueEntityWrite('person',personId,()=>api('/api/people/'+personId+'/cover',{method:'PUT',body:JSON.stringify({face_id:faceId})}));
+   const item=patchPersonInStream(personId,{cover:faceId,cover_face_id:faceId});
+   if(item)renderPersonCard(item);
+   if(!entitySessions.current(session)||Number(state.personId)!==personId)return;
    if(state.personDetail&&Number(state.personDetail.id)===personId){
     state.personDetail.cover=faceId;
     state.personDetail.cover_face_id=faceId;
    }
-   const item=patchPersonInStream(personId,{cover:faceId,cover_face_id:faceId});
-   if(item)renderPersonCard(item);
    $$('#person-faces [data-set-cover]').forEach(button=>{
     const selected=Number(button.dataset.setCover)===faceId;
     button.classList.toggle('is-cover',selected);
@@ -1212,7 +1282,8 @@ document.addEventListener('click',action(async e=>{
     button.title=selected?'当前首页头像':'设为首页头像';
    });
    toast('首页头像已选定');
-  }finally{coverButton.disabled=false;}
+  }catch(err){if(entitySessions.current(session))throw err;}
+  finally{if(entitySessions.current(session))coverButton.disabled=false;}
   return;
  }
  const person=e.target.closest('[data-person]');
@@ -1225,16 +1296,19 @@ document.addEventListener('click',action(async e=>{
  }
  const split=e.target.closest('[data-split]');
  if(split){
-  const sourceId=Number(state.personId);
-  const result=await api('/api/faces/'+split.dataset.split+'/split',{method:'POST'});
-  toast('已移到新的待命名分组');
-  await removePersonFaceLocally(split.dataset.split);
-  const remaining=await refreshPersonInLocalState(sourceId);
-  if(!remaining || !(state.personDetail&&state.personDetail.face_count))$('#person-dialog').close();
-  if(result&&result.person_id&&state.view==='people'){
-   const created=await fetchPersonById(result.person_id);
-   if(created)appendPersonToLocalState(created);
-  }
+  const sourceId=Number(state.personId),faceId=Number(split.dataset.split),session=entitySession.person,write=captureEntityWrite('person',sourceId,{face_id:faceId},0);
+  try{
+   const result=await queueEntityWrite('face',faceId,()=>operationRequest('/api/faces/'+faceId+'/split',{method:'POST'},write.operationId));
+   const remaining=await refreshPersonInLocalState(sourceId);
+   if(result&&result.person_id&&state.view==='people'){
+    const created=await fetchPersonById(result.person_id);
+    if(created)appendPersonToLocalState(created);
+   }
+   if(!entitySessions.current(session)||Number(state.personId)!==sourceId)return;
+   toast('已移到新的待命名分组');
+   await removePersonFaceLocally(faceId);
+   if(!remaining || !(state.personDetail&&state.personDetail.face_count))$('#person-dialog').close();
+  }catch(err){if(entitySessions.current(session))throw err;}
  }
  const year=e.target.closest('[data-year]');
  if(year){state.sort='date_desc';$('#sort-order').value=state.sort;await setView('year:'+year.dataset.year);return;}
@@ -1264,7 +1338,7 @@ async function exclusionDialog(ids=null,path=null){
  showDialog('#exclude-dialog');
 }
 async function restoreAssets(ids){
- const result=await api('/api/exclusions/assets',{method:'POST',body:JSON.stringify({ids,excluded:false})});
+ const operationId=operationRuntime.operationId(),result=await operationRequest('/api/exclusions/assets',{method:'POST',body:JSON.stringify({ids,excluded:false,operation_id:operationId})},operationId);
  toast(result.message);state.thumbRevision++;state.selected.clear();updateBatch();await refreshStatus();await loadPhotos();
  if($('#detail-dialog').open)await openPhoto(state.detail.id);
 }
@@ -1281,7 +1355,10 @@ $('#with-faces').addEventListener('change',()=>{$('#scan-workers').disabled=$('#
 $('#confirm-exclusion').addEventListener('click',action(async()=>{
  const button=$('#confirm-exclusion');button.disabled=true;
  try {const body={...state.exclusion};if(body.ids)body.reason=$('#exclude-reason').value||'手工排除';
-  const result=await api(body.ids?'/api/exclusions/assets':'/api/exclusions/roots',{method:'POST',body:JSON.stringify(body)});
+  const operationId=operationRuntime.operationId();if(body.ids)body.operation_id=operationId;
+  const result=body.ids
+   ?await operationRequest('/api/exclusions/assets',{method:'POST',body:JSON.stringify(body)},operationId)
+   :await api('/api/exclusions/roots',{method:'POST',body:JSON.stringify(body)});
   $('#exclude-dialog').close();if($('#detail-dialog').open)$('#detail-dialog').close();
   state.thumbRevision++;let locallyRemoved=false;
   if(body.ids&&body.ids.length){try{locallyRemoved=await streamRemovePhotos(body.ids);}catch(error){locallyRemoved=false;}}
@@ -1291,10 +1368,19 @@ $('#confirm-exclusion').addEventListener('click',action(async()=>{
 }));
 document.addEventListener('click',action(async e=>{const button=e.target.closest('[data-restore-root]');if(!button)return;const result=await api('/api/exclusions/roots/'+button.dataset.restoreRoot,{method:'DELETE'});state.thumbRevision++;toast(result.message);await loadExclusionRules();await refreshStatus();await loadPhotos();}));
 
-window.__ourTimeApp={state,api,peopleQuery,personLabel,prettyPlace,showDialog,openFolder,exclusionDialog,restoreAssets,refreshStatus,setView,openAddPhotos,addScanRoot,renderScanRoots,syncScanActivity};
+window.__ourTimeApp={state,api,operationRequest,peopleQuery,personLabel,prettyPlace,showDialog,openFolder,exclusionDialog,restoreAssets,refreshStatus,setView,openAddPhotos,addScanRoot,renderScanRoots,syncScanActivity,captureEntityWrite,queueEntityWrite,entitySessions,entitySession,draftRevision};
 
 setInterval(()=>{fetch('/',{cache:'no-store'}).then(res=>{if(res.ok)state.connectionNotice=false;else throw new Error('offline');}).catch(()=>{if(!state.connectionNotice){toast('后台暂时繁忙，已加载的照片仍可继续看；完整状态请稍后刷新',true);state.connectionNotice=true;}});refreshStatus().catch(()=>{});},8000);
 setInterval(syncScanActivity,1000);
 
 document.querySelectorAll("dialog").forEach(el=>{if(el.open)el.close();});
+const renderPhotoImplementation=renderPhoto;
+renderPhoto=async function(id){
+ const session=entitySessions.open('photo',Number(id));entitySession.photo=session;
+ const rendered=await renderPhotoImplementation(id);
+ if(!rendered||!entitySessions.current(session))return false;
+ const message=state.detail&&state.detail.face_status_message;
+ if(message){const facts=$('#detail-facts');if(facts)facts.insertAdjacentHTML('beforeend',`<div class="fact"><span>人脸识别状态</span><p>${esc(message)}</p></div>`);}
+ return true;
+};
 renderPhoto.ticket=0;

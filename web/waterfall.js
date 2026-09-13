@@ -220,9 +220,10 @@ function streamPaint(){
  const knownEmpty=ready&&Number(stats.assets||0)===0;
  const showEmpty=knownEmpty&&state.view==='timeline'&&!state.q&&!state.person&&!state.directory&&!state.place&&!state.dateFrom&&!state.dateTo&&!loading&&!waterfall.total;
  const showFavoritesEmpty=state.view==='favorites'&&!state.q&&!state.person&&!state.directory&&!state.place&&!state.dateFrom&&!state.dateTo&&!loading&&!waterfall.total;
+ const showNoResults=!showEmpty&&!loading&&!waterfall.error&&!waterfall.total;
  $('#empty').hidden=!showEmpty;
  $('#no-results').textContent=showFavoritesEmpty?'还没有收藏照片。打开一张喜欢的照片，点左下角“收藏”。':'没有符合条件的照片。可以换个关键词，或调整筛选。';
- $('#no-results').hidden=!showFavoritesEmpty;
+ $('#no-results').hidden=!showNoResults;
  if(!ready||loading)$('#stream-status').textContent='正在加载照片';
  $('#stream-footer').hidden=showEmpty?true:(waterfall.total===0&&!waterfall.error&&!loading);
  $('#stream-top').hidden=scrollY<1200;
@@ -230,9 +231,11 @@ function streamPaint(){
   streamPage(waterfall.shapes.length);
  }
 }
-async function loadPhotos(){
+async function loadPhotos(options={}){
  const oldTop=$('#photo-grid').getBoundingClientRect().top;
  waterfall.abort?.abort();waterfall.abort=new AbortController();waterfall.generation++;
+ const external=options&&options.signal,abortFromExternal=()=>waterfall.abort?.abort();
+ if(external){if(external.aborted)abortFromExternal();else external.addEventListener('abort',abortFromExternal,{once:true});}
  const ticket=waterfall.generation;
  const previous={
   cache:waterfall.cache,
@@ -252,9 +255,9 @@ async function loadPhotos(){
  if(typeof syncGroupResultCount==='function') syncGroupResultCount(state.view,{clear:true});
  if(oldTop<0&&!$('#detail-dialog').open)scrollTo({top:scrollY+oldTop-24,behavior:'instant'});
  const first=await streamPage(0);
- if(ticket!==waterfall.generation)return;
+ if(ticket!==waterfall.generation){if(external)external.removeEventListener('abort',abortFromExternal);return false;}
  const g=$('#photo-grid');
- if(!g)return;
+ if(!g){if(external)external.removeEventListener('abort',abortFromExternal);return false;}
  if(first){
   g.replaceChildren();
   g.style.height='0px';
@@ -273,6 +276,8 @@ async function loadPhotos(){
   g.classList.remove('is-updating');
   g.style.minHeight='';
  }
+ if(external)external.removeEventListener('abort',abortFromExternal);
+ return Boolean(first);
 }
 window.addEventListener('scroll',streamScroll,{passive:true});
 new ResizeObserver(()=>streamSchedule()).observe($('#photo-grid'));

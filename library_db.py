@@ -23,10 +23,11 @@ a.id, a.sha256, a.width, a.height, a.format, a.captured_at, a.date_source, a.dat
 a.latitude, a.longitude, a.place, a.place_source, a.camera, a.category, a.error,
 a.manual_date, a.manual_precision, a.manual_place, a.notes, a.face_state, a.face_error,
 a.created_at, a.excluded, a.exclude_reason, a.favorite, a.object_state, a.object_error,
-a.derivative_policy
+    a.derivative_policy, a.derivative_operation_id
 """.strip()
 
 B01_SCHEMA_MIGRATION = "b01_visibility_and_face_index_v1"
+M1_SCHEMA_MIGRATION = "m1_operation_safety_v1"
 
 
 def now():
@@ -116,6 +117,7 @@ def init_schema(conn):
                 "TEXT NOT NULL DEFAULT 'preserve' "
                 "CHECK(derivative_policy IN ('preserve','purge'))"
             ),
+            'derivative_operation_id': 'TEXT',
         },
         'files': {'excluded': 'INTEGER NOT NULL DEFAULT 0'},
         'jobs': {
@@ -167,6 +169,30 @@ def init_schema(conn):
             score REAL NOT NULL,
             PRIMARY KEY(asset_id, label)
         );
+        CREATE TABLE IF NOT EXISTS operations (
+            operation_id TEXT PRIMARY KEY,
+            kind TEXT NOT NULL,
+            request_hash TEXT NOT NULL,
+            status TEXT NOT NULL,
+            state_committed INTEGER NOT NULL DEFAULT 0,
+            cleanup_status TEXT NOT NULL DEFAULT 'not_applicable',
+            request_json TEXT NOT NULL,
+            result_json TEXT,
+            undo_json TEXT,
+            error_code TEXT,
+            error_detail TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS operation_items (
+            operation_id TEXT NOT NULL REFERENCES operations(operation_id) ON DELETE CASCADE,
+            item_kind TEXT NOT NULL,
+            item_id TEXT NOT NULL,
+            status TEXT NOT NULL,
+            detail TEXT,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY(operation_id,item_kind,item_id)
+        );
     ''')
     conn.executescript('''
         CREATE TRIGGER IF NOT EXISTS face_index_faces_insert
@@ -207,6 +233,10 @@ def init_schema(conn):
         "INSERT OR IGNORE INTO schema_migrations(name,applied_at) VALUES (?,?)",
         (B01_SCHEMA_MIGRATION, now()),
     )
+    conn.execute(
+        "INSERT OR IGNORE INTO schema_migrations(name,applied_at) VALUES (?,?)",
+        (M1_SCHEMA_MIGRATION, now()),
+    )
     conn.execute('CREATE INDEX IF NOT EXISTS object_tags_label ON object_tags(label, score DESC)')
     existing_assets = {r[1] for r in conn.execute('PRAGMA table_info(assets)')}
     for name, declaration in {
@@ -215,8 +245,13 @@ def init_schema(conn):
     }.items():
         if name not in existing_assets:
             conn.execute(f'ALTER TABLE assets ADD COLUMN {name} {declaration}')
+
+
+def recover_interrupted_jobs(conn):
+    """Recover stale jobs only after the process owns this data directory."""
     conn.execute(
-        "UPDATE jobs SET status='paused', message='上次运行中断，可继续扫描' WHERE status IN ('running','pausing')"
+        "UPDATE jobs SET status='paused', message='上次运行中断，可继续扫描' "
+        "WHERE status IN ('running','pausing')"
     )
 
 

@@ -144,6 +144,13 @@ function initialFaceStyle(){
   }
   return style;
 }
+function viewerCaptureEntityWrite(kind,id,payload,revision){
+  return window.__ourTimeApp.captureEntityWrite(kind,id,payload,revision);
+}
+function viewerWriteCurrent(write){
+  return window.__ourTimeApp.entitySessions.current(write.entitySession)
+    && Number(state.detail&&state.detail.id)===Number(write.entityId);
+}
 const viewer={
   ids:[],index:0,target:0,offset:0,total:0,context:null,generation:0,busy:false,
   timer:null,playing:false,scale:1,fit:true,loader:null,drafts:new Map(),window:200,
@@ -425,29 +432,40 @@ function buildFaceActionPopover(){
     e.preventDefault();
     const faceId=Number(pop.dataset.faceId),face=(state.detail?.faces||[]).find(item=>Number(item.id)===faceId);if(!face)return;
     const name=$('#face-action-name-input').value.trim();if(!name)throw new Error('请输入姓名');
+    const personId=Number(face.person_id),write=viewerCaptureEntityWrite('photo',Number(state.detail.id),{face_id:faceId,name,alias:String(face.alias||'')},0);
     const save=e.submitter||$('#face-action-rename button[type="submit"]');save.disabled=true;
     try{
-      const result=await rememberPersonName(Number(face.person_id),name,String(face.alias||''));
+      const result=await window.__ourTimeApp.queueEntityWrite('person',personId,()=>rememberPersonName(personId,write.payload.name,write.payload.alias,write));
+      if(!viewerWriteCurrent(write))return;
       if(result?.cancelled)return;
-      if(!result?.merged){$('#face-action-name').textContent=name;rememberPersonLabel({id:Number(face.person_id),name,alias:face.alias||'',confirmed:1,ignored:0});toast('姓名已修改');}
+      if(!result?.merged){$('#face-action-name').textContent=name;rememberPersonLabel({id:personId,name,alias:face.alias||'',confirmed:1,ignored:0});toast('姓名已修改');}
       closeFaceActionPopover();
-    }finally{save.disabled=false;}
+    }catch(err){if(viewerWriteCurrent(write))throw err;}
+    finally{if(viewerWriteCurrent(write))save.disabled=false;}
   }));
   $('#face-action-split').addEventListener('click',action(async()=>{
     const faceId=Number(pop.dataset.faceId),face=(state.detail?.faces||[]).find(item=>Number(item.id)===faceId);if(!face)return;
     const oldPerson=Number(face.person_id),oldName=String(face.name||'').trim()||'这个人物';
-    const result=await api(`/api/faces/${faceId}/split`,{method:'POST'});
-    Object.assign(face,{person_id:Number(result.person_id),name:'',alias:'',confirmed:0,ignored:0});
-    closeFaceActionPopover();renderFaceNames(state.detail);renderOpenPhotoPeople();
-    toast(`已从“${oldName}”移出；只影响这张照片`);
-    if(typeof refreshPersonInLocalState==='function')refreshPersonInLocalState(oldPerson).catch(()=>{});
+      const write=viewerCaptureEntityWrite('photo',Number(state.detail.id),{face_id:faceId},0);
+      try{
+        const result=await window.__ourTimeApp.queueEntityWrite('face',faceId,()=>window.__ourTimeApp.operationRequest(`/api/faces/${faceId}/split`,{method:'POST'},write.operationId));
+        if(typeof refreshPersonInLocalState==='function')refreshPersonInLocalState(oldPerson).catch(()=>{});
+        if(!viewerWriteCurrent(write))return;
+        Object.assign(face,{person_id:Number(result.person_id),name:'',alias:'',confirmed:0,ignored:0});
+        closeFaceActionPopover();renderFaceNames(state.detail);renderOpenPhotoPeople();
+        toast(`已从“${oldName}”移出；只影响这张照片`);
+      }catch(err){if(viewerWriteCurrent(write))throw err;}
   }));
   $('#face-action-ignore').addEventListener('click',action(async()=>{
     const faceId=Number(pop.dataset.faceId),face=(state.detail?.faces||[]).find(item=>Number(item.id)===faceId);if(!face)return;
-    const oldPerson=Number(face.person_id),result=await api(`/api/faces/${faceId}/ignore`,{method:'POST',body:JSON.stringify({ignored:true})});
-    Object.assign(face,{person_id:Number(result.person_id),name:'路人',alias:'',confirmed:0,ignored:1});
-    closeFaceActionPopover();renderFaceNames(state.detail);renderOpenPhotoPeople();toast('这张脸已标为路人');
-    if(typeof refreshPersonInLocalState==='function')refreshPersonInLocalState(oldPerson).catch(()=>{});
+    const oldPerson=Number(face.person_id),write=viewerCaptureEntityWrite('photo',Number(state.detail.id),{face_id:faceId,ignored:true},0);
+    try{
+      const result=await window.__ourTimeApp.queueEntityWrite('face',faceId,()=>window.__ourTimeApp.operationRequest(`/api/faces/${faceId}/ignore`,{method:'POST',body:JSON.stringify({ignored:true})},write.operationId));
+      if(typeof refreshPersonInLocalState==='function')refreshPersonInLocalState(oldPerson).catch(()=>{});
+      if(!viewerWriteCurrent(write))return;
+      Object.assign(face,{person_id:Number(result.person_id),name:'路人',alias:'',confirmed:0,ignored:1});
+      closeFaceActionPopover();renderFaceNames(state.detail);renderOpenPhotoPeople();toast('这张脸已标为路人');
+    }catch(err){if(viewerWriteCurrent(write))throw err;}
   }));
 }
 function openFaceActionPopover(button,face){
@@ -1821,7 +1839,5 @@ $('#detail-dialog').addEventListener('click',e=>{
  outsidePhotoDown=false;closePhotoViewer();
 });
 $('#detail-dialog').addEventListener('close',()=>outsidePhotoDown=false);
-$('#detail-form').addEventListener('input',()=>{stopSlides();viewer.drafts.set(state.detail.id,Object.fromEntries(['#edit-date','#edit-precision','#edit-place','#edit-notes'].map(k=>[k,$(k).value])));viewerMessage('补录尚未保存；翻图时会暂存在本页，刷新页面会丢失。');});
-$('#sort-order').addEventListener('change',action(async()=>{state.sort=$('#sort-order').value;state.offset=0;await loadPhotos();}));
-$('#refresh-photos').addEventListener('click',action(()=>loadPhotos()));
+$('#detail-form').addEventListener('input',()=>{stopSlides();const id=Number(state.detail.id);window.__ourTimeApp.draftRevision.photo.set(id,(window.__ourTimeApp.draftRevision.photo.get(id)||0)+1);viewer.drafts.set(id,Object.fromEntries(['#edit-date','#edit-precision','#edit-place','#edit-notes'].map(k=>[k,$(k).value])));viewerMessage('补录尚未保存；翻图时会暂存在本页，刷新页面会丢失。');});
 $('#browse-directory').addEventListener('click',action(()=>{state.folderTarget='browse';return openFolder(state.directory);}));

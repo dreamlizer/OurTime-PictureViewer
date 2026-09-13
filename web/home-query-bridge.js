@@ -19,10 +19,12 @@
     }
     const source = bindings.source;
     const inputs = bindings.legacyInputs || {};
-    let generation = 0;
-    let working = false;
+    let working = 0;
     const query = () => Object.fromEntries(fields.map(key => [key, value(source[key])]));
     const scope = () => value(bindings.scopeKey(source));
+    const querySession = global.OurTimeOperationRuntime.createQuerySession({
+      query: { ...query(), sort: value(source.sort), scope: scope() }, result: null
+    });
     function writeInputs() {
       for (const key of [...fields, 'sort']) {
         if (inputs[key] && 'value' in inputs[key]) inputs[key].value = value(source[key]);
@@ -45,26 +47,25 @@
     }
     async function update(next, context, reason) {
       guard(context);
-      if (working) throw new Error('照片列表正在更新，请稍候。');
       if (source.selecting) throw new Error('请先退出批量选择，再修改查询。');
-      const before = { ...query(), sort: value(source.sort), scope: scope() };
-      const token = ++generation;
-      working = true;
+      const token = querySession.begin({ ...query(), ...next, sort: value(next.sort ?? source.sort), scope: scope() });
+      working += 1;
       Object.assign(source, next);
       try {
         notify();
         // Must bind to the existing reset/reload path, NOT append/next-page loading.
-        await bindings.reloadPhotos({ reason, signal: context && context.signal });
+        const result=await bindings.reloadPhotos({ reason, signal: context && context.signal });
+        querySession.commit(token,result);
       } catch (error) {
-        const stillOurs = token === generation && scope() === before.scope
-          && Object.keys(next).every(key => value(source[key]) === value(next[key]));
-        if (stillOurs) {
-          for (const key of Object.keys(next)) source[key] = before[key];
+        if (querySession.fail(token)) {
+          const actual=querySession.read().actualQuery;
+          for (const key of fields) source[key]=value(actual[key]);
+          source.sort=value(actual.sort||'date_desc');
           notify();
         }
         throw error;
       } finally {
-        working = false;
+        working = Math.max(0,working-1);
         notify();
       }
     }

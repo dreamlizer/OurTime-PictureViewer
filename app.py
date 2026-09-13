@@ -8,6 +8,7 @@ import hashlib
 import io
 import json
 import csv
+import logging
 import math
 import mimetypes
 import sqlite3
@@ -17,13 +18,15 @@ import uuid
 import re
 import zipfile
 import subprocess
-from contextlib import contextmanager
+from contextlib import ExitStack, asynccontextmanager, contextmanager
 from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 from collections import deque
 from datetime import datetime
 from pathlib import Path
+from typing import Annotated
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from PIL import Image, ImageOps, ExifTags, IptcImagePlugin
@@ -33,7 +36,8 @@ from geo_labels import PlaceIndex
 from object_labels import classify_image, classify_images, model_ready, runtime_name as object_runtime, BATCH_SIZE
 from library_db import (
     ACTIVE_ASSET, ASSET_LIST_COLUMNS, init_schema, load_place_rules,
-    migrate_place_overrides, place_rules_version, register_collations, upsert_place_rule,
+    migrate_place_overrides, place_rules_version, recover_interrupted_jobs,
+    register_collations, upsert_place_rule,
 )
 from browse_queries import directory_predicate as directory_clause, fetch_people, fetch_photos, nearby_photo_spec
 
@@ -41,9 +45,6 @@ mimetypes.add_type('font/ttf', '.ttf')
 
 BASE = Path(__file__).resolve().parent
 DATA = Path(os.environ.get('PHOTO_LIBRARY_DATA', str(BASE / 'data'))).resolve()
-DATA.mkdir(parents=True, exist_ok=True)
-(DATA / 'thumbs').mkdir(exist_ok=True)
-(DATA / 'faces').mkdir(exist_ok=True)
 FACE_LABEL_DIR = DATA / '人名标签'
 FACE_LABEL_FILES = {f'{i}.png' for i in range(1, 10)}
 MODEL_ROOT = Path(os.environ.get('PHOTO_MODEL_ROOT', 'G:/CodexModels/insightface'))
@@ -67,6 +68,7 @@ OBJECT_JOB_LOCK=threading.Lock()
 GEO = None
 EXIFTOOL = next((BASE/'tools'/'exiftool').glob('*/exiftool.exe'),None)
 ASSET_LOCKS=[threading.RLock() for _ in range(128)]
+OPERATION_LOCKS=[threading.RLock() for _ in range(128)]
 GEO_LOCK=threading.Lock()
 RULE_LOCK=threading.RLock()
 RULES=[]
@@ -78,6 +80,13 @@ PROGRESS={
 }
 STATUS_CACHE={'at':0,'payload':None}
 STATUS_CACHE_LOCK=threading.Lock()
+APP_OWNER = None
+APP_INITIALIZED = False
+APP_INITIALIZE_LOCK = threading.RLock()
+APP_PORT = int(os.environ.get('PHOTO_LIBRARY_PORT', '8765'))
+RUNTIME_VERSION = 'not-started'
+SCAN_THREAD = None
+UVICORN_SERVER = None
 try:
     from pillow_heif import register_heif_opener
     register_heif_opener()
@@ -119,9 +128,147 @@ def attach_place_rules():
     PLACES.override_version = None
     PLACES.nearest.cache_clear()
 
-init_db()
-attach_place_rules()
-app = FastAPI(title='拾光 · 本地照片资料库', docs_url=None, redoc_url=None)
+class DataOwner:
+    """One OS-level writer lease for one canonical data directory."""
+    def __init__(self, data_dir):
+        self.data_dir=Path(data_dir).resolve()
+        self.path=self.data_dir/'writer.owner.lock'
+        self.handle=None
+
+    def acquire(self):
+        self.data_dir.mkdir(parents=True,exist_ok=True)
+        handle=open(self.path,'a+b')
+        handle.seek(0,os.SEEK_END)
+        if handle.tell()==0:
+            handle.write(b'0');handle.flush()
+        handle.seek(0)
+        try:
+            if os.name=='nt':
+                import msvcrt
+                msvcrt.locking(handle.fileno(),msvcrt.LK_NBLCK,1)
+            else:
+                import fcntl
+                fcntl.flock(handle.fileno(),fcntl.LOCK_EX|fcntl.LOCK_NB)
+        except (OSError,IOError) as exc:
+            handle.close()
+            raise RuntimeError(f'资料库正在由另一个拾光实例使用：{self.data_dir}') from exc
+        self.handle=handle
+
+    def release(self):
+        handle=self.handle
+        if not handle:return
+        handle.seek(0)
+        try:
+            if os.name=='nt':
+                import msvcrt
+                msvcrt.locking(handle.fileno(),msvcrt.LK_UNLCK,1)
+            else:
+                import fcntl
+                fcntl.flock(handle.fileno(),fcntl.LOCK_UN)
+        finally:
+            handle.close();self.handle=None
+
+
+def process_command_line(pid):
+    if pid<=0:return ''
+    if os.name!='nt':
+        try:return (Path('/proc')/str(pid)/'cmdline').read_bytes().replace(b'\0',b' ').decode(errors='replace')
+        except OSError:return ''
+    command=(
+        "$p=Get-CimInstance Win32_Process -Filter 'ProcessId=%d' "
+        "-ErrorAction SilentlyContinue;if($p){[Console]::OutputEncoding="
+        "[Text.UTF8Encoding]::new();$p.CommandLine}" % pid
+    )
+    try:
+        return subprocess.run(
+            ['powershell','-NoProfile','-Command',command],
+            capture_output=True,text=True,encoding='utf-8',errors='replace',
+            timeout=5,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0),
+        ).stdout.strip()
+    except (OSError,subprocess.SubprocessError):
+        return ''
+
+
+def refuse_unlocked_legacy_owner():
+    """Do not run beside an older app process that predates the writer lock."""
+    pid_file=DATA/'server.pid'
+    if not pid_file.is_file():return
+    try:pid=int(pid_file.read_text(encoding='ascii').strip())
+    except (OSError,ValueError):return
+    if pid==os.getpid():return
+    command=process_command_line(pid)
+    if command and str((BASE/'app.py').resolve()).casefold() in command.casefold():
+        raise RuntimeError(
+            f'检测到仍在使用此资料库的旧拾光进程（PID {pid}）；未启动第二个写服务'
+        )
+
+
+def capture_runtime_version():
+    try:
+        return subprocess.run(
+            ['git','rev-parse','HEAD'],cwd=BASE,capture_output=True,text=True,
+            encoding='ascii',errors='replace',timeout=3,
+            creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0),
+        ).stdout.strip() or 'working-tree'
+    except (OSError,subprocess.SubprocessError):
+        return 'working-tree'
+
+
+def initialize_application():
+    """Explicit startup boundary. Importing this module remains read-only."""
+    global APP_OWNER,APP_INITIALIZED,RUNTIME_VERSION
+    with APP_INITIALIZE_LOCK:
+        if APP_INITIALIZED:return
+        refuse_unlocked_legacy_owner()
+        owner=DataOwner(DATA)
+        owner.acquire()
+        try:
+            (DATA/'thumbs').mkdir(exist_ok=True)
+            (DATA/'faces').mkdir(exist_ok=True)
+            init_db()
+            with db() as c:recover_interrupted_jobs(c)
+            attach_place_rules()
+            refresh_rules()
+            RUNTIME_VERSION=capture_runtime_version()
+        except Exception:
+            owner.release()
+            raise
+        APP_OWNER=owner
+        APP_INITIALIZED=True
+
+
+def shutdown_application(timeout=15.0):
+    """Stop writers before releasing the data owner; never claim a timed-out stop."""
+    global APP_OWNER,APP_INITIALIZED
+    with APP_INITIALIZE_LOCK:
+        if not APP_INITIALIZED:return True
+        STOP.set()
+        thread=SCAN_THREAD
+        if thread and thread.is_alive():
+            thread.join(max(0,float(timeout)))
+            if thread.is_alive():
+                return False
+        close_readers()
+        if APP_OWNER:APP_OWNER.release()
+        APP_OWNER=None
+        APP_INITIALIZED=False
+        return True
+
+
+@asynccontextmanager
+async def app_lifespan(_application):
+    initialize_application()
+    try:
+        yield
+    finally:
+        if not shutdown_application():
+            raise RuntimeError('后台任务未在安全时限内停止；写入owner未释放')
+
+
+app = FastAPI(
+    title='拾光 · 本地照片资料库',docs_url=None,redoc_url=None,
+    lifespan=app_lifespan,
+)
 
 @app.middleware('http')
 async def local_only(request: Request, call_next):
@@ -133,6 +280,41 @@ async def local_only(request: Request, call_next):
         return JSONResponse({'detail':'不允许跨站请求'}, status_code=403)
     return await call_next(request)
 
+class ApiProblem(HTTPException):
+    def __init__(self,status_code,detail,error_code,**extra):
+        super().__init__(status_code=status_code,detail=detail)
+        self.error_code=error_code
+        self.extra=extra
+
+
+@app.exception_handler(HTTPException)
+async def structured_http_error(_request,exc):
+    code=getattr(exc,'error_code',None)
+    if not code:
+        code={
+            400:'invalid_request',404:'not_found',409:'conflict',
+            422:'invalid_request',423:'busy',
+        }.get(exc.status_code,'request_failed')
+    payload={'detail':exc.detail,'error_code':code}
+    payload.update(getattr(exc,'extra',{}))
+    return JSONResponse(payload,status_code=exc.status_code,headers=getattr(exc,'headers',None))
+
+
+@app.exception_handler(RequestValidationError)
+async def structured_validation_error(_request,exc):
+    return JSONResponse(
+        {'detail':exc.errors(),'error_code':'invalid_request'},status_code=422
+    )
+
+@app.exception_handler(Exception)
+async def structured_server_error(_request,exc):
+    logging.getLogger('ourtime').exception('Unhandled API error',exc_info=exc)
+    return JSONResponse(
+        {'detail':'服务器未能完成请求','error_code':'server_error'},
+        status_code=500,
+    )
+
+
 def now():
     return datetime.now().isoformat(timespec='seconds')
 
@@ -143,6 +325,10 @@ def invalidate_status_cache():
 
 def asset_lock(digest):
     return ASSET_LOCKS[int(digest[:8],16)%len(ASSET_LOCKS)]
+
+def operation_lock(operation_id):
+    digest=hashlib.sha256(str(operation_id).encode('utf-8')).digest()
+    return OPERATION_LOCKS[int.from_bytes(digest[:4],'big')%len(OPERATION_LOCKS)]
 
 def path_key(path):
     return os.path.normcase(os.path.abspath(path))
@@ -159,8 +345,6 @@ def path_excluded(path):
     with RULE_LOCK:
         return any(key==root or key.startswith(root.rstrip(os.sep)+os.sep) for root in RULES)
 
-refresh_rules()
-
 def thumbnail_path(digest):
     return DATA/'thumbs'/f'{digest}.jpg'
 
@@ -172,7 +356,8 @@ def make_thumbnail(path,digest):
 
 def remove_generated(path,folder):
     # Only application-generated cache files in the exact managed folder.
-    if path.is_symlink() or path.resolve().parent!=(DATA/folder).resolve():
+    managed=(DATA/folder)
+    if managed.is_symlink() or path.is_symlink() or path.parent.resolve()!=managed.resolve():
         raise RuntimeError('缓存路径不在本项目指定目录内')
     try:
         size=path.stat().st_size
@@ -181,22 +366,40 @@ def remove_generated(path,folder):
     except FileNotFoundError:
         return 0
 
-def owned_face_derivative_paths(face):
+def index_face_derivatives(face_dir=None):
+    """Enumerate a managed face folder once and group only exact encoded owners."""
+    face_dir=Path(face_dir or (DATA/'faces'))
+    inventory={}
+    try:entries=list(face_dir.iterdir())
+    except FileNotFoundError:entries=[]
+    patterns=(
+        re.compile(r'^(\d+)\.jpg$',re.I),
+        re.compile(r'^\.pending-(\d+)\.jpg$',re.I),
+        re.compile(r'^\.recover-(\d+)-[^\\/]+\.jpg$',re.I),
+    )
+    for path in entries:
+        for pattern in patterns:
+            match=pattern.fullmatch(path.name)
+            if match:
+                inventory.setdefault(int(match.group(1)),[]).append(path)
+                break
+    return inventory
+
+
+def owned_face_derivative_paths(face,inventory=None):
     """Return only managed crop files whose ownership is encoded by one face row."""
     face_id=int(face['id'])
     face_dir=DATA/'faces'
-    candidates=[
-        face_dir/(face['crop'] or f'{face_id}.jpg'),
-        face_dir/f'.pending-{face_id}.jpg',
-    ]
-    recover_prefix=f'.recover-{face_id}-'
-    try:
-        candidates.extend(
-            path for path in face_dir.iterdir()
-            if path.name.startswith(recover_prefix) and path.suffix.lower()=='.jpg'
-        )
-    except FileNotFoundError:
-        pass
+    inventory=inventory if inventory is not None else index_face_derivatives(face_dir)
+    candidates=list(inventory.get(face_id,[]))
+    crop=str(face['crop'] or '').strip()
+    if crop and Path(crop).name==crop and '/' not in crop and '\\' not in crop:
+        candidates=[path for path in candidates if path.name.lower()!=f'{face_id}.jpg']
+        candidates.append(face_dir/crop)
+    elif crop:
+        raise RuntimeError('缓存路径不在本项目指定目录内')
+    else:
+        candidates.append(face_dir/f'{face_id}.jpg')
     unique=[]
     seen=set()
     for path in candidates:
@@ -206,7 +409,7 @@ def owned_face_derivative_paths(face):
             unique.append(path)
     return unique
 
-def cleanup_asset_cache(aid):
+def cleanup_asset_cache(aid,operation_id=None):
     with db() as c:
         row=c.execute('SELECT * FROM assets WHERE id=?',(aid,)).fetchone()
     if not row:
@@ -214,24 +417,30 @@ def cleanup_asset_cache(aid):
     with asset_lock(row['sha256']):
         with db() as c:
             policy=c.execute(
-                'SELECT derivative_policy FROM assets WHERE id=?',(aid,)
+                'SELECT derivative_policy,derivative_operation_id FROM assets WHERE id=?',(aid,)
             ).fetchone()
             if not policy or policy['derivative_policy']!='purge':
+                return 0
+            if operation_id and policy['derivative_operation_id']!=operation_id:
                 return 0
             active=c.execute('SELECT 1 FROM assets a WHERE a.id=? AND '+ACTIVE_ASSET,(aid,)).fetchone()
             if active:
                 return 0
             faces=c.execute('SELECT id,crop FROM faces WHERE asset_id=?',(aid,)).fetchall()
         released=remove_generated(thumbnail_path(row['sha256']),'thumbs')
+        inventory=index_face_derivatives(DATA/'faces')
         for face in faces:
-            for path in owned_face_derivative_paths(face):
+            for path in owned_face_derivative_paths(face,inventory):
                 released+=remove_generated(path,'faces')
         with db() as c:
             current=c.execute(
-                'SELECT derivative_policy FROM assets WHERE id=?',(aid,)
+                'SELECT derivative_policy,derivative_operation_id FROM assets WHERE id=?',(aid,)
             ).fetchone()
             active=c.execute('SELECT 1 FROM assets a WHERE a.id=? AND '+ACTIVE_ASSET,(aid,)).fetchone()
-            if not current or current['derivative_policy']!='purge' or active:
+            if (
+                not current or current['derivative_policy']!='purge' or active
+                or (operation_id and current['derivative_operation_id']!=operation_id)
+            ):
                 return released
             face_ids=[int(face[0]) for face in faces]
             if face_ids:
@@ -241,7 +450,10 @@ def cleanup_asset_cache(aid):
                     face_ids,
                 )
             c.execute('DELETE FROM faces WHERE asset_id=?',(aid,))
-            c.execute('UPDATE assets SET face_state=0,face_error=NULL WHERE id=?',(aid,))
+            c.execute(
+                'UPDATE assets SET face_state=0,face_error=NULL,derivative_operation_id=NULL WHERE id=?',
+                (aid,),
+            )
         invalidate_face_index()
         invalidate_status_cache()
         return released
@@ -265,6 +477,80 @@ def jsonable(value):
         return f if math.isfinite(f) else str(value)
     except (TypeError,ValueError,ZeroDivisionError):
         return str(value)
+
+
+def canonical_request_hash(payload):
+    encoded=json.dumps(payload,ensure_ascii=False,sort_keys=True,separators=(',',':'))
+    return hashlib.sha256(encoded.encode('utf-8')).hexdigest(),encoded
+
+
+def operation_receipt(row):
+    result=json.loads(row['result_json']) if row['result_json'] else {}
+    return {
+        **result,
+        'operation_id':row['operation_id'],
+        'kind':row['kind'],
+        'status':row['status'],
+        'state_committed':bool(row['state_committed']),
+        'cleanup_status':row['cleanup_status'],
+        'error_code':row['error_code'],
+        'error_detail':row['error_detail'],
+    }
+
+
+def prepare_operation(conn,kind,operation_id,payload):
+    operation_id=str(operation_id or uuid.uuid4())
+    request_hash,request_json=canonical_request_hash(payload)
+    stamp=now()
+    inserted=conn.execute(
+        '''INSERT OR IGNORE INTO operations(
+             operation_id,kind,request_hash,status,request_json,created_at,updated_at
+           ) VALUES (?,?,?,'pending',?,?,?)''',
+        (operation_id,kind,request_hash,request_json,stamp,stamp),
+    ).rowcount
+    if not inserted:
+        row=conn.execute(
+            'SELECT * FROM operations WHERE operation_id=?',(operation_id,)
+        ).fetchone()
+        if row['kind']!=kind or row['request_hash']!=request_hash:
+            raise ApiProblem(
+                409,'同一操作编号不能用于不同请求','idempotency_conflict',
+                operation_id=operation_id,
+            )
+        return operation_id,operation_receipt(row)
+    return operation_id,None
+
+
+def finish_operation(conn,operation_id,result,*,status='committed',
+                     state_committed=True,cleanup_status='not_applicable',
+                     undo=None,error_code=None,error_detail=None):
+    payload=dict(result)
+    conn.execute(
+        '''UPDATE operations
+           SET status=?,state_committed=?,cleanup_status=?,result_json=?,
+               undo_json=?,error_code=?,error_detail=?,updated_at=?
+           WHERE operation_id=?''',
+        (
+            status,int(state_committed),cleanup_status,
+            json.dumps(payload,ensure_ascii=False,sort_keys=True),
+            json.dumps(undo,ensure_ascii=False,sort_keys=True) if undo is not None else None,
+            error_code,error_detail,now(),operation_id,
+        ),
+    )
+    row=conn.execute(
+        'SELECT * FROM operations WHERE operation_id=?',(operation_id,)
+    ).fetchone()
+    return operation_receipt(row)
+
+
+def operation_id_from(body,request=None):
+    value=getattr(body,'operation_id',None)
+    if not value and request is not None:
+        value=request.headers.get('Idempotency-Key')
+    value=str(value or uuid.uuid4()).strip()
+    if not value or len(value)>128 or not re.fullmatch(r'[A-Za-z0-9._:-]+',value):
+        raise ApiProblem(400,'操作编号无效','invalid_request')
+    return value
 
 def parse_date(value):
     if not value:
@@ -1212,13 +1498,22 @@ def run_scan(jid):
         close_readers()
         SCAN_LOCK.release()
 
+PositiveId = Annotated[int, Field(strict=True,gt=0)]
+
+
 class ScanRequest(BaseModel):
-    roots: list[str] = Field(min_length=1,max_length=30)
+    roots: list[Annotated[str, Field(min_length=1,max_length=32760)]] = Field(min_length=1,max_length=30)
     with_faces: bool = False
     include_system: bool = False
     workers:int=Field(default=2,ge=1,le=4)
+    operation_id:str|None=Field(default=None,max_length=128)
 
-def begin_scan(body):
+def begin_scan(body,request=None):
+    operation_id=operation_id_from(body,request)
+    with operation_lock(operation_id):
+        return begin_scan_locked(body,operation_id)
+
+def begin_scan_locked(body,operation_id):
     roots=[]
     seen_roots=set()
     for raw in body.roots:
@@ -1231,7 +1526,20 @@ def begin_scan(body):
         if key not in seen_roots:
             seen_roots.add(key)
             roots.append(resolved)
-    if not SCAN_LOCK.acquire(blocking=False): raise HTTPException(409,'已有扫描正在运行，请先暂停或等它完成')
+    request_payload={
+        'roots':roots,'with_faces':bool(body.with_faces),
+        'include_system':bool(body.include_system),'workers':int(body.workers),
+    }
+    with db() as c:
+        operation_id,existing=prepare_operation(c,'scan',operation_id,request_payload)
+    if existing:return existing
+    if not SCAN_LOCK.acquire(blocking=False):
+        with db() as c:
+            finish_operation(
+                c,operation_id,{},status='rejected',state_committed=False,
+                error_code='busy',error_detail='已有扫描正在运行',
+            )
+        raise ApiProblem(409,'已有扫描正在运行，请先暂停或等它完成','busy',operation_id=operation_id)
     STOP.clear(); jid=uuid.uuid4().hex
     with STATUS_CACHE_LOCK:
         STATUS_CACHE['payload']=None; STATUS_CACHE['at']=0
@@ -1239,13 +1547,19 @@ def begin_scan(body):
         with db() as c:
             c.execute('INSERT INTO jobs(id,roots,with_faces,include_system,status,started_at,workers,phase,current_stage) VALUES (?,?,?,?,?,?,?,?,?)',
                       (jid,json.dumps(roots,ensure_ascii=False),body.with_faces,body.include_system,'running',now(),1 if body.with_faces else body.workers,'inventory','inventory'))
-        threading.Thread(target=run_scan,args=(jid,),daemon=True).start()
+            receipt=finish_operation(
+                c,operation_id,{'id':jid},status='committed',
+                state_committed=True,
+            )
+        global SCAN_THREAD
+        SCAN_THREAD=threading.Thread(target=run_scan,args=(jid,),daemon=True)
+        SCAN_THREAD.start()
     except Exception:
         SCAN_LOCK.release(); raise
-    return {'id':jid}
+    return receipt
 
 @app.post('/api/scan')
-def scan(body:ScanRequest): return begin_scan(body)
+def scan(body:ScanRequest,request:Request): return begin_scan(body,request)
 
 @app.post('/api/scan/pause')
 def pause():
@@ -1269,11 +1583,34 @@ def resume(jid:str):
     with db() as c: row=c.execute('SELECT * FROM jobs WHERE id=?',(jid,)).fetchone()
     if not row: raise HTTPException(404,'任务不存在')
     if row['status']!='paused': raise HTTPException(409,'只有已暂停的扫描可以继续')
-    return begin_scan(ScanRequest(roots=json.loads(row['roots']),with_faces=bool(row['with_faces']),include_system=bool(row['include_system']),workers=row['workers']))
+    return begin_scan(ScanRequest(
+        roots=json.loads(row['roots']),with_faces=bool(row['with_faces']),
+        include_system=bool(row['include_system']),workers=row['workers'],
+        operation_id=uuid.uuid4().hex,
+    ))
 
 @app.get('/api/health')
 def health():
-    return {'ok': True, 'data_dir': str(DATA)}
+    return {
+        'ok':True,'data_dir':str(DATA),'pid':os.getpid(),
+        'data_key':hashlib.sha256(
+            os.path.normcase(str(DATA)).encode('utf-8')
+        ).hexdigest(),
+        'runtime_version':RUNTIME_VERSION,'owner':bool(APP_OWNER),
+    }
+
+
+@app.post('/api/shutdown')
+def request_shutdown():
+    if SCAN_THREAD and SCAN_THREAD.is_alive():
+        raise ApiProblem(409,'后台任务仍在安全停止过程中','busy')
+    if not UVICORN_SERVER:
+        raise ApiProblem(409,'当前运行方式不支持远程关闭','state_conflict')
+    def signal_shutdown():
+        time.sleep(.1)
+        UVICORN_SERVER.should_exit=True
+    threading.Thread(target=signal_shutdown,daemon=True).start()
+    return {'ok':True,'message':'正在安全关闭'}
 
 @app.get('/api/status')
 def status():
@@ -1346,49 +1683,130 @@ def status():
     return payload
 
 class ExclusionRequest(BaseModel):
-    ids:list[int]=Field(min_length=1,max_length=1000)
+    ids:list[PositiveId]=Field(min_length=1,max_length=1000)
     excluded:bool=True
     reason:str=Field(default='手工排除',max_length=200)
     display_only:bool=False
+    operation_id:str|None=Field(default=None,max_length=128)
 
 @app.post('/api/exclusions/assets')
-def exclude_assets(body:ExclusionRequest):
+def exclude_assets(body:ExclusionRequest,request:Request):
+    operation_id=operation_id_from(body,request)
+    with operation_lock(operation_id):
+        return exclude_assets_locked(body,request,operation_id)
+
+def exclude_assets_locked(body,request,operation_id):
     released=0
     unique_ids=list(dict.fromkeys(body.ids))
     display_only_restores=0
-    for aid in unique_ids:
+    request_payload={
+        'ids':unique_ids,'excluded':bool(body.excluded),'reason':body.reason,
+        'display_only':bool(body.display_only),
+    }
+    placeholders=','.join('?' for _ in unique_ids)
+    with db() as c:
+        rows=c.execute(
+            f'SELECT id,sha256 FROM assets WHERE id IN ({placeholders})',unique_ids
+        ).fetchall()
+    found_digest={int(row['id']):row['sha256'] for row in rows}
+    missing=[aid for aid in unique_ids if aid not in found_digest]
+    if missing:
+        raise ApiProblem(
+            404,f'照片 {missing[0]} 不存在','not_found',
+            operation_id=operation_id,
+        )
+    with ExitStack() as held_locks:
+        for digest in sorted(set(found_digest.values())):
+            held_locks.enter_context(asset_lock(digest))
         with db() as c:
-            row=c.execute('SELECT * FROM assets WHERE id=?',(aid,)).fetchone()
-        if not row:
-            raise HTTPException(404,f'照片 {aid} 不存在')
-        with asset_lock(row['sha256']):
-            with db() as c:
-                old=c.execute(
-                    'SELECT excluded,exclude_reason,derivative_policy FROM assets WHERE id=?',
-                    (aid,),
-                ).fetchone()
+            operation_id,existing=prepare_operation(
+                c,'asset_exclusion',operation_id,request_payload
+            )
+            if existing:return existing
+            rows=c.execute(
+                f'SELECT * FROM assets WHERE id IN ({placeholders})',unique_ids
+            ).fetchall()
+            found={int(row['id']):row for row in rows}
+            missing=[aid for aid in unique_ids if aid not in found]
+            if missing:
+                raise ApiProblem(
+                    404,f'照片 {missing[0]} 不存在','not_found',
+                    operation_id=operation_id,
+                )
+            policy='preserve' if not body.excluded or body.display_only else 'purge'
+            cleanup_owner=operation_id if policy=='purge' else None
+            for aid in unique_ids:
+                old=found[aid]
                 if not body.excluded and old['derivative_policy']=='preserve':
                     display_only_restores+=1
-                policy=(
-                    'preserve'
-                    if not body.excluded or body.display_only
-                    else 'purge'
-                )
                 c.execute(
                     '''UPDATE assets
-                       SET excluded=?,exclude_reason=?,derivative_policy=?
+                       SET excluded=?,exclude_reason=?,derivative_policy=?,
+                           derivative_operation_id=?
                        WHERE id=?''',
                     (
-                        int(body.excluded),
-                        body.reason if body.excluded else '',
-                        policy,
-                        aid,
+                        int(body.excluded),body.reason if body.excluded else '',
+                        policy,cleanup_owner,aid,
                     ),
                 )
-                c.execute('INSERT INTO edits(created_at,target,before_json,after_json) VALUES (?,?,?,?)',
-                          (now(),f'asset:{aid}',json.dumps(dict(old),ensure_ascii=False),json.dumps({'excluded':body.excluded,'reason':body.reason,'display_only':bool(body.excluded and body.display_only),'derivative_policy':policy},ensure_ascii=False)))
-            if body.excluded and not body.display_only:
-                released+=cleanup_asset_cache(aid)
+                c.execute(
+                    'INSERT INTO edits(created_at,target,before_json,after_json) VALUES (?,?,?,?)',
+                    (
+                        now(),f'asset:{aid}',
+                        json.dumps(
+                            {
+                                'excluded':old['excluded'],
+                                'exclude_reason':old['exclude_reason'],
+                                'derivative_policy':old['derivative_policy'],
+                                'derivative_operation_id':old['derivative_operation_id'],
+                            },ensure_ascii=False,
+                        ),
+                        json.dumps(
+                            {
+                                'excluded':body.excluded,'reason':body.reason,
+                                'display_only':bool(body.excluded and body.display_only),
+                                'derivative_policy':policy,
+                                'derivative_operation_id':cleanup_owner,
+                            },ensure_ascii=False,
+                        ),
+                    ),
+                )
+                if body.excluded and not body.display_only:
+                    c.execute(
+                        '''INSERT INTO operation_items(
+                             operation_id,item_kind,item_id,status,updated_at
+                           ) VALUES (?,'asset_cleanup',?,'pending',?)''',
+                        (operation_id,str(aid),now()),
+                    )
+            preliminary={
+                'updated':len(unique_ids),'released_bytes':0,
+                'display_only':bool(body.excluded and body.display_only),
+            }
+            cleanup_status='pending' if body.excluded and not body.display_only else 'not_applicable'
+            finish_operation(
+                c,operation_id,preliminary,status='committed',
+                state_committed=True,cleanup_status=cleanup_status,
+            )
+    cleanup_errors=[]
+    if body.excluded and not body.display_only:
+        for aid in unique_ids:
+            try:
+                amount=cleanup_asset_cache(aid,operation_id)
+                released+=amount
+                with db() as c:
+                    c.execute(
+                        '''UPDATE operation_items SET status='completed',detail=?,updated_at=?
+                           WHERE operation_id=? AND item_kind='asset_cleanup' AND item_id=?''',
+                        (json.dumps({'released_bytes':amount}),now(),operation_id,str(aid)),
+                    )
+            except Exception as exc:
+                cleanup_errors.append({'asset_id':aid,'detail':str(exc)})
+                with db() as c:
+                    c.execute(
+                        '''UPDATE operation_items SET status='failed',detail=?,updated_at=?
+                           WHERE operation_id=? AND item_kind='asset_cleanup' AND item_id=?''',
+                        (str(exc),now(),operation_id,str(aid)),
+                    )
     with STATUS_CACHE_LOCK:
         STATUS_CACHE['payload']=None; STATUS_CACHE['at']=0
     if body.excluded and body.display_only:
@@ -1399,7 +1817,96 @@ def exclude_assets(body:ExclusionRequest):
         message='已恢复显示，原照片和识别信息仍然保留'
     else:
         message='已撤销单张排除；若仍受目录规则影响，需要同时恢复目录。缩略图可按需重建，人脸需重扫。'
-    return {'updated':len(unique_ids),'released_bytes':released,'display_only':bool(body.excluded and body.display_only),'message':message}
+    cleanup_status='failed' if cleanup_errors else (
+        'completed' if body.excluded and not body.display_only else 'not_applicable'
+    )
+    with db() as c:
+        return finish_operation(
+            c,operation_id,{
+                'updated':len(unique_ids),'released_bytes':released,
+                'display_only':bool(body.excluded and body.display_only),
+                'message':message,'cleanup_errors':cleanup_errors,
+            },status='committed',state_committed=True,
+            cleanup_status=cleanup_status,
+            error_code='cleanup_incomplete' if cleanup_errors else None,
+            error_detail='状态已提交，但部分缓存清理可重试' if cleanup_errors else None,
+        )
+
+
+@app.get('/api/operations/{operation_id}')
+def get_operation(operation_id:str):
+    with db() as c:
+        row=c.execute(
+            'SELECT * FROM operations WHERE operation_id=?',(operation_id,)
+        ).fetchone()
+        if not row:raise ApiProblem(404,'操作不存在','not_found')
+        receipt=operation_receipt(row)
+        receipt['items']=[
+            dict(item) for item in c.execute(
+                '''SELECT item_kind,item_id,status,detail,updated_at
+                   FROM operation_items WHERE operation_id=?
+                   ORDER BY item_kind,item_id''',(operation_id,)
+            )
+        ]
+    return receipt
+
+
+@app.post('/api/operations/{operation_id}/retry-cleanup')
+def retry_operation_cleanup(operation_id:str):
+    if not operation_id or len(operation_id)>128:
+        raise ApiProblem(400,'操作编号无效','invalid_request')
+    with operation_lock(operation_id):
+        return retry_operation_cleanup_locked(operation_id)
+
+def retry_operation_cleanup_locked(operation_id):
+    with db() as c:
+        operation=c.execute(
+            'SELECT * FROM operations WHERE operation_id=?',(operation_id,)
+        ).fetchone()
+        if not operation:raise ApiProblem(404,'操作不存在','not_found')
+        if operation['kind']!='asset_exclusion' or not operation['state_committed']:
+            raise ApiProblem(409,'这个操作没有可重试的缓存清理','state_conflict')
+        ids=[
+            int(row['item_id']) for row in c.execute(
+                '''SELECT item_id FROM operation_items
+                   WHERE operation_id=? AND item_kind='asset_cleanup'
+                     AND status!='completed' ORDER BY CAST(item_id AS INTEGER)''',
+                (operation_id,),
+            )
+        ]
+    released=0
+    failures=[]
+    for aid in ids:
+        try:
+            amount=cleanup_asset_cache(aid,operation_id);released+=amount
+            with db() as c:
+                c.execute(
+                    '''UPDATE operation_items SET status='completed',detail=?,updated_at=?
+                       WHERE operation_id=? AND item_kind='asset_cleanup' AND item_id=?''',
+                    (json.dumps({'released_bytes':amount}),now(),operation_id,str(aid)),
+                )
+        except Exception as exc:
+            failures.append({'asset_id':aid,'detail':str(exc)})
+            with db() as c:
+                c.execute(
+                    '''UPDATE operation_items SET status='failed',detail=?,updated_at=?
+                       WHERE operation_id=? AND item_kind='asset_cleanup' AND item_id=?''',
+                    (str(exc),now(),operation_id,str(aid)),
+                )
+    with db() as c:
+        row=c.execute(
+            'SELECT * FROM operations WHERE operation_id=?',(operation_id,)
+        ).fetchone()
+        result=json.loads(row['result_json'] or '{}')
+        result['released_bytes']=int(result.get('released_bytes') or 0)+released
+        result['cleanup_errors']=failures
+        return finish_operation(
+            c,operation_id,result,status='committed',state_committed=True,
+            cleanup_status='failed' if failures else 'completed',
+            error_code='cleanup_incomplete' if failures else None,
+            error_detail='状态已提交，但部分缓存清理可重试' if failures else None,
+        )
+
 
 def directory_predicate(path):
     return directory_clause(path)
@@ -1489,6 +1996,14 @@ def folders(path:str='',scope:str='browse'):
 def asset_dict(row):
     d=dict(row)
     d['face_status']='committed_pending_publish' if d.get('face_state')==2 else None
+    if d.get('face_state')==2:
+        d['face_status_message']=(
+            '人脸结果已提交，裁剪发布失败，等待隔离恢复'
+            if d.get('face_error')
+            else '人脸结果已提交，裁剪文件待恢复'
+        )
+    else:
+        d['face_status_message']=None
     d['effective_date']=d['manual_date'] or d['captured_at']
     d['effective_place']=(d['manual_place'] or d['place'] or '').replace('附近','') or None
     d['effective_precision']=d['manual_precision'] if d['manual_date'] else d['date_precision']
@@ -1498,6 +2013,8 @@ def asset_dict(row):
 
 @app.get('/api/photos')
 def photos(q:str='',filter:str='all',person:str='',offset:int=0,limit:int=60,directory:str='',sort:str='date_desc',sequence:bool=False,max_id:int=0,around:int=0,tail:bool=False,date_from:str='',date_to:str='',place:str='',nearby:int=0,radius_m:int=100,map_cell:float=0,map_lat_bucket:float|None=None,map_lng_bucket:float|None=None):
+    if offset<0 or limit<1 or limit>500 or max_id<0 or around<0 or nearby<0:
+        raise ApiProblem(400,'分页或照片编号参数无效','invalid_request')
     try:
         with db() as c:
             result=fetch_photos(
@@ -1717,6 +2234,7 @@ def object_job():
 
 @app.get('/api/photos/{aid}')
 def photo_detail(aid:int):
+    if aid<=0:raise ApiProblem(422,'照片编号必须为正整数','invalid_request')
     with db() as c:
         row=c.execute('SELECT * FROM assets WHERE id=?',(aid,)).fetchone()
         if not row: raise HTTPException(404,'照片不存在')
@@ -1733,6 +2251,7 @@ class FavoriteRequest(BaseModel):
 
 @app.put('/api/photos/{aid}/favorite')
 def set_photo_favorite(aid:int, body:FavoriteRequest):
+    if aid<=0:raise ApiProblem(422,'照片编号必须为正整数','invalid_request')
     with db() as c:
         row=c.execute('SELECT favorite FROM assets WHERE id=?',(aid,)).fetchone()
         if not row:
@@ -1857,19 +2376,21 @@ def places(q:str='', offset:int=0, limit:int=80, west:float|None=None, south:flo
     return {'places':items,'total':total,'offset':max(offset,0),'limit':min(max(limit,1),200)}
 
 class EditRequest(BaseModel):
-    ids:list[int]=Field(min_length=1,max_length=1000)
+    ids:list[PositiveId]=Field(min_length=1,max_length=1000)
     manual_date:str|None=None
     manual_precision:str|None=None
-    manual_place:str|None=None
-    notes:str|None=None
+    manual_place:str|None=Field(default=None,max_length=200)
+    notes:str|None=Field(default=None,max_length=5000)
 
 @app.patch('/api/photos')
 def edit_photos(body:EditRequest):
-    changes=body.model_dump(exclude_unset=True); ids=changes.pop('ids')
+    changes=body.model_dump(exclude_unset=True); ids=list(dict.fromkeys(changes.pop('ids')))
     if not changes: raise HTTPException(400,'没有修改内容')
     for key in ['manual_date','manual_place','manual_precision']:
         if key in changes: changes[key]=(changes[key] or '').strip() or None
     if 'notes' in changes: changes['notes']=changes['notes'] or ''
+    if changes.get('manual_precision') not in {None,'年','月','日','范围 / 描述'}:
+        raise HTTPException(400,'日期精度无效')
     date=changes.get('manual_date')
     if date:
         precision=changes.get('manual_precision')
@@ -1953,10 +2474,11 @@ def person_detail(pid:int, offset:int=0, limit:int=48):
 
 class PersonEdit(BaseModel):
     name:str=Field(min_length=1,max_length=100)
-    alias:str=''
+    alias:str=Field(default='',max_length=100)
 
 @app.patch('/api/people/{pid}')
 def name_person(pid:int,body:PersonEdit):
+    if pid<=0:raise ApiProblem(422,'人物编号必须为正整数','invalid_request')
     name=normalize_person_text(body.name)
     if not name: raise HTTPException(400,'请输入姓名')
     alias=normalize_person_text(body.alias)
@@ -1970,10 +2492,11 @@ def name_person(pid:int,body:PersonEdit):
     return {'ok':True}
 
 class PersonCoverEdit(BaseModel):
-    face_id:int
+    face_id:PositiveId
 
 @app.put('/api/people/{pid}/cover')
 def set_person_cover(pid:int,body:PersonCoverEdit):
+    if pid<=0:raise ApiProblem(422,'人物编号必须为正整数','invalid_request')
     with db() as c:
         person=c.execute('SELECT * FROM people WHERE id=?',(pid,)).fetchone()
         if not person: raise HTTPException(404,'人物不存在')
@@ -1995,34 +2518,232 @@ def set_person_cover(pid:int,body:PersonCoverEdit):
     return {'ok':True,'cover':body.face_id}
 
 class MergeRequest(BaseModel):
-    target_id:int
+    target_id:PositiveId
+    operation_id:str|None=Field(default=None,max_length=128)
+    confirmation_token:str|None=Field(default=None,max_length=128)
 
 @app.post('/api/people/{pid}/merge')
-def merge_person(pid:int,body:MergeRequest):
-    if pid==body.target_id: raise HTTPException(400,'不能合并到自己')
+def merge_person(pid:int,body:MergeRequest,request:Request):
+    if pid<=0:raise ApiProblem(422,'人物编号必须为正整数','invalid_request')
+    if pid==body.target_id: raise ApiProblem(400,'不能合并到自己','invalid_request')
+    operation_id=operation_id_from(body,request)
+    with operation_lock(operation_id):
+        return merge_person_locked(pid,body,operation_id)
+
+def merge_person_locked(pid,body,operation_id):
+    request_payload={'source_id':pid,'target_id':body.target_id}
     with db() as c:
+        operation_id,existing=prepare_operation(
+            c,'person_merge',operation_id,request_payload
+        )
+        if existing:return existing
         target=c.execute('SELECT * FROM people WHERE id=?',(body.target_id,)).fetchone()
         source=c.execute('SELECT * FROM people WHERE id=?',(pid,)).fetchone()
-        if not target or not source: raise HTTPException(404,'人物不存在')
-        old_count=c.execute('SELECT count(*) FROM faces WHERE person_id=?',(pid,)).fetchone()[0]
+        if not target or not source:
+            raise ApiProblem(404,'人物不存在','not_found',operation_id=operation_id)
+        if int(source['confirmed'] or 0) and not int(target['confirmed'] or 0):
+            raise ApiProblem(
+                409,'不能把已确认人物合并到待确认候选','relationship_conflict',
+                operation_id=operation_id,
+            )
+        seen={pid}
+        cursor=target
+        while cursor and cursor['suggested_person_id'] is not None:
+            suggested=int(cursor['suggested_person_id'])
+            if suggested in seen:
+                raise ApiProblem(
+                    409,'人物候选关系会形成循环','relationship_conflict',
+                    operation_id=operation_id,
+                )
+            seen.add(suggested)
+            cursor=c.execute('SELECT * FROM people WHERE id=?',(suggested,)).fetchone()
+            if not cursor:
+                raise ApiProblem(
+                    409,'人物候选关系指向不存在对象','relationship_conflict',
+                    operation_id=operation_id,
+                )
+        faces=[dict(row) for row in c.execute(
+            'SELECT id,person_id,reviewed,ignored FROM faces WHERE person_id=? ORDER BY id',(pid,)
+        )]
+        conflicting=[dict(row) for row in c.execute(
+            '''SELECT s.id source_face_id,t.id target_face_id,s.asset_id
+               FROM faces s JOIN faces t ON t.asset_id=s.asset_id
+               WHERE s.person_id=? AND t.person_id=?
+               ORDER BY s.asset_id,s.id,t.id''',(pid,body.target_id)
+        )]
+        token_payload={
+            'source_id':pid,'target_id':body.target_id,
+            'pairs':conflicting,
+            'source_faces':[row['id'] for row in faces],
+        }
+        confirmation_token=canonical_request_hash(token_payload)[0]
+        if conflicting and body.confirmation_token!=confirmation_token:
+            raise ApiProblem(
+                409,'同一张照片里两个人物都有脸，需确认后再合并',
+                'same_photo_confirmation_required',
+                operation_id=operation_id,
+                confirmation_token=confirmation_token,
+                conflicts=conflicting,
+            )
+        old_count=len(faces)
         target_ignored=int(target['ignored'] or 0) if 'ignored' in target.keys() else 0
         source_ignored=int(source['ignored'] or 0) if 'ignored' in source.keys() else 0
         if target_ignored and not source_ignored:
-            raise HTTPException(400,'请先把路人组恢复为可识别，再合并到日常人物')
+            raise ApiProblem(
+                409,'请先把路人组恢复为可识别，再合并到日常人物',
+                'relationship_conflict',operation_id=operation_id,
+            )
+        reference_rows=[
+            {'id':int(row['id']),'suggested_person_id':row['suggested_person_id']}
+            for row in c.execute(
+                'SELECT id,suggested_person_id FROM people WHERE suggested_person_id=? ORDER BY id',
+                (pid,),
+            )
+        ]
+        target_cover_before=target['cover_face_id']
         c.execute('UPDATE faces SET person_id=?,reviewed=?,ignored=? WHERE person_id=?',(body.target_id,target['confirmed'],target_ignored,pid))
         if target['cover_face_id'] is None and source['cover_face_id'] is not None:
             c.execute('UPDATE people SET cover_face_id=? WHERE id=?',(source['cover_face_id'],body.target_id))
         c.execute('UPDATE people SET suggested_person_id=? WHERE suggested_person_id=?',(body.target_id,pid))
         c.execute('DELETE FROM people WHERE id=?',(pid,))
         c.execute('INSERT INTO edits(created_at,target,before_json,after_json) VALUES (?,?,?,?)',(now(),f'person:{pid}',json.dumps({'person':dict(source),'face_count':old_count},ensure_ascii=False),json.dumps({'merged_into':body.target_id,'moved_faces':old_count})))
+        target_after=c.execute(
+            'SELECT * FROM people WHERE id=?',(body.target_id,)
+        ).fetchone()
+        undo={
+            'source':dict(source),'target_id':body.target_id,
+            'target_cover_before':target_cover_before,
+            'target_cover_after':target_after['cover_face_id'],
+            'face_target_state':{
+                'reviewed':int(target['confirmed'] or 0),
+                'ignored':target_ignored,
+            },
+            'faces':faces,'references':reference_rows,
+        }
+        receipt=finish_operation(
+            c,operation_id,{'ok':True,'moved_faces':old_count},
+            status='committed',state_committed=True,undo=undo,
+        )
     invalidate_face_index()
-    return {'ok':True}
+    return receipt
+
+
+class UndoRequest(BaseModel):
+    dry_run:bool=True
+
+
+@app.post('/api/operations/{operation_id}/undo')
+def undo_operation(operation_id:str,body:UndoRequest):
+    if not operation_id or len(operation_id)>128:
+        raise ApiProblem(400,'操作编号无效','invalid_request')
+    with operation_lock(operation_id):
+        return undo_operation_locked(operation_id,body)
+
+def undo_operation_locked(operation_id,body):
+    with db() as c:
+        row=c.execute(
+            'SELECT * FROM operations WHERE operation_id=?',(operation_id,)
+        ).fetchone()
+        if not row:raise ApiProblem(404,'操作不存在','not_found')
+        if row['kind']!='person_merge' or not row['state_committed'] or not row['undo_json']:
+            raise ApiProblem(409,'这个操作不能撤销','state_conflict',operation_id=operation_id)
+        if row['status']=='undone':
+            return operation_receipt(row)
+        undo=json.loads(row['undo_json'])
+        source=undo['source']
+        source_id=int(source['id'])
+        target_id=int(undo['target_id'])
+        conflicts=[]
+        if c.execute('SELECT 1 FROM people WHERE id=?',(source_id,)).fetchone():
+            conflicts.append('源人物编号已被重新使用')
+        target=c.execute('SELECT * FROM people WHERE id=?',(target_id,)).fetchone()
+        if not target:
+            conflicts.append('目标人物已不存在')
+        elif target['cover_face_id']!=undo['target_cover_after']:
+            conflicts.append('目标人物封面已在合并后改变')
+        for face in undo['faces']:
+            current=c.execute(
+                'SELECT person_id,reviewed,ignored FROM faces WHERE id=?',(face['id'],)
+            ).fetchone()
+            expected=undo.get('face_target_state')
+            if (
+                not current
+                or int(current['person_id'])!=target_id
+                or (
+                    expected is not None
+                    and (
+                        int(current['reviewed'] or 0)!=int(expected['reviewed'])
+                        or int(current['ignored'] or 0)!=int(expected['ignored'])
+                    )
+                )
+            ):
+                conflicts.append(f"人脸 {face['id']} 已在合并后改变")
+        for ref in undo['references']:
+            current=c.execute(
+                'SELECT suggested_person_id FROM people WHERE id=?',(ref['id'],)
+            ).fetchone()
+            if not current or current['suggested_person_id']!=target_id:
+                conflicts.append(f"候选引用 {ref['id']} 已在合并后改变")
+        preview={
+            'operation_id':operation_id,'dry_run':bool(body.dry_run),
+            'can_undo':not conflicts,'conflicts':conflicts,
+            'faces':len(undo['faces']),'source_id':source_id,'target_id':target_id,
+        }
+        if body.dry_run:return preview
+        if conflicts:
+            raise ApiProblem(
+                409,'合并后的对象已变化，未执行撤销','undo_conflict',
+                operation_id=operation_id,conflicts=conflicts,
+            )
+        columns=[
+            name for name in (
+                'id','name','confirmed','suggested_person_id','alias','ignored',
+                'cover_face_id'
+            ) if name in source
+        ]
+        c.execute(
+            f"INSERT INTO people({','.join(columns)}) VALUES ({','.join('?' for _ in columns)})",
+            [source[name] for name in columns],
+        )
+        for face in undo['faces']:
+            c.execute(
+                '''UPDATE faces SET person_id=?,reviewed=?,ignored=? WHERE id=?''',
+                (
+                    source_id,face['reviewed'],face.get('ignored',0),face['id'],
+                ),
+            )
+        c.execute(
+            'UPDATE people SET cover_face_id=? WHERE id=?',
+            (undo['target_cover_before'],target_id),
+        )
+        for ref in undo['references']:
+            c.execute(
+                'UPDATE people SET suggested_person_id=? WHERE id=?',
+                (ref['suggested_person_id'],ref['id']),
+            )
+        result=json.loads(row['result_json'] or '{}')
+        result.update({'undone':True,'undo_faces':len(undo['faces'])})
+        receipt=finish_operation(
+            c,operation_id,result,status='undone',state_committed=True,undo=undo,
+        )
+    invalidate_face_index()
+    return receipt
 
 @app.post('/api/faces/{fid}/split')
-def split_face(fid:int):
+def split_face(fid:int,request:Request):
+    if fid<=0:raise ApiProblem(422,'人脸编号必须为正整数','invalid_request')
+    operation_id=operation_id_from(None,request)
+    with operation_lock(operation_id):
+        return split_face_locked(fid,operation_id)
+
+def split_face_locked(fid,operation_id):
     with db() as c:
+        operation_id,existing=prepare_operation(
+            c,'face_split',operation_id,{'face_id':fid}
+        )
+        if existing:return existing
         row=c.execute('SELECT person_id,ignored,reviewed FROM faces WHERE id=?',(fid,)).fetchone()
-        if not row: raise HTTPException(404,'人脸不存在')
+        if not row: raise ApiProblem(404,'人脸不存在','not_found',operation_id=operation_id)
         pid=c.execute('INSERT INTO people DEFAULT VALUES').lastrowid
         c.execute('UPDATE faces SET person_id=?,reviewed=0,ignored=0 WHERE id=?',(pid,fid))
         c.execute('UPDATE people SET cover_face_id=NULL WHERE id=? AND cover_face_id=?',(row['person_id'],fid))
@@ -2031,19 +2752,24 @@ def split_face(fid:int):
             json.dumps({'person_id':row['person_id'],'ignored':row['ignored'],'reviewed':row['reviewed']}),
             json.dumps({'person_id':pid,'ignored':0,'reviewed':0}),
         ))
+        receipt=finish_operation(
+            c,operation_id,{'person_id':pid},status='committed',
+            state_committed=True,
+        )
     invalidate_face_index()
-    return {'person_id':pid}
+    return receipt
 
 class IgnoreRequest(BaseModel):
     ignored:bool=True
 
 class PhotoPassersbyRequest(BaseModel):
     ignored:bool=True
-    person_ids:list[int]=Field(default_factory=list)
+    person_ids:list[PositiveId]=Field(default_factory=list,max_length=250)
 
 @app.post('/api/photos/{aid}/passersby')
 def mark_photo_passersby(aid:int,body:PhotoPassersbyRequest):
     """Mark only this photo's still-unnamed people as passersby, with a bounded undo."""
+    if aid<=0:raise ApiProblem(422,'照片编号必须为正整数','invalid_request')
     with db() as c:
         asset=c.execute('SELECT 1 FROM assets a WHERE a.id=? AND '+ACTIVE_ASSET,(aid,)).fetchone()
         if not asset: raise HTTPException(404,'照片不存在或已不在资料库中')
@@ -2100,6 +2826,7 @@ def mark_photo_passersby(aid:int,body:PhotoPassersbyRequest):
 
 @app.post('/api/people/{pid}/ignore')
 def ignore_person(pid:int,body:IgnoreRequest):
+    if pid<=0:raise ApiProblem(422,'人物编号必须为正整数','invalid_request')
     with db() as c:
         row=c.execute('SELECT * FROM people WHERE id=?',(pid,)).fetchone()
         if not row: raise HTTPException(404,'人物不存在')
@@ -2118,10 +2845,21 @@ def ignore_person(pid:int,body:IgnoreRequest):
     return {'ok':True,'ignored':body.ignored}
 
 @app.post('/api/faces/{fid}/ignore')
-def ignore_face(fid:int,body:IgnoreRequest):
+def ignore_face(fid:int,body:IgnoreRequest,request:Request):
+    if fid<=0:raise ApiProblem(422,'人脸编号必须为正整数','invalid_request')
+    operation_id=operation_id_from(None,request)
+    with operation_lock(operation_id):
+        return ignore_face_locked(fid,body,operation_id)
+
+def ignore_face_locked(fid,body,operation_id):
     with db() as c:
+        operation_id,existing=prepare_operation(
+            c,'face_ignore',operation_id,
+            {'face_id':fid,'ignored':bool(body.ignored)},
+        )
+        if existing:return existing
         row=c.execute('SELECT * FROM faces WHERE id=?',(fid,)).fetchone()
-        if not row: raise HTTPException(404,'人脸不存在')
+        if not row: raise ApiProblem(404,'人脸不存在','not_found',operation_id=operation_id)
         old_person=row['person_id']
         if body.ignored:
             pid=c.execute('INSERT INTO people(name,ignored) VALUES (?,1)',('路人',)).lastrowid
@@ -2142,8 +2880,11 @@ def ignore_face(fid:int,body:IgnoreRequest):
                 c.execute('DELETE FROM people WHERE id=?',(old_person,))
             after={'person_id':pid,'ignored':0}
         c.execute('INSERT INTO edits(created_at,target,before_json,after_json) VALUES (?,?,?,?)',(now(),f'face:{fid}',json.dumps({'person_id':old_person}),json.dumps(after)))
+        receipt=finish_operation(
+            c,operation_id,after,status='committed',state_committed=True,
+        )
     invalidate_face_index()
-    return after
+    return receipt
 
 @app.get('/api/thumb/{aid}')
 def thumbnail(aid:int):
@@ -2241,6 +2982,11 @@ app.mount('/',StaticFiles(directory=Path(os.environ.get('PHOTO_WEB_ROOT',str(BAS
 
 if __name__=='__main__':
     import uvicorn
-    parser=argparse.ArgumentParser();parser.add_argument('--port',type=int,default=8765)
+    parser=argparse.ArgumentParser();parser.add_argument('--port',type=int,default=APP_PORT)
     args=parser.parse_args()
-    uvicorn.run(app,host='127.0.0.1',port=args.port,access_log=False)
+    APP_PORT=args.port
+    config=uvicorn.Config(app,host='127.0.0.1',port=args.port,access_log=False)
+    UVICORN_SERVER=uvicorn.Server(config)
+    UVICORN_SERVER.run()
+    if not UVICORN_SERVER.started:
+        raise SystemExit(1)

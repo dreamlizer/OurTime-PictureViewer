@@ -49,6 +49,8 @@ def parse_id_list(raw, limit=100, label='编号'):
         values = list(dict.fromkeys(int(x) for x in str(raw).split(',') if str(x).strip()))
     except (TypeError, ValueError) as exc:
         raise ValueError(f'{label}无效') from exc
+    if any(value <= 0 for value in values):
+        raise ValueError(f'{label}必须为正整数')
     if len(values) > limit:
         raise ValueError(f'一次最多查询 {limit} 个{label}')
     return values
@@ -199,6 +201,8 @@ def photo_conditions(q='', filter='all', person='', directory='', max_id=0, date
             at_most = re.fullmatch(r'upto(\d+)', raw)
             if exact:
                 group_min = group_max = int(exact.group(1))
+                if group_min < 1:
+                    raise ValueError('合影人数至少为 1')
             elif interval:
                 group_min, group_max = map(int, interval.groups())
             elif at_least:
@@ -214,6 +218,12 @@ def photo_conditions(q='', filter='all', person='', directory='', max_id=0, date
         if group_min and group_max and group_min > group_max:
             raise ValueError('最少人数不能大于最多人数')
         current = 'all'
+    allowed = {
+        'all','timeline','excluded','uncertain','duplicates','errors',
+        'missing','screenshots','favorites','no_place',
+    }
+    if current not in allowed:
+        raise ValueError('不支持的照片筛选')
     path_condition = 'asset_id=a.id'
     path_values = []
     if max_id > 0:
