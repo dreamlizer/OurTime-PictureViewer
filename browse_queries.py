@@ -403,14 +403,22 @@ def nearby_photo_spec(conn, anchor_id, radius_m):
 
 def fetch_photos(conn, *, q='', filter='all', person='', offset=0, limit=60, directory='', sort='date_desc',
                  sequence=False, max_id=0, around=0, tail=False, date_from='', date_to='', place='',
-                 nearby=0, radius_m=100, map_cell=0, map_lat_bucket=None, map_lng_bucket=None):
+                 nearby=0, radius_m=100, map_cell=0, map_lat_bucket=None, map_lng_bucket=None,
+                 map_west=None, map_south=None, map_east=None, map_north=None):
     if sort not in PHOTO_ORDERS:
         raise ValueError('未知的照片排序方式')
     spec = photo_conditions(
         q=q, filter=filter, person=person, directory=directory, max_id=max_id,
         date_from=date_from, date_to=date_to, place=place,
     )
-    map_requested=bool(map_cell or map_lat_bucket is not None or map_lng_bucket is not None)
+    bounds_raw=(map_west,map_south,map_east,map_north)
+    bounds_supplied=[value is not None for value in bounds_raw]
+    if any(bounds_supplied) and not all(bounds_supplied):
+        raise ValueError('地图视野边界必须完整提供')
+    map_requested=bool(
+        map_cell or map_lat_bucket is not None or map_lng_bucket is not None
+        or any(bounds_supplied)
+    )
     if map_requested:
         try:
             cell=float(map_cell)
@@ -425,6 +433,21 @@ def fetch_photos(conn, *, q='', filter='all', person='', offset=0, limit=60, dir
             ' AND CAST(floor(a.longitude/?) AS INTEGER)=?'
         )
         spec['values'].extend([cell,lat_bucket,cell,lng_bucket])
+        if all(bounds_supplied):
+            try:
+                west,south,east,north=(float(value) for value in bounds_raw)
+            except (TypeError,ValueError) as exc:
+                raise ValueError('地图视野边界无效') from exc
+            if (
+                not all(math.isfinite(value) for value in (west,south,east,north))
+                or not -180<=west<east<=180 or not -90<=south<north<=90
+            ):
+                raise ValueError('地图视野边界无效')
+            spec['where'] += (
+                ' AND a.latitude BETWEEN ? AND ?'
+                ' AND a.longitude BETWEEN ? AND ?'
+            )
+            spec['values'].extend([south,north,west,east])
     if nearby:
         nearby_clause, nearby_values, _anchor = nearby_photo_spec(conn, nearby, radius_m)
         spec['where'] += ' AND ' + nearby_clause

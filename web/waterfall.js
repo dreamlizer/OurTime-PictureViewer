@@ -249,7 +249,7 @@ async function loadPhotos(options={}){
  };
  waterfall.pending.clear();waterfall.cache=new Map();waterfall.heights=[];waterfall.shapes=[];waterfall.ranges=[];waterfall.pageEnds=[];waterfall.total=0;waterfall.maxId=0;waterfall.error=false;
  const mapFilter=state.placeMapFilter;
- waterfall.query={q:state.q,filter:mapFilter?'all':state.view,person:state.person,directory:state.directory,sort:state.sort,date_from:state.dateFrom||'',date_to:state.dateTo||'',place:state.place||'',...(mapFilter?{map_cell:mapFilter.cell,map_lat_bucket:mapFilter.lat_bucket,map_lng_bucket:mapFilter.lng_bucket}:{})};
+ waterfall.query={q:state.q,filter:mapFilter?'all':state.view,person:state.person,directory:state.directory,sort:state.sort,date_from:state.dateFrom||'',date_to:state.dateTo||'',place:state.place||'',...(mapFilter?{map_cell:mapFilter.cell,map_lat_bucket:mapFilter.lat_bucket,map_lng_bucket:mapFilter.lng_bucket,...('map_west' in mapFilter?{map_west:mapFilter.map_west,map_south:mapFilter.map_south,map_east:mapFilter.map_east,map_north:mapFilter.map_north}:{})}:{})};
  waterfall.width=streamMetrics().width;waterfall.columns=streamMetrics().columns;state.offset=0;
  const grid=$('#photo-grid');const keepHeight=Math.max(grid.offsetHeight||0,window.innerHeight*0.45);waterfall.seenPhotos=new Set();streamEntrance.disconnect();grid.classList.add('is-updating');grid.style.minHeight=keepHeight+'px';$('#stream-status').textContent='正在加载照片…';$('#stream-retry').hidden=true;$('#no-results').hidden=true;$('#empty').hidden=true;$('#result-count').textContent='加载中';
  if(typeof syncGroupResultCount==='function') syncGroupResultCount(state.view,{clear:true});

@@ -1311,6 +1311,54 @@ def job_error(jid,path,stage,message):
         c.execute('INSERT INTO job_errors(job_id,path,stage,message) VALUES (?,?,?,?)',(jid,str(path),stage,str(message)))
         c.execute('UPDATE jobs SET errors=errors+1 WHERE id=?',(jid,))
 
+def reconcile_missing_files(root, *, stop_event=STOP, stat_path=None,
+                            error_callback=None, batch_size=250):
+    root_path=Path(root)
+    stat_path=stat_path or (lambda path:path.stat())
+    result={'checked':0,'missing':0,'errors':0,'root_accessible':False}
+    try:
+        root_path.stat()
+        if not root_path.is_dir():
+            raise NotADirectoryError(str(root_path))
+    except OSError as exc:
+        result['errors']=1
+        if error_callback:error_callback(root_path,exc)
+        return result
+    result['root_accessible']=True
+    where,values=directory_predicate(root_path)
+    last_id=0
+    page=max(1,min(int(batch_size),1000))
+    while not stop_event.is_set():
+        with db() as c:
+            rows=c.execute(
+                'SELECT id,path,size,mtime_ns FROM files '
+                'WHERE id>? AND '+where+' ORDER BY id LIMIT ?',
+                [last_id,*values,page],
+            ).fetchall()
+        if not rows:break
+        missing=[]
+        for row in rows:
+            path=Path(row['path'])
+            result['checked']+=1
+            try:
+                stat_path(path)
+            except FileNotFoundError:
+                missing.append((row['id'],row['path'],row['size'],row['mtime_ns']))
+            except OSError as exc:
+                result['errors']+=1
+                if error_callback:error_callback(path,exc)
+        if missing:
+            with db() as c:
+                for file_id,path,size,mtime_ns in missing:
+                    result['missing']+=c.execute(
+                        '''UPDATE files SET exists_now=0
+                           WHERE id=? AND path=? AND size IS ? AND mtime_ns IS ?
+                             AND exists_now<>0''',
+                        (file_id,path,size,mtime_ns),
+                    ).rowcount
+        last_id=rows[-1]['id']
+    return result
+
 def run_scan(jid):
     try:
         with db() as c:
@@ -1468,20 +1516,12 @@ def run_scan(jid):
                 for future in pending: future.result()
             flush_job_progress(force=True)
             if not STOP.is_set():
-                with db() as c:
-                    rows=c.execute('SELECT id,path FROM files').fetchall()
-                    for row in rows:
-                        try:
-                            Path(row['path']).relative_to(root_path)
-                        except ValueError:
-                            continue
-                        # Only a confirmed absent path is marked missing; access errors stay in the error list.
-                        try:
-                            Path(row['path']).stat()
-                        except FileNotFoundError:
-                            c.execute('UPDATE files SET exists_now=0 WHERE id=?',(row['id'],))
-                        except OSError:
-                            pass
+                reconcile_missing_files(
+                    root_path,
+                    error_callback=lambda path,exc:job_error(
+                        jid,path,'缺失文件核对',exc
+                    ),
+                )
         with progress_lock:
             if not STOP.is_set():
                 progress['total']=progress['processed']
@@ -2018,7 +2058,7 @@ def asset_dict(row):
     return d
 
 @app.get('/api/photos')
-def photos(q:str='',filter:str='all',person:str='',offset:int=0,limit:int=60,directory:str='',sort:str='date_desc',sequence:bool=False,max_id:int=0,around:int=0,tail:bool=False,date_from:str='',date_to:str='',place:str='',nearby:int=0,radius_m:int=100,map_cell:float=0,map_lat_bucket:float|None=None,map_lng_bucket:float|None=None):
+def photos(q:str='',filter:str='all',person:str='',offset:int=0,limit:int=60,directory:str='',sort:str='date_desc',sequence:bool=False,max_id:int=0,around:int=0,tail:bool=False,date_from:str='',date_to:str='',place:str='',nearby:int=0,radius_m:int=100,map_cell:float=0,map_lat_bucket:float|None=None,map_lng_bucket:float|None=None,map_west:float|None=None,map_south:float|None=None,map_east:float|None=None,map_north:float|None=None):
     if offset<0 or limit<1 or limit>500 or max_id<0 or around<0 or nearby<0:
         raise ApiProblem(400,'分页或照片编号参数无效','invalid_request')
     try:
@@ -2028,6 +2068,7 @@ def photos(q:str='',filter:str='all',person:str='',offset:int=0,limit:int=60,dir
                 directory=directory, sort=sort, sequence=sequence, max_id=max_id, around=around, tail=tail,
                 date_from=date_from, date_to=date_to, place=place, nearby=nearby, radius_m=radius_m,
                 map_cell=map_cell, map_lat_bucket=map_lat_bucket, map_lng_bucket=map_lng_bucket,
+                map_west=map_west, map_south=map_south, map_east=map_east, map_north=map_north,
             )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
@@ -2988,16 +3029,26 @@ def reveal(aid:int):
     subprocess.Popen(['explorer.exe','/select,',str(path)])
     return {'ok':True}
 
+def collect_export_snapshot(conn, after_table=None):
+    conn.execute('BEGIN')
+    result={'exported_at':now(),'format_version':2}
+    queries=(
+        ('assets','SELECT * FROM assets'),
+        ('files','SELECT * FROM files'),
+        ('people','SELECT * FROM people'),
+        ('faces','SELECT id,asset_id,person_id,bbox,score,reviewed FROM faces'),
+        ('edits','SELECT * FROM edits'),
+        ('excluded_roots','SELECT * FROM excluded_roots'),
+    )
+    for name,query in queries:
+        result[name]=[dict(row) for row in conn.execute(query)]
+        if after_table:after_table(name)
+    return result
+
 @app.get('/api/export')
 def export():
     with db() as c:
-        result={'exported_at':now(),'format_version':2,
-                'assets':[dict(r) for r in c.execute('SELECT * FROM assets')],
-                'files':[dict(r) for r in c.execute('SELECT * FROM files')],
-                'people':[dict(r) for r in c.execute('SELECT * FROM people')],
-                'faces':[dict(r) for r in c.execute('SELECT id,asset_id,person_id,bbox,score,reviewed FROM faces')],
-                'edits':[dict(r) for r in c.execute('SELECT * FROM edits')],
-                'excluded_roots':[dict(r) for r in c.execute('SELECT * FROM excluded_roots')]}
+        result=collect_export_snapshot(c)
     return Response(json.dumps(result,ensure_ascii=False,indent=2),media_type='application/json',headers={'Content-Disposition':'attachment; filename="photo-library.json"'})
 
 @app.post('/api/backup')

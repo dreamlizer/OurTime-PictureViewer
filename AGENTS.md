@@ -19,6 +19,9 @@ FastAPI + uvicorn + SQLite WAL；前端是 `web/` 静态 HTML/CSS/JS，无构建
 - 后台 `app.py`，元数据 `metadata_reader.py`，地名 `geo_labels.py`。
 - 正式库：`data/library.sqlite3`、`data/thumbs/`、`data/faces/`；备份 `data/backups/`；PID/日志在 `data/`。
 - 验证脚本在 `validation/`，证据在 `validation/reports/`；`validation/work/` 是隔离测试场。
+- 导入 `app` 不应初始化数据库或恢复任务；初始化/关闭只走 FastAPI lifespan 或显式 `initialize_application()` / `shutdown_application()`。
+- 扫描末尾缺失核对必须用目录谓词在 SQL 内限定当前 root；磁盘 `stat` 不放在数据库事务中，确认缺失后用路径、大小和 mtime 防并发覆盖地短事务更新。
+- `/api/export` 的六张业务表来自同一显式 SQLite 读快照；它是 `format_version=2` 清单，不含完整 embedding，不替代 `Connection.backup()` 生成的数据库备份。
 - `app.js` 先于 `viewer.js` 加载。`esc` / `prettyPlace` / `personLabel` 等公共函数必须放在 `app.js` 前部，禁止只写在 `viewer.js`。
 - 用户合同看 [README.md](README.md)。不要把用户照片路径写入文档或记忆。
 
@@ -36,6 +39,7 @@ smoke 至少要拦住这些：
 - `prettyPlace()` / `personLabel()` / `esc()` 先定义再调用，且定义在 `app.js`。
 - 照片流切换时先隐藏 `#no-results`，显示“正在加载照片”，不能先闪“没有照片”。
 - 大图照片地图入口只能使用真实经纬度；单张地图默认约 0.2 倍，只绘制该照片的定位针和缩略图，点击缩略图必须回到同一张大图。没有坐标时提示，禁止按地点文字猜造坐标。
+- 地点总览的聚合标记点击后必须保留产生标记时的完整视野边界；照片分页与大图连续浏览沿用该固定范围，不能改用移动后的地图视野或静默退成整个格网。
 - 现役接口空闲时：`/api/photos/{id}` 有 `files` / `faces` / `effective_place`；`/api/people/{id}` 每张脸有数字 `asset_id`。人物详情按 `limit` 分页，默认 48 张脸；合并按钮必须是 `type=button`，提示要写在对话框内。
 - 合影详情卡片的快捷排除必须二次确认并使用 `display_only`，只退出展示，不清理缩略图、人脸或姓名关系；恢复仍走现有“已排除”入口。
 

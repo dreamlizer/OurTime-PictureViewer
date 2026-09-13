@@ -175,7 +175,17 @@ function capturePlaceMapState(anchor=null){
 }
 async function openPlaceDetail(place,anchor=null,mapFilter=null){
   if(state.view==='places')state.placeReturn=capturePlaceMapState(anchor);
-  state.placeMapFilter=mapFilter&&Number.isFinite(Number(mapFilter.cell))&&Number.isFinite(Number(mapFilter.lat_bucket))&&Number.isFinite(Number(mapFilter.lng_bucket))?{cell:Number(mapFilter.cell),lat_bucket:Number(mapFilter.lat_bucket),lng_bucket:Number(mapFilter.lng_bucket)}:null;
+  if(mapFilter){
+    const base={cell:Number(mapFilter.cell),lat_bucket:Number(mapFilter.lat_bucket),lng_bucket:Number(mapFilter.lng_bucket)};
+    if(!Number.isFinite(base.cell)||!Number.isFinite(base.lat_bucket)||!Number.isFinite(base.lng_bucket))throw new Error('地图定位点无效');
+    const bounds={map_west:Number(mapFilter.map_west),map_south:Number(mapFilter.map_south),map_east:Number(mapFilter.map_east),map_north:Number(mapFilter.map_north)};
+    const supplied=['map_west','map_south','map_east','map_north'].map(key=>mapFilter[key]!==undefined&&mapFilter[key]!==null);
+    if(supplied.some(Boolean)){
+      if(!supplied.every(Boolean)||!Object.values(bounds).every(Number.isFinite)||bounds.map_west>=bounds.map_east||bounds.map_south>=bounds.map_north)throw new Error('地图视野边界无效');
+      Object.assign(base,bounds);
+    }
+    state.placeMapFilter=base;
+  }else state.placeMapFilter=null;
   await setView('place:'+place);
 }
 async function returnToPlacesMap(){
@@ -827,7 +837,7 @@ async function loadPlaceMap(){
   for(const item of data.clusters||[]){
     if(item.latitude==null||item.longitude==null)continue;
     const marker=L.marker(placeMapPoint(item.latitude,item.longitude));
-    marker.bindPopup('<button type="button" class="place-popup" data-place="'+esc(item.place||'')+'" data-anchor-id="'+(Number(item.anchor_id)||0)+'" data-latitude="'+Number(item.latitude)+'" data-longitude="'+Number(item.longitude)+'" data-map-cell="'+Number(item.cell)+'" data-map-lat-bucket="'+Number(item.lat_bucket)+'" data-map-lng-bucket="'+Number(item.lng_bucket)+'"><span class="place-popup-kicker">拍摄地点</span><strong>'+esc(item.place||'未命名地点')+'</strong><em>'+fmt(item.count)+' 张照片</em><span class="place-popup-go">查看这些照片</span></button>', {className:'place-popup-wrap', closeButton:true, maxWidth:280});
+    marker.bindPopup('<button type="button" class="place-popup" data-place="'+esc(item.place||'')+'" data-anchor-id="'+(Number(item.anchor_id)||0)+'" data-latitude="'+Number(item.latitude)+'" data-longitude="'+Number(item.longitude)+'" data-map-cell="'+Number(item.cell)+'" data-map-lat-bucket="'+Number(item.lat_bucket)+'" data-map-lng-bucket="'+Number(item.lng_bucket)+'" data-map-west="'+Number(b.west)+'" data-map-south="'+Number(b.south)+'" data-map-east="'+Number(b.east)+'" data-map-north="'+Number(b.north)+'"><span class="place-popup-kicker">拍摄地点</span><strong>'+esc(item.place||'未命名地点')+'</strong><em>'+fmt(item.count)+' 张照片</em><span class="place-popup-go">查看这些照片</span></button>', {className:'place-popup-wrap', closeButton:true, maxWidth:280});
     state.placeCluster.addLayer(marker);
   }
   const status=$('#places-stream-status'); if(status)status.textContent=data.truncated?'当前视野聚合点过多，仅显示前 '+fmt((data.clusters||[]).length)+' 个；请放大地图查看完整范围':data.clusters&&data.clusters.length?'点击圆点查看该处照片':'这一层视野里还没有坐标点，可缩小地图或回到北京';
@@ -1322,7 +1332,7 @@ document.addEventListener('click',action(async e=>{
  const group=e.target.closest('[data-group]');
  if(group){state.sort='date_desc';$('#sort-order').value=state.sort;await setView('group:'+group.dataset.group);return;}
  const place=e.target.closest('[data-place]');
- if(place){const latitude=Number(place.dataset.latitude),longitude=Number(place.dataset.longitude),id=Number(place.dataset.anchorId),cell=Number(place.dataset.mapCell),lat_bucket=Number(place.dataset.mapLatBucket),lng_bucket=Number(place.dataset.mapLngBucket);const mapFilter=Number.isFinite(cell)&&Number.isFinite(lat_bucket)&&Number.isFinite(lng_bucket)?{cell,lat_bucket,lng_bucket}:null;await openPlaceDetail(place.dataset.place,Number.isFinite(latitude)&&Number.isFinite(longitude)?{id,latitude,longitude}:null,mapFilter);return;}
+ if(place){const latitude=Number(place.dataset.latitude),longitude=Number(place.dataset.longitude),id=Number(place.dataset.anchorId),cell=Number(place.dataset.mapCell),lat_bucket=Number(place.dataset.mapLatBucket),lng_bucket=Number(place.dataset.mapLngBucket);const hasMap=Number.isFinite(cell)&&Number.isFinite(lat_bucket)&&Number.isFinite(lng_bucket);const mapFilter=hasMap?{cell,lat_bucket,lng_bucket,...(place.dataset.mapWest!==undefined?{map_west:Number(place.dataset.mapWest),map_south:Number(place.dataset.mapSouth),map_east:Number(place.dataset.mapEast),map_north:Number(place.dataset.mapNorth)}:{})}:null;await openPlaceDetail(place.dataset.place,Number.isFinite(latitude)&&Number.isFinite(longitude)?{id,latitude,longitude}:null,mapFilter);return;}
  const folder=e.target.closest('[data-folder]');
  if(folder)await openFolder(folder.dataset.folder);
  if(e.target.id==='banner-details')await setView('scan');

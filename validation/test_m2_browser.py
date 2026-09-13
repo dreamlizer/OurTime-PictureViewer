@@ -168,6 +168,34 @@ def main():
                     "地图聚合计数与点击后的照片查询一致",
                     checks,
                 )
+                frozen = page.evaluate(
+                    """async () => {
+                      const before={...state.placeMapFilter};
+                      state.placeMap.setView([0,0],3,{animate:false});
+                      await streamPage(1);
+                      const context=currentBrowseContext();
+                      return {
+                        before,
+                        query:{
+                          map_west:waterfall.query.map_west,map_south:waterfall.query.map_south,
+                          map_east:waterfall.query.map_east,map_north:waterfall.query.map_north
+                        },
+                        context:{
+                          map_west:context.map_west,map_south:context.map_south,
+                          map_east:context.map_east,map_north:context.map_north
+                        }
+                      };
+                    }"""
+                )
+                expected = {
+                    key: frozen["before"][key]
+                    for key in ("map_west", "map_south", "map_east", "map_north")
+                }
+                check(
+                    frozen["query"] == expected and frozen["context"] == expected,
+                    "点击后移动地图不改变分页和大图浏览的原视野边界",
+                    checks,
+                )
                 check(errors == [], "真实页面无pageerror或未处理Promise rejection", checks)
                 browser.close()
                 browser = None
