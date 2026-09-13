@@ -74,6 +74,9 @@ def main() -> int:
             assert page.locator("#scan-face-photos").inner_text() == "9"
             assert page.locator("#scan-faces-found").inner_text() == "17"
             assert page.locator("#scan-face-average").inner_text() == "0.80 秒/张"
+            assert page.locator("#scan-progress").evaluate("el => el.classList.contains('is-live')") == (status != "paused")
+            heartbeat_animation = page.locator("#scan-heartbeat").evaluate("el => getComputedStyle(el, '::after').animationName")
+            assert (heartbeat_animation != "none") == (status != "paused")
             if status == "paused":
                 assert page.locator(".add-photos-card").is_visible()
                 assert page.locator("#scan-folder-picker").is_visible()
@@ -91,9 +94,15 @@ def main() -> int:
         assert page.locator("#scan-stage").inner_text() == "正在清点文件，已发现 46 张照片"
         assert page.locator("#scan-fraction").inner_text() == "46 张"
         assert page.locator("#scan-progress-track").get_attribute("class").endswith("is-inventory")
+        assert page.locator("#scan-progress").evaluate("el => el.classList.contains('is-live')")
+        page.evaluate("""() => { window.__ourTimeApp.state.scanStatusAt = Date.now() - 16000; window.__ourTimeApp.syncScanActivity(); }""")
+        assert not page.locator("#scan-progress").evaluate("el => el.classList.contains('is-live')")
+        assert page.locator("#scan-progress").evaluate("el => el.classList.contains('is-stale')")
+        assert page.locator("#scan-heartbeat").evaluate("el => getComputedStyle(el, '::after').animationName") == "none"
         current["job"] = job("paused")
         page.evaluate("window.__ourTimeApp.refreshStatus?.()")
         page.wait_for_timeout(100)
+        assert not page.locator("#scan-progress").evaluate("el => el.classList.contains('is-live') || el.classList.contains('is-stale')")
 
         # Compatibility check against the currently running backend: the picker
         # obtains drive roots from /api/drives even before a service restart.

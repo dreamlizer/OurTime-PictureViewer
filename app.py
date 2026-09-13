@@ -1499,7 +1499,7 @@ def rename_place(body:PlaceRenameRequest):
     return {'updated':len(ids),'name':target,'matched':bool(matched or remembered), 'remembered':remembered}
 
 @app.get('/api/places')
-def places(q:str='', offset:int=0, limit:int=80, west:float|None=None, south:float|None=None, east:float|None=None, north:float|None=None, zoom:int=11):
+def places(q:str='', offset:int=0, limit:int=80, west:float|None=None, south:float|None=None, east:float|None=None, north:float|None=None, zoom:float=11):
     values=[]
     having="HAVING place IS NOT NULL AND place!=''"
     needle=(q or '').strip()
@@ -1509,9 +1509,9 @@ def places(q:str='', offset:int=0, limit:int=80, west:float|None=None, south:flo
     grouped='SELECT coalesce(nullif(a.manual_place,\'\'), a.place) place, count(*) n, avg(a.latitude) latitude, avg(a.longitude) longitude FROM assets a WHERE '+ACTIVE_ASSET+' GROUP BY place '
     with db() as c:
         if None not in (west,south,east,north):
-            cell=max(0.02, min(8.0, 360/(2**max(1,min(int(zoom),18)))))
-            rows=c.execute('SELECT round(a.latitude/?,4)*? lat, round(a.longitude/?,4)*? lon, count(*) n, min(coalesce(nullif(a.manual_place,\'\'), a.place)) place FROM assets a WHERE '+ACTIVE_ASSET+' AND a.latitude BETWEEN ? AND ? AND a.longitude BETWEEN ? AND ? GROUP BY 1,2 ORDER BY n DESC LIMIT 400',(cell,cell,cell,cell,south,north,west,east)).fetchall()
-            return {'mode':'map','zoom':zoom,'clusters':[{'latitude':r['lat'],'longitude':r['lon'],'count':r['n'],'place':r['place']} for r in rows]}
+            cell=max(0.02, min(8.0, 360/(2**max(1,min(float(zoom),18)))))
+            rows=c.execute('SELECT round(a.latitude/?,4)*? lat, round(a.longitude/?,4)*? lon, count(*) n, min(a.id) anchor_id, coalesce(nullif(a.manual_place,\'\'), a.place) place FROM assets a WHERE '+ACTIVE_ASSET+' AND a.latitude BETWEEN ? AND ? AND a.longitude BETWEEN ? AND ? GROUP BY 1,2 ORDER BY n DESC LIMIT 400',(cell,cell,cell,cell,south,north,west,east)).fetchall()
+            return {'mode':'map','zoom':zoom,'clusters':[{'latitude':r['lat'],'longitude':r['lon'],'count':r['n'],'place':r['place'],'anchor_id':r['anchor_id']} for r in rows]}
         total=c.execute('SELECT count(*) FROM ('+grouped+having+') t',values).fetchone()[0]
         rows=c.execute(grouped+having+' ORDER BY n DESC, place LIMIT ? OFFSET ?',values+[min(max(limit,1),200),max(offset,0)]).fetchall()
     items=[{'place':r['place'],'count':r['n'],'latitude':r['latitude'],'longitude':r['longitude']} for r in rows]

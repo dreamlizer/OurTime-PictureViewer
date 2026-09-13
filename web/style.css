@@ -113,15 +113,6 @@ body{overflow-anchor:none}
 .place-popup em{font-style:normal;font-size:12px;color:var(--muted)}
 .place-popup-go{margin-top:8px;display:inline-flex;align-items:center;justify-content:center;padding:9px 12px;border-radius:6px;background:var(--green);color:#fff;font-size:12px}
 .place-popup:hover .place-popup-go{background:#324d33}
-.place-refine{display:flex;flex-direction:column;gap:10px;margin:8px 0 16px;padding:16px 18px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
-.place-refine[hidden]{display:none!important}
-.place-refine-copy b{display:block;font-size:15px;font-weight:500;margin-bottom:4px}
-.place-refine-row{display:flex;gap:8px;align-items:center}
-.place-refine-row input{flex:1;border:1px solid var(--line);border-radius:5px;padding:9px 10px}
-.place-refine-suggest{display:flex;flex-wrap:wrap;gap:8px}
-.place-suggest{border:1px solid var(--line);background:#fff;border-radius:999px;padding:6px 10px;font-size:12px;color:var(--ink)}
-.place-suggest.matched{border-color:#a3b28f;background:#f3f6ec}
-.place-suggest small{display:block;color:var(--muted);font-size:10px}
 #photo-mat{position:relative}
 .face-name-layer{position:absolute;inset:0;pointer-events:none}.face-name-layer button.face-name{pointer-events:auto;border:0;cursor:pointer}
 .face-name{position:absolute;left:0;top:0;transform:none;padding:6px 5px;border-radius:3px;background:rgba(20,24,18,.38);color:#f6f1e6;font:13px/1.2 var(--serif);letter-spacing:.22em;writing-mode:vertical-rl;text-orientation:mixed;max-height:42%;overflow:hidden;white-space:nowrap;text-shadow:0 1px 10px #000a}

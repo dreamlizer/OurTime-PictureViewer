@@ -72,7 +72,7 @@ main { margin-left: 208px; padding: 0 28px 24px; min-width: 0; }
 .group-detail-back { flex: 0 0 36px; width: 36px; height: 36px; min-height: 36px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border: 1px solid #bac5be; border-radius: 50%; background: var(--panel); color: var(--green); }
 .group-detail-back:hover { background: var(--surface-hover); border-color: #829b8b; }
 .group-detail-back svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-.masthead-title { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
+.masthead-title { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .group-result-count { color: var(--muted); font-size: 14px; font-variant-numeric: tabular-nums; }
 .people-named-count { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .masthead .stats { flex-wrap: wrap; flex-shrink: 1; justify-content: flex-end; max-width: 100%; }
@@ -151,7 +151,7 @@ input:disabled, select:disabled, textarea:disabled { background-color: #e9eeea; 
 #library-view .browse-options { gap: 6px; flex: 0 1 auto; margin: 0 0 0 auto; padding: 0; }
 .browse-options select { font-size: 12px; }
 .directory-filter .text-button { font-size: 12px; padding-inline: 8px; }
-.chrome-row .batch-bar, .chrome-row .place-refine { flex-basis: 100%; order: 2; width: 100%; margin: 0; }
+.chrome-row .batch-bar { flex-basis: 100%; order: 2; width: 100%; margin: 0; }
 .chrome-row .timeline-tools { order: 1; flex-basis: 100%; margin: 0; justify-content: flex-start; }
 .batch-bar, #people-merge-bar { flex-wrap: wrap; gap: 8px 12px; padding: 12px 14px; background: #e5efe8; border: 1px solid #b5cdbd; border-radius: 9px; font-size: 13px; }
 #selected-count, #people-selected-count { font-weight: 600; color: #214b39; }
@@ -342,19 +342,8 @@ body.is-photo-place-view #places-map { height: clamp(430px, 72vh, 820px); }
 .photo-place-map-dot div { width: 13px; height: 13px; border: 2px solid #fff; border-radius: 50%; background: currentColor; box-shadow: 0 2px 7px rgba(31,45,36,.3); }
 .photo-place-map-dot.is-anchor { color: #973f35; }
 .photo-place-range-circle { stroke: #396c50; fill: #6d9a7f; }
-.place-refine { width: auto !important; padding: 0; border: 0; background: transparent; }
-.place-refine-row { display: flex; align-items: center; gap: 8px; }
-.place-refine-row label { color: var(--muted); font-size: 12px; white-space: nowrap; }
-.place-refine-row input { width: 220px; flex: 0 1 220px; }
-.place-refine-suggest { max-width: 430px; }
-.is-place-detail-view #library-view > .view-chrome .toolbar,
-.is-place-detail-view #library-view .directory-filter,
-.is-place-detail-view #library-view .browse-options { display: none; }
-.is-place-detail-view #library-view > .view-chrome { padding-block: 8px; }
-.is-place-detail-view #library-view .chrome-row { min-height: 38px; justify-content: flex-start; }
-.is-place-detail-view #library-view .place-refine { flex: 0 1 auto; order: 0; }
-.place-suggest { min-height: 36px; padding: 7px 12px; border-radius: 7px; }
-.place-suggest small { color: var(--muted); font-size: 11px; }
+.is-place-detail-view #library-view > .view-chrome { display: none; }
+.is-place-detail-view #place-detail-edit { flex: 0 0 30px; width: 30px; height: 30px; min-height: 30px; opacity: .72; }
 
 /* Forms and dialogs: readable labels, aligned fields, predictable actions. */
 .scan-layout { grid-template-columns: minmax(0, 1.3fr) minmax(280px, .8fr); gap: 24px; }
@@ -393,11 +382,17 @@ body.is-photo-place-view #places-map { height: clamp(430px, 72vh, 820px); }
 .scan-progress { width: 100%; margin: 0 0 20px; padding: 20px 22px; }
 .scan-progress-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 18px; }
 .scan-progress-head h2 { margin: 0; font-size: 17px; }
-.scan-progress-head p { margin: 3px 0 0; color: var(--green); font-size: 12px; }
+.scan-progress-head p { display: flex; align-items: center; gap: 7px; margin: 3px 0 0; color: var(--green); font-size: 12px; }
 .scan-progress-head > strong { color: var(--ink); font-size: 21px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.scan-heartbeat { position: relative; flex: 0 0 7px; width: 7px; height: 7px; border-radius: 50%; background: #aeb9b2; }
+.scan-progress.is-live .scan-heartbeat { background: var(--green); }
+.scan-progress.is-live .scan-heartbeat::after { content: ""; position: absolute; inset: -4px; border: 1px solid rgb(47 104 78 / 38%); border-radius: 50%; animation: scan-heartbeat 2.1s ease-out infinite; }
+.scan-progress.is-stale .scan-heartbeat { background: #aeb9b2; }
 .scan-progress-track { position: relative; height: 7px; margin: 15px 0 12px; overflow: hidden; border-radius: 4px; background: #e4ebe6; }
-.scan-progress-track i { display: block; width: 0; height: 100%; border-radius: inherit; background: var(--green); transition: width .25s ease; }
-.scan-progress-track.is-inventory i { width: 28%; background: linear-gradient(90deg,#b8cbbd,var(--green),#b8cbbd); background-size: 220% 100%; animation: scan-inventory 1.8s linear infinite; }
+.scan-progress-track i { position: relative; display: block; width: 0; height: 100%; overflow: hidden; border-radius: inherit; background: var(--green); transition: width .25s ease; }
+.scan-progress.is-live .scan-progress-track:not(.is-inventory) i::after { content: ""; position: absolute; inset: 0 auto 0 -32%; width: 28%; background: linear-gradient(90deg,transparent,rgb(255 255 255 / 38%),transparent); animation: scan-flow 2.8s ease-in-out infinite; }
+.scan-progress-track.is-inventory i { width: 28%; background: #b8cbbd; }
+.scan-progress.is-live .scan-progress-track.is-inventory i { background: linear-gradient(90deg,#b8cbbd,var(--green),#b8cbbd); background-size: 220% 100%; animation: scan-inventory 1.8s linear infinite; }
 .scan-progress-summary { display: flex; flex-wrap: wrap; gap: 13px 22px; margin: 0; color: var(--muted); font-size: 12px; }
 .scan-progress-summary b { color: var(--ink); font-size: 19px; font-variant-numeric: tabular-nums; }
 .scan-face-progress { display: flex; flex-wrap: wrap; align-items: baseline; gap: 7px 18px; margin-top: 13px; padding-top: 12px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
@@ -407,6 +402,8 @@ body.is-photo-place-view #places-map { height: clamp(430px, 72vh, 820px); }
 .scan-progress #scan-current:empty { display: none; }
 .scan-progress #job-actions { margin-top: 12px; }
 @keyframes scan-inventory { from { background-position: 100% 0; } to { background-position: -120% 0; } }
+@keyframes scan-flow { 0%,18% { left: -32%; } 72%,100% { left: 118%; } }
+@keyframes scan-heartbeat { 0% { opacity: .7; transform: scale(.65); } 65%,100% { opacity: 0; transform: scale(1.35); } }
 .scan-history { width: min(900px, 100%); margin: 0 auto 20px; padding: 0 20px; }
 .scan-history > summary { padding: 14px 0; }
 .scan-history[open] > summary { border-bottom: 1px solid var(--line); }
@@ -429,12 +426,12 @@ body.is-add-photos-view .top-actions .edition { display: none; }
   .photo-place-editor { order: -1; }
   #photo-place-form { grid-template-columns: minmax(0,1fr) 96px; }
   body.is-photo-place-view #places-map { height: 55vh; min-height: 390px; }
-  .place-refine-row { flex-wrap: wrap; }
-  .place-refine-row input { flex: 1 1 160px; width: auto; }
 }
 @media (prefers-reduced-motion: reduce) {
   .scan-progress-track i { transition: none; }
-  .scan-progress-track.is-inventory i { animation: none; }
+  .scan-progress.is-live .scan-progress-track i,
+  .scan-progress.is-live .scan-progress-track i::after,
+  .scan-progress.is-live .scan-heartbeat::after { animation: none; }
 }
 .error-row b { color: var(--danger); }
 details { border-color: var(--line); font-size: 13px; }

@@ -376,6 +376,7 @@ def main():
         'id="start-scan"',
         'id="scan-view-errors"',
         'id="scan-progress-track"',
+        'id="scan-heartbeat"',
         'id="scan-remaining"',
         'id="scan-face-photos"',
         'id="scan-faces-found"',
@@ -389,6 +390,9 @@ def main():
         or "继续上次扫描" not in app
         or "await openAddPhotos(path)" not in app
         or "const scanStageLabels=" not in app
+        or "function syncScanActivity()" not in app
+        or "setInterval(syncScanActivity,1000)" not in app
+        or ".scan-progress.is-live .scan-heartbeat" not in appearance
         or "face_average_seconds" not in backend
         or "progress['phase']='processing'" not in backend):
         fail("添加照片目录选择与文件夹页扫描入口尚未按用途统一")

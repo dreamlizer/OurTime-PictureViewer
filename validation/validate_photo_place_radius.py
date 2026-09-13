@@ -103,6 +103,8 @@ def main() -> int:
             raise RuntimeError("隔离服务未启动\n" + log_path.read_text(encoding="utf-8", errors="replace"))
 
         distances, originals = seed()
+        map_data = request_json("/api/places?west=116.3&south=39.8&east=116.5&north=40.1&zoom=15.3")
+        check(any(item["anchor_id"] == 1 for item in map_data["clusters"]), "地图点返回同一网格内可用于地点编辑的定位照片")
         nearby = request_json("/api/photos/1/nearby?radius_m=500")
         check(nearby["total"] == 11 and len(nearby["samples"]) == 9, "500 米范围返回全部数量并固定九张预览")
         check(all(item["distance_m"] <= 500 for item in nearby["points"]), "范围预览不混入半径外照片")
@@ -173,12 +175,37 @@ def main() -> int:
             page.wait_for_function("document.querySelector('#toast').textContent.includes('8 张照片')")
             check(page.locator("#photo-place-editor").is_hidden(), "确认后地点面板收起并给出明确反馈")
 
-            page.evaluate("setView('place:测试园区东门')")
+            page.evaluate("""async () => {
+                await setView('places');
+                const map = ensurePlaceMap();
+                map.setView([39.90123, 116.40156], 15.3, {animate:false});
+                await loadPlaceMap();
+                await openPlaceDetail('测试园区东门', {id:1, latitude:39.9, longitude:116.4});
+            }""")
             page.wait_for_function("state.view === 'place:测试园区东门'")
             check(page.locator("body").evaluate("node => node.classList.contains('is-place-detail-view')"), "地点详情进入精简布局状态")
             check(not page.locator("#library-view .filters").is_visible() and not page.locator("#library-view .directory-filter").is_visible(), "地点详情隐藏批量补录和目录筛选杂项")
-            check(page.locator("#place-refine-input").bounding_box()["width"] <= 240, "地点名称输入框保持紧凑")
+            check(page.locator("#place-detail-back").is_visible() and page.locator("#place-detail-edit").is_visible(), "地点标题同时提供返回地图和修改地点入口")
+            check(page.locator("#place-refine").count() == 0 and "地图里没有" not in page.locator("body").inner_text(), "旧地点输入框和无效提示已移除")
             page.screenshot(path=str(REPORT / "place-detail-compact.png"), full_page=False)
+            page.set_viewport_size({"width": 1440, "height": 500})
+            page.evaluate("scrollTo(0, 360)")
+            page.wait_for_timeout(80)
+            masthead_top = page.locator(".masthead").bounding_box()["y"]
+            check(abs(masthead_top - 60) < 1 and page.locator("#page-title").is_visible(), "地点照片向上滚动时标题和操作仍固定可见")
+            page.set_viewport_size({"width": 1440, "height": 900})
+            page.evaluate("scrollTo(0, 0)")
+            page.locator("#place-detail-edit").click()
+            page.wait_for_function("state.view === 'photo-place:1'")
+            page.wait_for_selector("#photo-place-editor:not([hidden])")
+            check(page.locator("#places-photo-back").inner_text() == "返回地点照片", "地点范围编辑明确返回地点照片，而不是误入大图")
+            page.locator("#places-photo-back").click()
+            page.wait_for_function("state.view === 'place:测试园区东门'")
+            page.locator("#place-detail-back").click()
+            page.wait_for_function("state.view === 'places'")
+            restored = page.evaluate("""() => {const center=state.placeMap.getCenter();return {latitude:center.lat,longitude:center.lng,zoom:state.placeMap.getZoom()};}""")
+            check(abs(restored["latitude"] - 39.90123) < 0.00001 and abs(restored["longitude"] - 116.40156) < 0.00001 and abs(restored["zoom"] - 15.3) < 0.01, "返回地点地图后精确恢复进入前的中心与缩放")
+            page.screenshot(path=str(REPORT / "place-map-restored.png"), full_page=False)
             check(not errors, "完整地图地点链路没有 JavaScript 运行错误")
             browser.close()
 
