@@ -75,6 +75,19 @@ def main():
         year_only = fetch_photos(conn, date_from='2025', date_to='2025', place='北京')
         conn.commit()
         assert sorted(item['id'] for item in year_only['items']) == [1, 2, 4], year_only
+        conn.execute('UPDATE assets SET latitude=?,longitude=? WHERE id IN (1,2)', (39.9000,116.4000))
+        conn.execute('UPDATE assets SET latitude=?,longitude=? WHERE id=3', (39.9005,116.4005))
+        conn.commit()
+        cell=.02
+        cluster=fetch_photos(conn, map_cell=cell, map_lat_bucket=round(39.9000/cell,4), map_lng_bucket=round(116.4000/cell,4))
+        conn.commit()
+        assert [item['id'] for item in cluster['items']] == [2, 1], cluster
+        try:
+            fetch_photos(conn, map_cell=.01, map_lat_bucket=1, map_lng_bucket=1)
+        except ValueError as exc:
+            assert '地图定位点无效' in str(exc)
+        else:
+            raise AssertionError('accepted invalid map cell')
         conn.close()
     print('STRUCTURED_QUERY_OK')
     return 0

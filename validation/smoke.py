@@ -229,13 +229,17 @@ def main():
         "radiusM:PHOTO_PLACE_RADIUS_DEFAULT",
         "/nearby?radius_m=",
         "/nearby-place",
+        "function wgs84ToGcj02",
+        "function gcj02ToWgs84",
+        "function placeGpsBounds",
+        "placeMapPoint(photo.latitude,photo.longitude)",
     )) or not all(value in backend for value in (
         "def nearby_photos(",
         "def set_nearby_place(",
         "radius_m:int=Field(default=100,ge=1,le=500)",
     )) or "syncPhotoPlaceButton(state.detail)" not in viewer:
-        fail("单张照片地图缺少 0.15 倍聚焦、500 米范围复核、九张预览或返回大图链路")
-    ok("单张照片地图已接入 500 米内复核、九张预览和完整大图浏览")
+        fail("单张照片地图缺少 0.15 倍聚焦、GCJ/WGS 坐标适配、500 米范围复核、九张预览或返回大图链路")
+    ok("单张照片地图已接入 GCJ/WGS 坐标适配、500 米内复核、九张预览和完整大图浏览")
     if not all(path in viewer for path in (
         "/api/face-label-bg/1.png",
         "/api/face-label-bg/2.png",
@@ -397,15 +401,18 @@ def main():
         or "progress['phase']='processing'" not in backend):
         fail("添加照片目录选择与文件夹页扫描入口尚未按用途统一")
     if not all(value in backend for value in (
-        "FACE_GROUP_THRESHOLD = 0.50",
-        "FACE_AUTO_MATCH_THRESHOLD = 0.68",
-        "FACE_AUTO_MATCH_MARGIN = 0.08",
+        "FACE_GROUP_THRESHOLD = 0.52",
+        "FACE_MATCH_MARGIN = 0.08",
         "def choose_face_person(",
+        "target.confirmed AS suggested_confirmed",
+        "suggested_person_id and (suggested_confirmed or suggested_ignored)",
+        "p.suggested_person_id IS NOT NULL",
+        "if item['route']!='suggested'",
         "'ignored' if row['ignored'] else 'confirmed'",
         "UPDATE faces SET reviewed=1,ignored=0",
     )):
-        fail("人脸自动分流缺少人物级阈值、路人状态或恢复闭环")
-    ok("添加照片入口和保守人脸自动分流合同已接入")
+        fail("人脸自动分流缺少统一阈值、真实人物差值、候选人物折叠、路人状态或恢复闭环")
+    ok("添加照片入口和统一人脸归类合同已接入")
 
     live = {}
     try:

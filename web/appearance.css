@@ -292,7 +292,7 @@ body:has(#objects-view:not([hidden])) #library-view { display: none; }
 .place-zoom { border-inline: 1px solid var(--line); padding-inline: 10px; gap: 5px; }
 .place-zoom input { width: 65px; min-width: 0; padding: 7px 4px; border: 1px solid var(--control-line); }
 .place-zoom .small { width: 34px; padding-inline: 0; }
-.places-map { position: relative; z-index: 0; isolation: isolate; height: clamp(340px, 62vh, 760px); margin: 0 0 20px; border-color: #bac8be; border-radius: 12px; background: #e8eee9; }
+.places-map { position: relative; z-index: 0; isolation: isolate; height: clamp(340px, 62vh, 760px); margin: 0; border-color: #bac8be; border-radius: 12px; background: #e8eee9; }
 .place-popup-wrap .leaflet-popup-content-wrapper { background: #fff; border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 6px 28px #26332f24; }
 .place-popup-wrap .leaflet-popup-tip { background: #fff; }
 .place-popup-kicker { font: 12px/1.5 var(--sans); letter-spacing: 0; color: var(--muted); }
@@ -333,6 +333,18 @@ body:has(#objects-view:not([hidden])) #library-view { display: none; }
 body.is-photo-place-view #places-view .toolbar { align-items: center; }
 body.is-photo-place-view #places-map { height: clamp(430px, 72vh, 820px); }
 .places-map-shell { position: relative; }
+/* The map is the destination on this page.  At ordinary desktop sizes it owns
+   the remaining viewport instead of leaving a trailing status strip or footer. */
+@media (min-width: 701px) and (min-height: 680px) {
+  main:has(#places-view:not([hidden])) { height: 100dvh; min-height: 0; padding-bottom: 0; display: flex; flex-direction: column; overflow: hidden; }
+  main:has(#places-view:not([hidden])) > .topbar,
+  main:has(#places-view:not([hidden])) > .masthead { flex: 0 0 auto; }
+  #places-view:not([hidden]) { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; }
+  #places-view:not([hidden]) > .view-chrome { flex: 0 0 auto; }
+  #places-view:not([hidden]) .places-map-shell { display: flex; flex: 1 1 auto; min-height: 0; }
+  #places-view:not([hidden]) .places-map { flex: 1 1 auto; height: auto; min-height: 0; }
+  #places-view:not([hidden]) ~ footer { display: none; }
+}
 @media (prefers-reduced-motion: reduce) {
   .photo-place-pin, .photo-place-thumb { transition: none; }
 }

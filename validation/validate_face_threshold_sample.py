@@ -20,7 +20,15 @@ MAX_QUERIES_PER_STATE = 120
 
 
 def state_of(row) -> str:
+    if row["suggested_person_id"] and (row["suggested_confirmed"] or row["suggested_ignored"]):
+        return "ignored" if row["suggested_ignored"] else "confirmed"
     return "ignored" if row["ignored"] else "confirmed" if row["confirmed"] else "pending"
+
+
+def canonical_person_of(row) -> int:
+    if row["suggested_person_id"] and (row["suggested_confirmed"] or row["suggested_ignored"]):
+        return int(row["suggested_person_id"])
+    return int(row["person_id"])
 
 
 def main() -> int:
@@ -39,12 +47,23 @@ def main() -> int:
             rows = connection.execute(
                 """WITH ranked AS (
                        SELECT f.id,f.asset_id,f.embedding,f.person_id,p.confirmed,p.ignored,
+                              p.suggested_person_id,
+                              target.confirmed AS suggested_confirmed,
+                              target.ignored AS suggested_ignored,
                               row_number() OVER (PARTITION BY f.person_id ORDER BY f.id DESC) AS rn
-                       FROM faces f JOIN people p ON p.id=f.person_id
+                       FROM faces f
+                       JOIN people p ON p.id=f.person_id
+                       LEFT JOIN people target ON target.id=p.suggested_person_id
                        WHERE f.embedding IS NOT NULL
                          AND (coalesce(p.ignored,0)=1 OR coalesce(f.ignored,0)=0)
+                         AND NOT (
+                             coalesce(p.confirmed,0)=0
+                             AND coalesce(p.ignored,0)=0
+                             AND p.suggested_person_id IS NOT NULL
+                         )
                    )
-                   SELECT id,asset_id,embedding,person_id,confirmed,ignored
+                   SELECT id,asset_id,embedding,person_id,confirmed,ignored,
+                          suggested_person_id,suggested_confirmed,suggested_ignored
                    FROM ranked WHERE rn<=5 ORDER BY person_id,id DESC"""
             ).fetchall()
         finally:
@@ -53,8 +72,9 @@ def main() -> int:
         grouped: dict[int, list] = defaultdict(list)
         asset_people: dict[int, set[int]] = defaultdict(set)
         for item in rows:
-            grouped[int(item["person_id"])].append(item)
-            asset_people[int(item["asset_id"])].add(int(item["person_id"]))
+            canonical_person = canonical_person_of(item)
+            grouped[canonical_person].append(item)
+            asset_people[int(item["asset_id"])].add(canonical_person)
 
         queries = []
         reference_rows = []
@@ -74,6 +94,9 @@ def main() -> int:
                 "person_id": int(item["person_id"]),
                 "confirmed": int(item["confirmed"]),
                 "ignored": int(item["ignored"]),
+                "suggested_person_id": item["suggested_person_id"],
+                "suggested_confirmed": int(item["suggested_confirmed"] or 0),
+                "suggested_ignored": int(item["suggested_ignored"] or 0),
             } for item in references[:4])
 
         started = time.perf_counter()
@@ -85,7 +108,7 @@ def main() -> int:
         same_asset_candidates_excluded = 0
         for query in queries:
             embedding = np.frombuffer(query["embedding"], dtype=np.float32)
-            expected_person = int(query["person_id"])
+            expected_person = canonical_person_of(query)
             # Leave-one-out sampling must not let another face from the same photo
             # act as historical identity evidence. Production sees a new asset only
             # once and also forbids assigning one person twice within that asset.
@@ -130,9 +153,8 @@ def main() -> int:
             "passed": named_wrong == 0 and ignored_wrong == 0,
             "source": "formal embeddings opened read-only; no paths or names recorded",
             "thresholds": {
-                "group": app.FACE_GROUP_THRESHOLD,
-                "auto": app.FACE_AUTO_MATCH_THRESHOLD,
-                "margin": app.FACE_AUTO_MATCH_MARGIN,
+                "match": app.FACE_GROUP_THRESHOLD,
+                "different_person_margin": app.FACE_MATCH_MARGIN,
             },
             "sample": {
                 "people_in_index": len(index["unique_person_ids"]),
@@ -152,7 +174,7 @@ def main() -> int:
         REPORT.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
         print(json.dumps(report, ensure_ascii=False, indent=2))
         if not report["passed"]:
-            raise AssertionError("只读样本发现自动错归，需要提高阈值或 margin")
+            raise AssertionError("只读样本发现自动错归，需要重新检查统一阈值或人物映射")
     return 0
 
 

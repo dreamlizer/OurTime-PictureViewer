@@ -60,9 +60,8 @@ FACE_RUNTIME = None
 FACE_INDEX = None
 FACE_INDEX_LOCK = threading.Lock()
 FACE_INDEX_GEN = 0
-FACE_GROUP_THRESHOLD = 0.50
-FACE_AUTO_MATCH_THRESHOLD = 0.68
-FACE_AUTO_MATCH_MARGIN = 0.08
+FACE_GROUP_THRESHOLD = 0.52
+FACE_MATCH_MARGIN = 0.08
 OBJECT_JOB={'status':'idle','processed':0,'limit':0,'tagged':0,'errors':0,'message':'','started_at':None,'finished_at':None}
 OBJECT_JOB_LOCK=threading.Lock()
 GEO = None
@@ -433,6 +432,13 @@ def invalidate_face_index():
 
 def build_face_index(known):
     import numpy as np
+    def value(row,key,default=None):
+        try:
+            result=row[key]
+        except (KeyError,IndexError,TypeError):
+            return default
+        return default if result is None else result
+
     count=len(known)
     dim=512
     if known:
@@ -444,23 +450,34 @@ def build_face_index(known):
     person_slot_by_id={}
     unique_person_ids=[]
     person_states=[]
+    canonical_person_ids=[]
     if known:
         vectors[:count]=np.stack([np.frombuffer(r['embedding'],dtype=np.float32) for r in known])
         for face_index,row in enumerate(known):
-            person_id=int(row['person_id'])
+            source_person_id=int(row['person_id'])
+            suggested_person_id=int(value(row,'suggested_person_id',0) or 0)
+            suggested_confirmed=bool(value(row,'suggested_confirmed',0))
+            suggested_ignored=bool(value(row,'suggested_ignored',0))
+            if suggested_person_id and (suggested_confirmed or suggested_ignored):
+                person_id=suggested_person_id
+                state='ignored' if suggested_ignored else 'confirmed'
+            else:
+                person_id=source_person_id
+                state='ignored' if row['ignored'] else 'confirmed' if row['confirmed'] else 'pending'
+            canonical_person_ids.append(person_id)
             slot=person_slot_by_id.get(person_id)
             if slot is None:
                 slot=len(unique_person_ids)
                 person_slot_by_id[person_id]=slot
                 unique_person_ids.append(person_id)
-                person_states.append('ignored' if row['ignored'] else 'confirmed' if row['confirmed'] else 'pending')
+                person_states.append(state)
+            elif state=='ignored' or (state=='confirmed' and person_states[slot]=='pending'):
+                person_states[slot]=state
             person_slots[face_index]=slot
     return {
         'vectors':vectors,
         'size':count,
-        'person_ids':[int(r['person_id']) for r in known],
-        'confirmed':[bool(r['confirmed']) for r in known],
-        'ignored':[bool(r['ignored']) for r in known],
+        'person_ids':canonical_person_ids,
         'person_slots':person_slots,
         'person_slot_by_id':person_slot_by_id,
         'unique_person_ids':unique_person_ids,
@@ -478,10 +495,19 @@ def load_face_index():
             generation=FACE_INDEX_GEN
         with db() as c:
             known=c.execute(
-                '''SELECT f.embedding,f.person_id,p.confirmed,p.ignored
-                   FROM faces f JOIN people p ON p.id=f.person_id
+                '''SELECT f.embedding,f.person_id,p.confirmed,p.ignored,p.suggested_person_id,
+                          target.confirmed AS suggested_confirmed,
+                          target.ignored AS suggested_ignored
+                   FROM faces f
+                   JOIN people p ON p.id=f.person_id
+                   LEFT JOIN people target ON target.id=p.suggested_person_id
                    WHERE f.embedding IS NOT NULL
                      AND (coalesce(p.ignored,0)=1 OR coalesce(f.ignored,0)=0)
+                     AND NOT (
+                         coalesce(p.confirmed,0)=0
+                         AND coalesce(p.ignored,0)=0
+                         AND p.suggested_person_id IS NOT NULL
+                     )
                    ORDER BY f.id'''
             ).fetchall()
         index=build_face_index(known)
@@ -521,11 +547,9 @@ def remember_face(person_id,embedding,confirmed=False,ignored=False):
         FACE_INDEX['person_slots'][position]=slot
         FACE_INDEX['size']+=1
         FACE_INDEX['person_ids'].append(person_id)
-        FACE_INDEX['confirmed'].append(bool(confirmed))
-        FACE_INDEX['ignored'].append(bool(ignored))
 
 def choose_face_person(index,embedding,used_people=None):
-    """Choose a conservative person-level route for one normalized embedding."""
+    """Route one face to the closest canonical person at the shared threshold."""
     import numpy as np
     used={int(pid) for pid in (used_people or ())}
     if not index or not index.get('size') or not index.get('unique_person_ids'):
@@ -545,11 +569,13 @@ def choose_face_person(index,embedding,used_people=None):
     margin=best_score-second_score
     state=index['person_states'][best_slot]
     base={'person_id':None,'suggested_person_id':None,'best_score':best_score,'second_score':second_score,'margin':margin}
-    if state in {'confirmed','ignored'} and best_score>=FACE_AUTO_MATCH_THRESHOLD and margin>=FACE_AUTO_MATCH_MARGIN:
+    if best_score<FACE_GROUP_THRESHOLD:
+        return {**base,'route':'new'}
+    if state in {'confirmed','ignored'}:
+        if margin<FACE_MATCH_MARGIN:
+            return {**base,'route':'suggested','suggested_person_id':best_person}
         return {**base,'route':state,'person_id':best_person}
-    if state=='confirmed' and best_score>=FACE_GROUP_THRESHOLD:
-        return {**base,'route':'suggested','suggested_person_id':best_person}
-    if state=='pending' and best_score>=FACE_GROUP_THRESHOLD:
+    if state=='pending':
         return {**base,'route':'pending','person_id':best_person}
     return {**base,'route':'new'}
 
@@ -602,11 +628,12 @@ def process_faces(asset_id,path):
                     c.execute('UPDATE faces SET crop=? WHERE id=?',(f'{fid}.jpg',fid))
                 c.execute('UPDATE assets SET face_state=1,face_error=NULL WHERE id=?',(asset_id,))
             for item in staged:
-                remember_face(
-                    item['person_id'],item['emb'],
-                    confirmed=item['route']=='confirmed',
-                    ignored=item['route']=='ignored',
-                )
+                if item['route']!='suggested':
+                    remember_face(
+                        item['person_id'],item['emb'],
+                        confirmed=item['route']=='confirmed',
+                        ignored=item['route']=='ignored',
+                    )
             return len(staged)
         except Exception:
             invalidate_face_index()
@@ -1159,13 +1186,14 @@ def asset_dict(row):
     return d
 
 @app.get('/api/photos')
-def photos(q:str='',filter:str='all',person:str='',offset:int=0,limit:int=60,directory:str='',sort:str='date_desc',sequence:bool=False,max_id:int=0,around:int=0,tail:bool=False,date_from:str='',date_to:str='',place:str='',nearby:int=0,radius_m:int=100):
+def photos(q:str='',filter:str='all',person:str='',offset:int=0,limit:int=60,directory:str='',sort:str='date_desc',sequence:bool=False,max_id:int=0,around:int=0,tail:bool=False,date_from:str='',date_to:str='',place:str='',nearby:int=0,radius_m:int=100,map_cell:float=0,map_lat_bucket:float|None=None,map_lng_bucket:float|None=None):
     try:
         with db() as c:
             result=fetch_photos(
                 c, q=q, filter=filter, person=person, offset=offset, limit=limit,
                 directory=directory, sort=sort, sequence=sequence, max_id=max_id, around=around, tail=tail,
                 date_from=date_from, date_to=date_to, place=place, nearby=nearby, radius_m=radius_m,
+                map_cell=map_cell, map_lat_bucket=map_lat_bucket, map_lng_bucket=map_lng_bucket,
             )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
@@ -1510,8 +1538,8 @@ def places(q:str='', offset:int=0, limit:int=80, west:float|None=None, south:flo
     with db() as c:
         if None not in (west,south,east,north):
             cell=max(0.02, min(8.0, 360/(2**max(1,min(float(zoom),18)))))
-            rows=c.execute('SELECT round(a.latitude/?,4)*? lat, round(a.longitude/?,4)*? lon, count(*) n, min(a.id) anchor_id, coalesce(nullif(a.manual_place,\'\'), a.place) place FROM assets a WHERE '+ACTIVE_ASSET+' AND a.latitude BETWEEN ? AND ? AND a.longitude BETWEEN ? AND ? GROUP BY 1,2 ORDER BY n DESC LIMIT 400',(cell,cell,cell,cell,south,north,west,east)).fetchall()
-            return {'mode':'map','zoom':zoom,'clusters':[{'latitude':r['lat'],'longitude':r['lon'],'count':r['n'],'place':r['place'],'anchor_id':r['anchor_id']} for r in rows]}
+            rows=c.execute('SELECT round(a.latitude/?,4) lat_bucket, round(a.longitude/?,4) lng_bucket, round(a.latitude/?,4)*? lat, round(a.longitude/?,4)*? lon, count(*) n, min(a.id) anchor_id, coalesce(nullif(a.manual_place,\'\'), a.place) place FROM assets a WHERE '+ACTIVE_ASSET+' AND a.latitude BETWEEN ? AND ? AND a.longitude BETWEEN ? AND ? GROUP BY 1,2 ORDER BY n DESC LIMIT 400',(cell,cell,cell,cell,cell,cell,south,north,west,east)).fetchall()
+            return {'mode':'map','zoom':zoom,'clusters':[{'latitude':r['lat'],'longitude':r['lon'],'count':r['n'],'place':r['place'],'anchor_id':r['anchor_id'],'cell':cell,'lat_bucket':r['lat_bucket'],'lng_bucket':r['lng_bucket']} for r in rows]}
         total=c.execute('SELECT count(*) FROM ('+grouped+having+') t',values).fetchone()[0]
         rows=c.execute(grouped+having+' ORDER BY n DESC, place LIMIT ? OFFSET ?',values+[min(max(limit,1),200),max(offset,0)]).fetchall()
     items=[{'place':r['place'],'count':r['n'],'latitude':r['latitude'],'longitude':r['longitude']} for r in rows]

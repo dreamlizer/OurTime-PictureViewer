@@ -393,13 +393,25 @@ def nearby_photo_spec(conn, anchor_id, radius_m):
 
 def fetch_photos(conn, *, q='', filter='all', person='', offset=0, limit=60, directory='', sort='date_desc',
                  sequence=False, max_id=0, around=0, tail=False, date_from='', date_to='', place='',
-                 nearby=0, radius_m=100):
+                 nearby=0, radius_m=100, map_cell=0, map_lat_bucket=None, map_lng_bucket=None):
     if sort not in PHOTO_ORDERS:
         raise ValueError('未知的照片排序方式')
     spec = photo_conditions(
         q=q, filter=filter, person=person, directory=directory, max_id=max_id,
         date_from=date_from, date_to=date_to, place=place,
     )
+    map_requested=bool(map_cell or map_lat_bucket is not None or map_lng_bucket is not None)
+    if map_requested:
+        try:
+            cell=float(map_cell)
+            lat_bucket=float(map_lat_bucket)
+            lng_bucket=float(map_lng_bucket)
+        except (TypeError, ValueError) as exc:
+            raise ValueError('地图定位点无效') from exc
+        if not all(math.isfinite(value) for value in (cell,lat_bucket,lng_bucket)) or not .02<=cell<=8:
+            raise ValueError('地图定位点无效')
+        spec['where'] += ' AND round(a.latitude/?,4)=? AND round(a.longitude/?,4)=?'
+        spec['values'].extend([cell,lat_bucket,cell,lng_bucket])
     if nearby:
         nearby_clause, nearby_values, _anchor = nearby_photo_spec(conn, nearby, radius_m)
         spec['where'] += ' AND ' + nearby_clause

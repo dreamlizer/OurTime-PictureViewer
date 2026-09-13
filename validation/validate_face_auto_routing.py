@@ -32,12 +32,24 @@ def vector(score: float, dim: int = 4) -> np.ndarray:
     return result
 
 
-def row(person_id: int, score: float, *, confirmed: bool = False, ignored: bool = False) -> dict:
+def row(
+    person_id: int,
+    score: float,
+    *,
+    confirmed: bool = False,
+    ignored: bool = False,
+    suggested_person_id: int | None = None,
+    suggested_confirmed: bool = False,
+    suggested_ignored: bool = False,
+) -> dict:
     return {
         "embedding": vector(score).tobytes(),
         "person_id": person_id,
         "confirmed": int(confirmed),
         "ignored": int(ignored),
+        "suggested_person_id": suggested_person_id,
+        "suggested_confirmed": int(suggested_confirmed),
+        "suggested_ignored": int(suggested_ignored),
     }
 
 
@@ -60,17 +72,39 @@ def main() -> int:
         def choose(rows, used=()):
             return app.choose_face_person(app.build_face_index(rows), query, used)
 
-        direct_named = choose([row(1, 0.74, confirmed=True), row(2, 0.58)])
-        check(direct_named["route"] == "confirmed" and direct_named["person_id"] == 1, "高置信度且 margin 足够时直接进入已命名人物", checks)
+        direct_named = choose([row(1, 0.55, confirmed=True), row(2, 0.40)])
+        check(direct_named["route"] == "confirmed" and direct_named["person_id"] == 1, "达到统一阈值时直接进入已命名人物", checks)
 
-        suggested = choose([row(1, 0.55, confirmed=True), row(2, 0.30)])
-        check(suggested["route"] == "suggested" and suggested["suggested_person_id"] == 1, "只达到聚类阈值时仅保留可能人物", checks)
+        below_threshold = choose([row(1, 0.519, confirmed=True), row(2, 0.30)])
+        check(below_threshold["route"] == "new" and below_threshold["person_id"] is None, "低于统一阈值时保持待确认", checks)
 
         close_named = choose([row(1, 0.72, confirmed=True), row(2, 0.69, confirmed=True)])
-        check(close_named["route"] == "suggested" and close_named["margin"] < app.FACE_AUTO_MATCH_MARGIN, "最高分足够但人物级 margin 不足时不自动确认", checks)
+        check(
+            close_named["route"] == "suggested"
+            and close_named["suggested_person_id"] == 1
+            and close_named["margin"] < app.FACE_MATCH_MARGIN,
+            "两个真正不同人物接近时保留待确认",
+            checks,
+        )
+
+        canonical_named = choose([
+            row(1, 0.74, confirmed=True),
+            row(10, 0.78, suggested_person_id=1, suggested_confirmed=True),
+            row(2, 0.60, confirmed=True),
+        ])
+        check(
+            canonical_named["route"] == "confirmed"
+            and canonical_named["person_id"] == 1
+            and len(app.build_face_index([
+                row(1, 0.74, confirmed=True),
+                row(10, 0.78, suggested_person_id=1, suggested_confirmed=True),
+            ])["unique_person_ids"]) == 1,
+            "正式人物与指向他的待确认碎片折叠为同一人物",
+            checks,
+        )
 
         direct_ignored = choose([row(3, 0.74, ignored=True), row(1, 0.58, confirmed=True)])
-        check(direct_ignored["route"] == "ignored" and direct_ignored["person_id"] == 3, "高置信度路人继续进入原路人组", checks)
+        check(direct_ignored["route"] == "ignored" and direct_ignored["person_id"] == 3, "达到统一阈值的路人继续进入原路人组", checks)
 
         unknown = choose([row(1, 0.40, confirmed=True), row(2, 0.35)])
         check(unknown["route"] == "new" and unknown["person_id"] is None, "陌生人进入新的待确认人物", checks)
@@ -91,14 +125,18 @@ def main() -> int:
         person_level = choose([
             row(1, 0.72, confirmed=True),
             row(1, 0.71, confirmed=True),
-            row(2, 0.69, confirmed=True),
+            row(2, 0.60, confirmed=True),
         ])
-        check(person_level["route"] == "suggested" and person_level["second_score"] > 0.68, "margin 比较不同人物而不是同一人物的两张脸", checks)
+        check(person_level["route"] == "confirmed" and person_level["person_id"] == 1, "同一人物的多张脸共同构成人物级候选", checks)
 
         with app.db() as connection:
             ignored_person = connection.execute("INSERT INTO people(name,confirmed,ignored) VALUES ('路人',0,1)").lastrowid
             hidden_normal = connection.execute("INSERT INTO people(name,confirmed,ignored) VALUES ('待核对',0,0)").lastrowid
-            for pid, face_ignored in ((ignored_person, 1), (hidden_normal, 1)):
+            suggested_target = connection.execute("INSERT INTO people(name,confirmed) VALUES ('候选目标',1)").lastrowid
+            suggested_fragment = connection.execute(
+                "INSERT INTO people(suggested_person_id) VALUES (?)", (suggested_target,)
+            ).lastrowid
+            for pid, face_ignored in ((ignored_person, 1), (hidden_normal, 1), (suggested_fragment, 0)):
                 connection.execute(
                     "INSERT INTO assets(sha256,metadata,face_state,created_at) VALUES (?,?,1,?)",
                     (f"{pid:064x}", "{}", app.now()),
@@ -112,6 +150,7 @@ def main() -> int:
         loaded = app.load_face_index()
         check(ignored_person in loaded["unique_person_ids"], "用户明确标记的路人人脸会进入匹配索引", checks)
         check(hidden_normal not in loaded["unique_person_ids"], "普通人物中单独忽略的人脸不会进入匹配索引", checks)
+        check(suggested_fragment not in loaded["unique_person_ids"], "仍有歧义的可能人物只作提示，不进入自动匹配索引", checks)
 
         client = TestClient(app.app)
         response = client.patch(f"/api/people/{ignored_person}", json={"name": "重新认识的人", "alias": ""})
@@ -169,6 +208,7 @@ def main() -> int:
                 "INSERT INTO assets(sha256,metadata,face_state,created_at) VALUES (?,?,0,?)",
                 ("d" * 64, "{}", app.now()),
             ).lastrowid
+            people_before = connection.execute("SELECT count(*) FROM people").fetchone()[0]
         suggested_image = data / "route-suggested.jpg"
         Image.new("RGB", (100, 100), "white").save(suggested_image)
         app.get_face_engine = lambda: SimpleNamespace(get=lambda _: [SimpleNamespace(
@@ -180,9 +220,13 @@ def main() -> int:
         finally:
             app.get_face_engine = original_engine
         with app.db() as connection:
-            suggested_face = connection.execute("SELECT person_id,ignored,reviewed FROM faces WHERE asset_id=?", (suggested_asset,)).fetchone()
-            suggested_person = connection.execute("SELECT confirmed,ignored,suggested_person_id FROM people WHERE id=?", (suggested_face[0],)).fetchone()
-        check(tuple(suggested_face[1:]) == (0, 0) and tuple(suggested_person) == (0, 0, route_named), "真实 process_faces 中等置信度新建待确认并记录可能人物", checks)
+            routed_named_face = connection.execute("SELECT person_id,ignored,reviewed FROM faces WHERE asset_id=?", (suggested_asset,)).fetchone()
+            people_after = connection.execute("SELECT count(*) FROM people").fetchone()[0]
+        check(
+            tuple(routed_named_face) == (route_named, 0, 1) and people_after == people_before,
+            "真实 process_faces 达到统一阈值后直接进入已命名人物",
+            checks,
+        )
 
         with app.db() as connection:
             done_asset = connection.execute(
@@ -209,9 +253,8 @@ def main() -> int:
             "passed": True,
             "data_dir": str(data),
             "thresholds": {
-                "group": app.FACE_GROUP_THRESHOLD,
-                "auto": app.FACE_AUTO_MATCH_THRESHOLD,
-                "margin": app.FACE_AUTO_MATCH_MARGIN,
+                "match": app.FACE_GROUP_THRESHOLD,
+                "different_person_margin": app.FACE_MATCH_MARGIN,
             },
             "performance": {"people": 5000, "faces": 20000, "elapsed_ms": round(elapsed_ms, 3), "route": large_result["route"]},
             "checks": checks,

@@ -816,13 +816,13 @@ function updateToolVisuals(){
   }
 }
 
-function currentBrowseContext(){return {q:state.q,filter:state.view,person:state.person,directory:state.directory,sort:state.sort,date_from:state.dateFrom||'',date_to:state.dateTo||'',place:state.place||'',max_id:state.maxId};}
+function currentBrowseContext(){const mapFilter=state.placeMapFilter;return {q:state.q,filter:mapFilter?'all':state.view,person:state.person,directory:state.directory,sort:state.sort,date_from:state.dateFrom||'',date_to:state.dateTo||'',place:state.place||'',...(mapFilter?{map_cell:mapFilter.cell,map_lat_bucket:mapFilter.lat_bucket,map_lng_bucket:mapFilter.lng_bucket}:{}),max_id:state.maxId};}
 function browseContextKey(context={}){
  const filter=String(context.filter||'all');
- return JSON.stringify({q:String(context.q||''),filter:filter==='all'?'timeline':filter,person:String(context.person||''),directory:String(context.directory||''),sort:String(context.sort||'date_desc'),date_from:String(context.date_from||''),date_to:String(context.date_to||''),place:String(context.place||''),nearby:Number(context.nearby||0),radius_m:Number(context.radius_m||0),max_id:Number(context.max_id||0)});
+ return JSON.stringify({q:String(context.q||''),filter:filter==='all'?'timeline':filter,person:String(context.person||''),directory:String(context.directory||''),sort:String(context.sort||'date_desc'),date_from:String(context.date_from||''),date_to:String(context.date_to||''),place:String(context.place||''),map_cell:Number(context.map_cell||0),map_lat_bucket:Number(context.map_lat_bucket||0),map_lng_bucket:Number(context.map_lng_bucket||0),nearby:Number(context.nearby||0),radius_m:Number(context.radius_m||0),max_id:Number(context.max_id||0)});
 }
 function sameBrowseContext(a,b){return browseContextKey(a)===browseContextKey(b);}
-function contextLabel(c){const person=state.people.find(p=>String(p.id)===c.person);const filter=c.filter||'';const heading=c.nearby?`当前位置 ${Number(c.radius_m)||100} 米内`:c.person?(person?.name||'人物 '+c.person):filter.startsWith('year:')?(filter.slice(5)==='unknown'?'时间未记录':filter.slice(5)+' 年'):filter.startsWith('group:')?groupTitle(filter)[1]:filter.startsWith('place:')?(filter.slice(6)==='unknown'?'地点未记录':filter.slice(6)):titles[filter]?.[0]||'照片';return [heading,c.directory?basename(c.directory):'',c.place?prettyPlace(c.place):'',c.date_from||c.date_to?((c.date_from||'')+(c.date_to&&c.date_to!==c.date_from?' ~ '+c.date_to:'')):'',c.q?'搜索：'+c.q:''].filter(Boolean).join(' · ');}
+function contextLabel(c){const person=state.people.find(p=>String(p.id)===c.person);const filter=c.filter||'';const heading=c.nearby?`当前位置 ${Number(c.radius_m)||100} 米内`:c.map_cell?'地图定位点':c.person?(person?.name||'人物 '+c.person):filter.startsWith('year:')?(filter.slice(5)==='unknown'?'时间未记录':filter.slice(5)+' 年'):filter.startsWith('group:')?groupTitle(filter)[1]:filter.startsWith('place:')?(filter.slice(6)==='unknown'?'地点未记录':filter.slice(6)):titles[filter]?.[0]||'照片';return [heading,c.directory?basename(c.directory):'',c.place?prettyPlace(c.place):'',c.date_from||c.date_to?((c.date_from||'')+(c.date_to&&c.date_to!==c.date_from?' ~ '+c.date_to:'')):'',c.q?'搜索：'+c.q:''].filter(Boolean).join(' · ');}
 function viewerMessage(text){$('#viewer-message').textContent=text;}
 function clearViewerImage(){
  hideSignatureInfo();
