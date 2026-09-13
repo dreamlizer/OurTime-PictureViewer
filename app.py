@@ -323,8 +323,14 @@ def invalidate_status_cache():
         STATUS_CACHE['payload']=None
         STATUS_CACHE['at']=0
 
+def asset_lock_index(digest):
+    return int(digest[:8],16)%len(ASSET_LOCKS)
+
+def asset_lock_indices(digests):
+    return sorted({asset_lock_index(digest) for digest in digests})
+
 def asset_lock(digest):
-    return ASSET_LOCKS[int(digest[:8],16)%len(ASSET_LOCKS)]
+    return ASSET_LOCKS[asset_lock_index(digest)]
 
 def operation_lock(operation_id):
     digest=hashlib.sha256(str(operation_id).encode('utf-8')).digest()
@@ -1716,8 +1722,8 @@ def exclude_assets_locked(body,request,operation_id):
             operation_id=operation_id,
         )
     with ExitStack() as held_locks:
-        for digest in sorted(set(found_digest.values())):
-            held_locks.enter_context(asset_lock(digest))
+        for lock_index in asset_lock_indices(found_digest.values()):
+            held_locks.enter_context(ASSET_LOCKS[lock_index])
         with db() as c:
             operation_id,existing=prepare_operation(
                 c,'asset_exclusion',operation_id,request_payload
@@ -2368,8 +2374,33 @@ def places(q:str='', offset:int=0, limit:int=80, west:float|None=None, south:flo
     with db() as c:
         if None not in (west,south,east,north):
             cell=max(0.02, min(8.0, 360/(2**max(1,min(float(zoom),18)))))
-            rows=c.execute('SELECT round(a.latitude/?,4) lat_bucket, round(a.longitude/?,4) lng_bucket, round(a.latitude/?,4)*? lat, round(a.longitude/?,4)*? lon, count(*) n, min(a.id) anchor_id, coalesce(nullif(a.manual_place,\'\'), a.place) place FROM assets a WHERE '+ACTIVE_ASSET+' AND a.latitude BETWEEN ? AND ? AND a.longitude BETWEEN ? AND ? GROUP BY 1,2 ORDER BY n DESC LIMIT 400',(cell,cell,cell,cell,cell,cell,south,north,west,east)).fetchall()
-            return {'mode':'map','zoom':zoom,'clusters':[{'latitude':r['lat'],'longitude':r['lon'],'count':r['n'],'place':r['place'],'anchor_id':r['anchor_id'],'cell':cell,'lat_bucket':r['lat_bucket'],'lng_bucket':r['lng_bucket']} for r in rows]}
+            grouped_map='''SELECT CAST(floor(a.latitude/?) AS INTEGER) lat_bucket,
+                                  CAST(floor(a.longitude/?) AS INTEGER) lng_bucket,
+                                  avg(a.latitude) lat,avg(a.longitude) lon,
+                                  count(*) n,min(a.id) anchor_id,
+                                  max(coalesce(nullif(a.manual_place,''),a.place)) place
+                           FROM assets a WHERE '''+ACTIVE_ASSET+'''
+                             AND a.latitude BETWEEN ? AND ?
+                             AND a.longitude BETWEEN ? AND ?
+                           GROUP BY lat_bucket,lng_bucket'''
+            map_values=(cell,cell,south,north,west,east)
+            total_clusters=c.execute(
+                'SELECT count(*) FROM ('+grouped_map+') grouped',map_values
+            ).fetchone()[0]
+            rows=c.execute(
+                grouped_map+' ORDER BY n DESC,lat_bucket,lng_bucket LIMIT 400',
+                map_values,
+            ).fetchall()
+            return {
+                'mode':'map','zoom':zoom,
+                'clusters':[{
+                    'latitude':r['lat'],'longitude':r['lon'],'count':r['n'],
+                    'place':r['place'],'anchor_id':r['anchor_id'],'cell':cell,
+                    'lat_bucket':r['lat_bucket'],'lng_bucket':r['lng_bucket'],
+                } for r in rows],
+                'total_clusters':total_clusters,
+                'truncated':total_clusters>len(rows),
+            }
         total=c.execute('SELECT count(*) FROM ('+grouped+having+') t',values).fetchone()[0]
         rows=c.execute(grouped+having+' ORDER BY n DESC, place LIMIT ? OFFSET ?',values+[min(max(limit,1),200),max(offset,0)]).fetchall()
     items=[{'place':r['place'],'count':r['n'],'latitude':r['latitude'],'longitude':r['longitude']} for r in rows]

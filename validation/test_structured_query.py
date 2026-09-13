@@ -1,4 +1,5 @@
 from pathlib import Path
+import math
 import sqlite3
 import sys
 import tempfile
@@ -79,9 +80,9 @@ def main():
         conn.execute('UPDATE assets SET latitude=?,longitude=? WHERE id=3', (39.9005,116.4005))
         conn.commit()
         cell=.02
-        cluster=fetch_photos(conn, map_cell=cell, map_lat_bucket=round(39.9000/cell,4), map_lng_bucket=round(116.4000/cell,4))
+        cluster=fetch_photos(conn, map_cell=cell, map_lat_bucket=math.floor(39.9000/cell), map_lng_bucket=math.floor(116.4000/cell))
         conn.commit()
-        assert [item['id'] for item in cluster['items']] == [2, 1], cluster
+        assert [item['id'] for item in cluster['items']] == [3, 2, 1], cluster
         try:
             fetch_photos(conn, map_cell=.01, map_lat_bucket=1, map_lng_bucket=1)
         except ValueError as exc:

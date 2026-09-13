@@ -420,7 +420,10 @@ def fetch_photos(conn, *, q='', filter='all', person='', offset=0, limit=60, dir
             raise ValueError('地图定位点无效') from exc
         if not all(math.isfinite(value) for value in (cell,lat_bucket,lng_bucket)) or not .02<=cell<=8:
             raise ValueError('地图定位点无效')
-        spec['where'] += ' AND round(a.latitude/?,4)=? AND round(a.longitude/?,4)=?'
+        spec['where'] += (
+            ' AND CAST(floor(a.latitude/?) AS INTEGER)=?'
+            ' AND CAST(floor(a.longitude/?) AS INTEGER)=?'
+        )
         spec['values'].extend([cell,lat_bucket,cell,lng_bucket])
     if nearby:
         nearby_clause, nearby_values, _anchor = nearby_photo_spec(conn, nearby, radius_m)

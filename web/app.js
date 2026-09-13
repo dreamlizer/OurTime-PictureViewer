@@ -62,12 +62,17 @@ async function mergePeopleRequest(source,target){
 }
 async function operationRequest(url,options,operationId=operationRuntime.operationId()){
  const headers={...(options&&options.headers||{}),'Idempotency-Key':operationId};
- try{return await api(url,{...(options||{}),headers});}
+ let result;
+ try{result=await api(url,{...(options||{}),headers});}
  catch(error){
   if(error.status&&error.status<500)throw error;
-  try{const receipt=await api('/api/operations/'+encodeURIComponent(operationId),{timeoutMs:5000});receipt.recoveredAfterResponseLoss=true;return receipt;}
+  let receipt;
+  try{receipt=await api('/api/operations/'+encodeURIComponent(operationId),{timeoutMs:5000});}
   catch(receiptError){error.operationId=operationId;error.errorCode=error.errorCode||'operation_status_unknown';throw error;}
+  receipt.recoveredAfterResponseLoss=true;
+  return operationRuntime.interpretOperationReceipt(receipt);
  }
+ return operationRuntime.interpretOperationReceipt(result);
 }
 
 function viewPanel(view=state.view){
@@ -815,7 +820,9 @@ async function loadPlaceMap(){
   const b=placeGpsBounds(map.getBounds());
   const params=new URLSearchParams({west:b.west,south:b.south,east:b.east,north:b.north,zoom:String(Math.round(map.getZoom()))});
   const data=await api('/api/places?'+params);
-  $('#places-total').textContent=(data.clusters&&data.clusters.length?fmt(data.clusters.reduce(function(n,x){return n+(x.count||0);},0))+' 张在当前视野':'当前视野还没有坐标点');
+  $('#places-total').textContent=data.truncated
+    ?'地点较多，显示 '+fmt((data.clusters||[]).length)+' / '+fmt(data.total_clusters||0)+' 个聚合点'
+    :(data.clusters&&data.clusters.length?fmt(data.clusters.reduce(function(n,x){return n+(x.count||0);},0))+' 张在当前视野':'当前视野还没有坐标点');
   state.placeCluster.clearLayers();
   for(const item of data.clusters||[]){
     if(item.latitude==null||item.longitude==null)continue;
@@ -823,7 +830,7 @@ async function loadPlaceMap(){
     marker.bindPopup('<button type="button" class="place-popup" data-place="'+esc(item.place||'')+'" data-anchor-id="'+(Number(item.anchor_id)||0)+'" data-latitude="'+Number(item.latitude)+'" data-longitude="'+Number(item.longitude)+'" data-map-cell="'+Number(item.cell)+'" data-map-lat-bucket="'+Number(item.lat_bucket)+'" data-map-lng-bucket="'+Number(item.lng_bucket)+'"><span class="place-popup-kicker">拍摄地点</span><strong>'+esc(item.place||'未命名地点')+'</strong><em>'+fmt(item.count)+' 张照片</em><span class="place-popup-go">查看这些照片</span></button>', {className:'place-popup-wrap', closeButton:true, maxWidth:280});
     state.placeCluster.addLayer(marker);
   }
-  const status=$('#places-stream-status'); if(status)status.textContent=data.clusters&&data.clusters.length?'点击圆点查看该处照片':'这一层视野里还没有坐标点，可缩小地图或回到北京';
+  const status=$('#places-stream-status'); if(status)status.textContent=data.truncated?'当前视野聚合点过多，仅显示前 '+fmt((data.clusters||[]).length)+' 个；请放大地图查看完整范围':data.clusters&&data.clusters.length?'点击圆点查看该处照片':'这一层视野里还没有坐标点，可缩小地图或回到北京';
 }
 function photoPlaceMarker(photo){
   const label=prettyPlace(photo.effective_place)||'这张照片的拍摄位置';
@@ -990,7 +997,7 @@ function faceItemHtml(f,person){
 function updatePersonFaceStatus(){const p=state.personDetail;const status=$('#person-faces-status');if(!status||!p)return;const n=(p.faces||[]).length;const total=p.face_count||n;if(state.personFaces&&state.personFaces.loading){status.hidden=false;status.textContent='正在加载人脸';return;}if(p.more){status.hidden=false;status.textContent='已显示 '+fmt(n)+' / '+fmt(total)+' · 继续下滚加载';return;}status.hidden=!n;status.textContent=n?('已显示全部 '+fmt(total)+' 张人脸'):'';}
 function renderPersonFaces(reset=false, appended=[]){const p=state.personDetail;if(!p)return;const faces=p.faces||[];const grid=$('#person-faces');if(!grid)return;if(reset)grid.innerHTML=faces.map(f=>faceItemHtml(f,p)).join('');else (appended||[]).forEach(f=>{if(!grid.querySelector('[data-face-id="'+f.id+'"]'))grid.insertAdjacentHTML('beforeend',faceItemHtml(f,p));});updatePersonFaceStatus();}
 function maybeLoadMorePersonFaces(){const p=state.personDetail;const body=$('.person-body');if(!p||!p.more||!body)return;if(state.personFaces&&state.personFaces.loading)return;if(body.scrollTop+body.clientHeight>body.scrollHeight-160)loadPersonFaces(false);}
-async function removePersonFaceLocally(fid){const p=state.personDetail;if(!p)return;const id=Number(fid);const body=$('.person-body');const top=body?body.scrollTop:0;p.faces=(p.faces||[]).filter(f=>Number(f.id)!==id);if(typeof p.face_count==='number'&&p.face_count>0)p.face_count-=1;const item=$('#person-faces [data-face-id="'+id+'"]');if(!item){if(body)body.scrollTop=top;updatePersonFaceStatus();return;}const height=item.getBoundingClientRect().height;item.style.height=height+'px';item.classList.add('removing');await new Promise(resolve=>setTimeout(resolve,180));if(item.parentNode)item.remove();if(body)body.scrollTop=top;updatePersonFaceStatus();}
+async function removePersonFaceLocally(fid){const p=state.personDetail;if(!p)return;const id=Number(fid);const body=$('.person-body');const top=body?body.scrollTop:0;p.faces=(p.faces||[]).filter(f=>Number(f.id)!==id);if(typeof p.face_count==='number'&&p.face_count>0)p.face_count-=1;p.more=(p.faces||[]).length<p.face_count;const stream=state.personFaces;if(stream){stream.generation+=1;stream.offset=(p.faces||[]).length;stream.loading=false;}const item=$('#person-faces [data-face-id="'+id+'"]');if(!item){if(body)body.scrollTop=top;updatePersonFaceStatus();return;}const height=item.getBoundingClientRect().height;item.style.height=height+'px';item.classList.add('removing');await new Promise(resolve=>setTimeout(resolve,180));if(item.parentNode)item.remove();if(body)body.scrollTop=top;updatePersonFaceStatus();}
 function bindPersonFaceScroll(){const body=$('.person-body');if(!body||body.dataset.scrollBound)return;body.dataset.scrollBound='1';body.addEventListener('scroll',()=>maybeLoadMorePersonFaces(),{passive:true});}
 async function loadPersonFaces(reset=false){const id=state.personId;if(!id)return;const stream=state.personFaces||(state.personFaces={generation:0,offset:0,loading:false});if(stream.loading&&!reset)return;if(reset){stream.offset=0;}const ticket=++stream.generation;const offset=reset?0:stream.offset;stream.loading=true;try{const p=await api('/api/people/'+id+'?offset='+offset+'&limit=48');if(ticket!==stream.generation||Number(state.personId)!==Number(id))return;const incoming=p.faces||[];const existing=reset?[]:((state.personDetail&&state.personDetail.faces)||[]);const seen=new Set(existing.map(f=>f.id));const appended=incoming.filter(f=>!seen.has(f.id));p.faces=existing.concat(appended);state.personDetail=p;stream.offset=(typeof p.offset==='number'?p.offset+incoming.length:p.faces.length);renderPersonFaces(reset, appended);}finally{if(ticket===stream.generation)stream.loading=false;}}
 function updateBatch(){$('#batch-bar').hidden=!state.selecting;$('#selected-count').textContent=`已选 ${state.selected.size} 张`;$('#select-mode').textContent=state.selecting?'退出批量':'批量补录';$('#batch-edit').disabled=!state.selected.size;$('#batch-exclude').disabled=!state.selected.size;$('#batch-restore').disabled=!state.selected.size;$('#batch-exclude').hidden=state.view==='excluded';$('#batch-restore').hidden=state.view!=='excluded';window.__ourTimeHomeSync?.();}
