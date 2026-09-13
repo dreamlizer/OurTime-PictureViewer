@@ -279,7 +279,11 @@ def main():
         '添加并扫描',
     )) or 'id="last-scan-details"' in html:
         fail("添加照片页未收口为多目录极简流程，或仍显示最近一次扫描")
-    if "state.folderTarget==='scan'?'scan':'browse'" not in app or "await openAddPhotos(path)" not in app:
+    if ("state.folderTarget==='scan'?'scan':'browse'" not in app
+        or "const drives=await api('/api/drives')" not in app
+        or "card.hidden=active" not in app
+        or "继续上次扫描" not in app
+        or "await openAddPhotos(path)" not in app):
         fail("添加照片目录选择与文件夹页扫描入口尚未按用途统一")
     if not all(value in backend for value in (
         "FACE_GROUP_THRESHOLD = 0.50",

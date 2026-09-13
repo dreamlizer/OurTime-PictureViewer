@@ -45,8 +45,26 @@ def main() -> int:
             page.wait_for_timeout(100)
             assert page.locator("#scan-progress").is_visible(), status
             if status == "paused":
-                assert page.locator("#scan-progress-title").inner_text() == "已暂停"
-                assert page.locator("#resume-scan").inner_text() == "继续扫描"
+                assert page.locator(".add-photos-card").is_visible()
+                assert page.locator("#scan-folder-picker").is_visible()
+                assert page.locator("#scan-progress-title").inner_text() == "上一次添加已暂停"
+                assert page.locator("#resume-scan").inner_text() == "继续上次扫描"
+                assert "选择新文件夹" in page.locator("#scan-current").inner_text()
+
+        # Compatibility check against the currently running backend: the picker
+        # obtains drive roots from /api/drives even before a service restart.
+        page.click("#scan-folder-picker")
+        page.wait_for_selector("#folder-dialog[open]")
+        roots = page.locator("#folder-list [data-folder]").evaluate_all(
+            "nodes => nodes.map(node => node.dataset.folder)"
+        )
+        assert roots and any(not root.upper().startswith("I:") for root in roots)
+        page.click('[data-close="folder-dialog"]')
+        REPORT.parent.mkdir(parents=True, exist_ok=True)
+        page.screenshot(
+            path=str(REPORT.parent / "scan-paused-allows-new-folder.png"),
+            full_page=True,
+        )
 
         # Start a scan through the page, then simulate its completion in this visit.
         current["job"] = job("completed")
