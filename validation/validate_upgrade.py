@@ -117,7 +117,8 @@ try:
     finish()
     with sqlite3.connect(DATA/'library.sqlite3') as c:
         affected=c.execute('SELECT DISTINCT a.sha256 FROM assets a JOIN files f ON f.asset_id=a.id WHERE f.path LIKE ?',(str(concurrent)+'%',)).fetchall()
-        check(all(not (DATA/'thumbs'/(r[0]+'.jpg')).exists() for r in affected),'扫描与目录排除同时执行，完成后没有被重建的漏清缓存')
+        policies=c.execute('SELECT DISTINCT a.derivative_policy FROM assets a JOIN files f ON f.asset_id=a.id WHERE f.path LIKE ?',(str(concurrent)+'%',)).fetchall()
+        check(all((DATA/'thumbs'/(r[0]+'.jpg')).exists() for r in affected) and policies==[('preserve',)],'扫描与目录排除同时执行，目录规则保留已提交衍生缓存且不获得清理权限')
         check(c.execute('PRAGMA integrity_check').fetchone()[0]=='ok','并发扫描与排除后的数据库完整性通过')
     # Face results are cleared along with crops, while names and manual notes survive.
     face_dir=RUN/'face-fixture';face_dir.mkdir()

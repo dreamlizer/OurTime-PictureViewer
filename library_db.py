@@ -22,8 +22,11 @@ ASSET_LIST_COLUMNS = """
 a.id, a.sha256, a.width, a.height, a.format, a.captured_at, a.date_source, a.date_precision,
 a.latitude, a.longitude, a.place, a.place_source, a.camera, a.category, a.error,
 a.manual_date, a.manual_precision, a.manual_place, a.notes, a.face_state, a.face_error,
-a.created_at, a.excluded, a.exclude_reason, a.favorite, a.object_state, a.object_error
+a.created_at, a.excluded, a.exclude_reason, a.favorite, a.object_state, a.object_error,
+a.derivative_policy
 """.strip()
+
+B01_SCHEMA_MIGRATION = "b01_visibility_and_face_index_v1"
 
 
 def now():
@@ -62,7 +65,9 @@ def init_schema(conn):
           date_precision TEXT, latitude REAL, longitude REAL, place TEXT, place_source TEXT,
           camera TEXT, category TEXT NOT NULL DEFAULT '照片', error TEXT,
           manual_date TEXT, manual_precision TEXT, manual_place TEXT, notes TEXT NOT NULL DEFAULT '',
-          face_state INTEGER NOT NULL DEFAULT 0, face_error TEXT, created_at TEXT NOT NULL);
+          face_state INTEGER NOT NULL DEFAULT 0, face_error TEXT, created_at TEXT NOT NULL,
+          derivative_policy TEXT NOT NULL DEFAULT 'preserve'
+            CHECK(derivative_policy IN ('preserve','purge')));
         CREATE TABLE IF NOT EXISTS files (
           id INTEGER PRIMARY KEY, asset_id INTEGER NOT NULL REFERENCES assets(id), path TEXT NOT NULL UNIQUE,
           size INTEGER NOT NULL, mtime_ns INTEGER NOT NULL, modified_at TEXT, exists_now INTEGER NOT NULL DEFAULT 1);
@@ -105,6 +110,12 @@ def init_schema(conn):
             'excluded': 'INTEGER NOT NULL DEFAULT 0',
             'exclude_reason': "TEXT NOT NULL DEFAULT ''",
             'favorite': 'INTEGER NOT NULL DEFAULT 0',
+            # Historical exclusions have no trustworthy structured proof that
+            # derivative deletion was authorized, so migration is conservative.
+            'derivative_policy': (
+                "TEXT NOT NULL DEFAULT 'preserve' "
+                "CHECK(derivative_policy IN ('preserve','purge'))"
+            ),
         },
         'files': {'excluded': 'INTEGER NOT NULL DEFAULT 0'},
         'jobs': {
@@ -141,6 +152,15 @@ def init_schema(conn):
     conn.execute('CREATE INDEX IF NOT EXISTS faces_person_asset ON faces(person_id, asset_id)')
     conn.execute('CREATE INDEX IF NOT EXISTS files_path_nocase ON files(path COLLATE NOCASE)')
     conn.executescript('''
+        CREATE TABLE IF NOT EXISTS schema_migrations (
+            name TEXT PRIMARY KEY,
+            applied_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS face_index_state (
+            id INTEGER PRIMARY KEY CHECK(id=1),
+            revision INTEGER NOT NULL
+        );
+        INSERT OR IGNORE INTO face_index_state(id,revision) VALUES (1,0);
         CREATE TABLE IF NOT EXISTS object_tags (
             asset_id INTEGER NOT NULL REFERENCES assets(id),
             label TEXT NOT NULL,
@@ -148,6 +168,45 @@ def init_schema(conn):
             PRIMARY KEY(asset_id, label)
         );
     ''')
+    conn.executescript('''
+        CREATE TRIGGER IF NOT EXISTS face_index_faces_insert
+        AFTER INSERT ON faces BEGIN
+          UPDATE face_index_state SET revision=revision+1 WHERE id=1;
+        END;
+        CREATE TRIGGER IF NOT EXISTS face_index_faces_update
+        AFTER UPDATE ON faces BEGIN
+          UPDATE face_index_state SET revision=revision+1 WHERE id=1;
+        END;
+        CREATE TRIGGER IF NOT EXISTS face_index_faces_delete
+        AFTER DELETE ON faces BEGIN
+          UPDATE face_index_state SET revision=revision+1 WHERE id=1;
+        END;
+        CREATE TRIGGER IF NOT EXISTS face_index_people_insert
+        AFTER INSERT ON people BEGIN
+          UPDATE face_index_state SET revision=revision+1 WHERE id=1;
+        END;
+        CREATE TRIGGER IF NOT EXISTS face_index_people_update
+        AFTER UPDATE ON people BEGIN
+          UPDATE face_index_state SET revision=revision+1 WHERE id=1;
+        END;
+        CREATE TRIGGER IF NOT EXISTS face_index_people_delete
+        AFTER DELETE ON people BEGIN
+          UPDATE face_index_state SET revision=revision+1 WHERE id=1;
+        END;
+    ''')
+    invalid_policy = conn.execute(
+        """SELECT count(*) FROM assets
+           WHERE derivative_policy NOT IN ('preserve','purge')
+              OR derivative_policy IS NULL"""
+    ).fetchone()[0]
+    if invalid_policy:
+        raise RuntimeError(
+            f"B01 migration found {invalid_policy} invalid derivative policies"
+        )
+    conn.execute(
+        "INSERT OR IGNORE INTO schema_migrations(name,applied_at) VALUES (?,?)",
+        (B01_SCHEMA_MIGRATION, now()),
+    )
     conn.execute('CREATE INDEX IF NOT EXISTS object_tags_label ON object_tags(label, score DESC)')
     existing_assets = {r[1] for r in conn.execute('PRAGMA table_info(assets)')}
     for name, declaration in {

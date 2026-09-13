@@ -183,6 +183,11 @@ def cleanup_asset_cache(aid):
         return 0
     with asset_lock(row['sha256']):
         with db() as c:
+            policy=c.execute(
+                'SELECT derivative_policy FROM assets WHERE id=?',(aid,)
+            ).fetchone()
+            if not policy or policy['derivative_policy']!='purge':
+                return 0
             active=c.execute('SELECT 1 FROM assets a WHERE a.id=? AND '+ACTIVE_ASSET,(aid,)).fetchone()
             if active:
                 return 0
@@ -191,8 +196,22 @@ def cleanup_asset_cache(aid):
         for face in faces:
             released+=remove_generated(DATA/'faces'/f'{face[0]}.jpg','faces')
         with db() as c:
+            current=c.execute(
+                'SELECT derivative_policy FROM assets WHERE id=?',(aid,)
+            ).fetchone()
+            active=c.execute('SELECT 1 FROM assets a WHERE a.id=? AND '+ACTIVE_ASSET,(aid,)).fetchone()
+            if not current or current['derivative_policy']!='purge' or active:
+                return released
+            face_ids=[int(face[0]) for face in faces]
+            if face_ids:
+                placeholders=','.join('?' for _ in face_ids)
+                c.execute(
+                    f'UPDATE people SET cover_face_id=NULL WHERE cover_face_id IN ({placeholders})',
+                    face_ids,
+                )
             c.execute('DELETE FROM faces WHERE asset_id=?',(aid,))
             c.execute('UPDATE assets SET face_state=0,face_error=NULL WHERE id=?',(aid,))
+        invalidate_face_index()
         return released
 
 def jsonable(value):
@@ -430,7 +449,13 @@ def invalidate_face_index():
         FACE_INDEX=None
         FACE_INDEX_GEN += 1
 
-def build_face_index(known):
+def face_index_revision():
+    with db() as c:
+        return int(c.execute(
+            'SELECT revision FROM face_index_state WHERE id=1'
+        ).fetchone()[0])
+
+def build_face_index(known,revision=0):
     import numpy as np
     def value(row,key,default=None):
         try:
@@ -482,18 +507,34 @@ def build_face_index(known):
         'person_slot_by_id':person_slot_by_id,
         'unique_person_ids':unique_person_ids,
         'person_states':person_states,
+        'revision':int(revision),
     }
 
 def load_face_index():
-    global FACE_INDEX
+    global FACE_INDEX, FACE_INDEX_GEN
     attempts=0
     while True:
         attempts+=1
         with FACE_INDEX_LOCK:
-            if FACE_INDEX is not None:
-                return FACE_INDEX
+            cached=FACE_INDEX
             generation=FACE_INDEX_GEN
+        if cached is not None:
+            current_revision=face_index_revision()
+            with FACE_INDEX_LOCK:
+                if (
+                    FACE_INDEX is cached
+                    and int(cached.get('revision',-1))==current_revision
+                ):
+                    return cached
+                if FACE_INDEX is cached:
+                    FACE_INDEX=None
+                    FACE_INDEX_GEN+=1
+                generation=FACE_INDEX_GEN
         with db() as c:
+            c.execute('BEGIN')
+            revision=int(c.execute(
+                'SELECT revision FROM face_index_state WHERE id=1'
+            ).fetchone()[0])
             known=c.execute(
                 '''SELECT f.embedding,f.person_id,p.confirmed,p.ignored,p.suggested_person_id,
                           target.confirmed AS suggested_confirmed,
@@ -508,11 +549,12 @@ def load_face_index():
                          AND coalesce(p.ignored,0)=0
                          AND p.suggested_person_id IS NOT NULL
                      )
-                   ORDER BY f.id'''
+                    ORDER BY f.id'''
             ).fetchall()
-        index=build_face_index(known)
+        index=build_face_index(known,revision)
+        current_revision=face_index_revision()
         with FACE_INDEX_LOCK:
-            if generation==FACE_INDEX_GEN:
+            if generation==FACE_INDEX_GEN and revision==current_revision:
                 if FACE_INDEX is None:
                     FACE_INDEX=index
                 return FACE_INDEX
@@ -521,11 +563,18 @@ def load_face_index():
         if attempts>=8:
             raise RuntimeError('人脸索引正在更新，请稍后重试')
 
-def remember_face(person_id,embedding,confirmed=False,ignored=False):
+def remember_face(
+    person_id,embedding,confirmed=False,ignored=False,expected_revision=None
+):
     import numpy as np
     with FACE_INDEX_LOCK:
         if FACE_INDEX is None:
-            return
+            return False
+        if (
+            expected_revision is not None
+            and int(FACE_INDEX.get('revision',-1))!=int(expected_revision)
+        ):
+            return False
         vector=np.asarray(embedding,dtype=np.float32).reshape(-1)
         if FACE_INDEX['size']==0 and vector.shape[0]!=FACE_INDEX['vectors'].shape[1]:
             FACE_INDEX['vectors']=np.zeros((len(FACE_INDEX['vectors']), vector.shape[0]), dtype=np.float32)
@@ -547,6 +596,7 @@ def remember_face(person_id,embedding,confirmed=False,ignored=False):
         FACE_INDEX['person_slots'][position]=slot
         FACE_INDEX['size']+=1
         FACE_INDEX['person_ids'].append(person_id)
+        return True
 
 def choose_face_person(index,embedding,used_people=None):
     """Route one face to the closest canonical person at the shared threshold."""
@@ -579,71 +629,248 @@ def choose_face_person(index,embedding,used_people=None):
         return {**base,'route':'pending','person_id':best_person}
     return {**base,'route':'new'}
 
+def crop_face_image(pic,bbox):
+    x1,y1,x2,y2=[int(x) for x in bbox[:4]]
+    pad=int(max(x2-x1,y2-y1)*.25)
+    crop=pic.crop((
+        max(0,x1-pad),max(0,y1-pad),
+        min(pic.width,x2+pad),min(pic.height,y2+pad),
+    ))
+    crop.thumbnail((200,200))
+    return crop
+
+class FacePublishPending(RuntimeError):
+    """Face rows committed; only derivative crop publication needs recovery."""
+
+class FaceIndexChanged(RuntimeError):
+    """The matching index changed before its decision could be committed."""
+
+def recover_asset_face_crops(asset_id,path):
+    """Finish a committed crop publication without rerunning face inference."""
+    with db() as c:
+        rows=c.execute(
+            'SELECT id,bbox,crop FROM faces WHERE asset_id=? ORDER BY id',
+            (asset_id,),
+        ).fetchall()
+    if not rows:
+        return False
+    pic=None
+    recovery_files=[]
+    try:
+        for row in rows:
+            final_name=row['crop'] or f"{row['id']}.jpg"
+            final_path=DATA/'faces'/final_name
+            pending_path=DATA/'faces'/f".pending-{row['id']}.jpg"
+            if final_path.exists():
+                continue
+            if pending_path.exists():
+                os.replace(pending_path,final_path)
+                continue
+            if pic is None:
+                with Image.open(path) as original:
+                    pic=ImageOps.exif_transpose(original).convert('RGB')
+                    pic.thumbnail((2400,2400))
+            bbox=json.loads(row['bbox'])
+            staged=DATA/'faces'/f".recover-{row['id']}-{uuid.uuid4().hex}.jpg"
+            recovery_files.append(staged)
+            crop_face_image(pic,bbox).save(staged,format='JPEG',quality=88)
+            os.replace(staged,final_path)
+        with db() as c:
+            c.execute(
+                'UPDATE assets SET face_state=1,face_error=NULL WHERE id=?',
+                (asset_id,),
+            )
+        invalidate_face_index()
+        return True
+    finally:
+        for staged in recovery_files:
+            try:
+                staged.unlink()
+            except (FileNotFoundError,OSError):
+                pass
+
+def person_accepts_route(conn,person_id,route):
+    row=conn.execute(
+        'SELECT confirmed,ignored,suggested_person_id FROM people WHERE id=?',
+        (person_id,),
+    ).fetchone()
+    if not row:
+        return False
+    if route=='confirmed':
+        return bool(row['confirmed']) and not bool(row['ignored'])
+    if route=='ignored':
+        return bool(row['ignored'])
+    if route=='pending':
+        return not bool(row['confirmed']) and not bool(row['ignored'])
+    return True
+
+def route_staged_faces(index,staged):
+    used_people=set()
+    for item in staged:
+        decision=choose_face_person(index,item['emb'],used_people)
+        item['person_id']=decision['person_id']
+        item['suggestion']=decision['suggested_person_id']
+        item['route']=decision['route']
+        if item['person_id']:
+            used_people.add(item['person_id'])
+
 def process_faces(asset_id,path):
     import numpy as np
     with db() as c:
-        row=c.execute('SELECT face_state FROM assets WHERE id=?',(asset_id,)).fetchone()
-        if row and int(row['face_state'] or 0)==1:
+        row=c.execute(
+            'SELECT sha256,face_state FROM assets WHERE id=?',(asset_id,)
+        ).fetchone()
+    if not row:
+        raise RuntimeError('照片档案不存在')
+    with asset_lock(row['sha256']):
+        with db() as c:
+            state_row=c.execute(
+                '''SELECT face_state,
+                          EXISTS(SELECT 1 FROM faces WHERE asset_id=?) has_faces
+                   FROM assets WHERE id=?''',
+                (asset_id,asset_id),
+            ).fetchone()
+        state=int(state_row['face_state'] or 0)
+        if state==1:
             return None
-    engine=get_face_engine()
-    with Image.open(path) as original:
-        pic=ImageOps.exif_transpose(original).convert('RGB')
-        pic.thumbnail((2400,2400))
-        detections=engine.get(np.asarray(pic)[:,:,::-1].copy())
-        index=load_face_index()
-        used_people=set()
-        staged=[]
-        for face in detections:
-            x1,y1,x2,y2=[int(x) for x in face.bbox]
-            if x2-x1<28 or y2-y1<28 or float(face.det_score)<0.65:
-                continue
-            emb=np.asarray(face.normed_embedding,dtype=np.float32)
-            decision=choose_face_person(index,emb,used_people)
-            person_id=decision['person_id']
-            suggestion=decision['suggested_person_id']
-            pad=int(max(x2-x1,y2-y1)*.25)
-            crop=pic.crop((max(0,x1-pad),max(0,y1-pad),min(pic.width,x2+pad),min(pic.height,y2+pad)))
-            crop.thumbnail((200,200))
-            staged.append({'emb':emb,'person_id':person_id,'suggestion':suggestion,'route':decision['route'],'bbox':[x1,y1,x2,y2,pic.width,pic.height],'score':float(face.det_score),'crop':crop})
-            if person_id:
-                used_people.add(person_id)
-        created_people=[]
-        created_crops=[]
-        try:
-            with db() as c:
-                for item in staged:
-                    person_id=item['person_id']
-                    if not person_id:
-                        person_id=c.execute('INSERT INTO people(suggested_person_id) VALUES (?)',(item['suggestion'],)).lastrowid
-                        created_people.append(person_id)
-                        item['person_id']=person_id
-                    reviewed=int(item['route'] in {'confirmed','ignored'})
-                    ignored=int(item['route']=='ignored')
-                    fid=c.execute('INSERT INTO faces(asset_id,person_id,bbox,embedding,score,reviewed,ignored) VALUES (?,?,?,?,?,?,?)',
-                        (asset_id,person_id,json.dumps(item['bbox']),item['emb'].tobytes(),item['score'],reviewed,ignored)).lastrowid
-                    item['fid']=fid
-                    crop_path=DATA/'faces'/f'{fid}.jpg'
-                    created_crops.append(crop_path)
-                    item['crop'].save(crop_path,quality=88)
-                    c.execute('UPDATE faces SET crop=? WHERE id=?',(f'{fid}.jpg',fid))
-                c.execute('UPDATE assets SET face_state=1,face_error=NULL WHERE id=?',(asset_id,))
-            for item in staged:
-                if item['route']!='suggested':
-                    remember_face(
-                        item['person_id'],item['emb'],
-                        confirmed=item['route']=='confirmed',
-                        ignored=item['route']=='ignored',
+        if state==2 or state_row['has_faces']:
+            try:
+                if recover_asset_face_crops(asset_id,path):
+                    return None
+            except Exception as error:
+                with db() as c:
+                    c.execute(
+                        'UPDATE assets SET face_state=2,face_error=? WHERE id=?',
+                        ('人脸裁剪待恢复：'+str(error),asset_id),
                     )
-            return len(staged)
+                raise FacePublishPending(
+                    '人脸已提交，裁剪发布待恢复'
+                ) from error
+        engine=get_face_engine()
+        with Image.open(path) as original:
+            pic=ImageOps.exif_transpose(original).convert('RGB')
+            pic.thumbnail((2400,2400))
+            detections=engine.get(np.asarray(pic)[:,:,::-1].copy())
+            staged=[]
+            for face in detections:
+                x1,y1,x2,y2=[int(x) for x in face.bbox]
+                if x2-x1<28 or y2-y1<28 or float(face.det_score)<0.65:
+                    continue
+                emb=np.asarray(face.normed_embedding,dtype=np.float32)
+                staged.append({
+                    'emb':emb,
+                    'bbox':[x1,y1,x2,y2,pic.width,pic.height],
+                    'score':float(face.det_score),
+                    'crop':crop_face_image(pic,[x1,y1,x2,y2]),
+                })
+        committed_revision=None
+        for decision_attempt in range(3):
+            index=load_face_index()
+            index_revision=int(index.get('revision',face_index_revision()))
+            route_staged_faces(index,staged)
+            pending_crops=[]
+            try:
+                with db() as c:
+                    c.execute('BEGIN IMMEDIATE')
+                    write_revision=int(c.execute(
+                        'SELECT revision FROM face_index_state WHERE id=1'
+                    ).fetchone()[0])
+                    if write_revision!=index_revision:
+                        raise FaceIndexChanged(
+                            f'index {index_revision}, database {write_revision}'
+                        )
+                    for item in staged:
+                        person_id=item['person_id']
+                        if person_id and not person_accepts_route(
+                            c,person_id,item['route']
+                        ):
+                            person_id=None
+                            item['person_id']=None
+                            item['suggestion']=None
+                            item['route']='new'
+                        if not person_id:
+                            if item['suggestion']:
+                                suggestion_exists=c.execute(
+                                    '''SELECT 1 FROM people
+                                       WHERE id=?
+                                         AND (confirmed=1 OR ignored=1)''',
+                                    (item['suggestion'],),
+                                ).fetchone()
+                                if not suggestion_exists:
+                                    item['suggestion']=None
+                            person_id=c.execute('INSERT INTO people(suggested_person_id) VALUES (?)',(item['suggestion'],)).lastrowid
+                            item['person_id']=person_id
+                        reviewed=int(item['route'] in {'confirmed','ignored'})
+                        ignored=int(item['route']=='ignored')
+                        fid=c.execute('INSERT INTO faces(asset_id,person_id,bbox,embedding,score,reviewed,ignored) VALUES (?,?,?,?,?,?,?)',
+                            (asset_id,person_id,json.dumps(item['bbox']),item['emb'].tobytes(),item['score'],reviewed,ignored)).lastrowid
+                        item['fid']=fid
+                        crop_path=DATA/'faces'/f".pending-{fid}.jpg"
+                        pending_crops.append(crop_path)
+                        item['crop'].save(crop_path,format='JPEG',quality=88)
+                        c.execute('UPDATE faces SET crop=? WHERE id=?',(f'{fid}.jpg',fid))
+                    c.execute('UPDATE assets SET face_state=2,face_error=NULL WHERE id=?',(asset_id,))
+                    committed_revision=int(c.execute(
+                        'SELECT revision FROM face_index_state WHERE id=1'
+                    ).fetchone()[0])
+                break
+            except FaceIndexChanged:
+                invalidate_face_index()
+                if decision_attempt==2:
+                    raise RuntimeError(
+                        '人脸索引持续更新，未提交过期匹配结果'
+                    )
+                continue
+            except Exception:
+                for crop_path in pending_crops:
+                    try:
+                        if crop_path.exists():
+                            crop_path.unlink()
+                    except OSError:
+                        pass
+                raise
+        try:
+            for item,crop_path in zip(staged,pending_crops):
+                os.replace(crop_path,DATA/'faces'/f"{item['fid']}.jpg")
+            with db() as c:
+                c.execute('UPDATE assets SET face_state=1,face_error=NULL WHERE id=?',(asset_id,))
+        except Exception as error:
+            with db() as c:
+                c.execute(
+                    'UPDATE assets SET face_state=2,face_error=? WHERE id=?',
+                    ('人脸裁剪待恢复：'+str(error),asset_id),
+                )
+            invalidate_face_index()
+            raise FacePublishPending('人脸已提交，裁剪发布待恢复') from error
+
+        try:
+            current_revision=face_index_revision()
+            remembered=True
+            if current_revision!=committed_revision:
+                remembered=False
+            else:
+                for item in staged:
+                    if item['route']!='suggested':
+                        remembered=bool(remember_face(
+                            item['person_id'],item['emb'],
+                            confirmed=item['route']=='confirmed',
+                            ignored=item['route']=='ignored',
+                            expected_revision=index_revision,
+                        )) and remembered
+            with FACE_INDEX_LOCK:
+                if (
+                    remembered
+                    and FACE_INDEX is not None
+                    and int(FACE_INDEX.get('revision',-1))==index_revision
+                ):
+                    FACE_INDEX['revision']=committed_revision
+                elif FACE_INDEX is not None:
+                    # A concurrent write or build means the incremental delta
+                    # cannot prove it represents the current database.
+                    raise RuntimeError('人脸索引版本已变化')
         except Exception:
             invalidate_face_index()
-            for crop_path in created_crops:
-                try:
-                    if crop_path.exists():
-                        crop_path.unlink()
-                except OSError:
-                    pass
-            raise
+        return len(staged)
 
 def ingest(path,with_faces,stage=None):
     notify = stage or (lambda _name: None)
@@ -719,6 +946,8 @@ def ingest(path,with_faces,stage=None):
                     face_processed=True
                     faces_found=int(found)
                     face_seconds=time.perf_counter()-face_started
+            except FacePublishPending as e:
+                error='人脸处理：'+str(e)
             except Exception as e:
                 with db() as c:
                     c.execute('UPDATE assets SET face_state=-1,face_error=? WHERE id=?',(str(e),aid))
@@ -1071,12 +1300,30 @@ def exclude_assets(body:ExclusionRequest):
             raise HTTPException(404,f'照片 {aid} 不存在')
         with asset_lock(row['sha256']):
             with db() as c:
-                old=c.execute('SELECT excluded,exclude_reason FROM assets WHERE id=?',(aid,)).fetchone()
-                if not body.excluded and old['exclude_reason']=='在合影页排除显示':
+                old=c.execute(
+                    'SELECT excluded,exclude_reason,derivative_policy FROM assets WHERE id=?',
+                    (aid,),
+                ).fetchone()
+                if not body.excluded and old['derivative_policy']=='preserve':
                     display_only_restores+=1
-                c.execute('UPDATE assets SET excluded=?,exclude_reason=? WHERE id=?',(int(body.excluded),body.reason if body.excluded else '',aid))
+                policy=(
+                    'preserve'
+                    if not body.excluded or body.display_only
+                    else 'purge'
+                )
+                c.execute(
+                    '''UPDATE assets
+                       SET excluded=?,exclude_reason=?,derivative_policy=?
+                       WHERE id=?''',
+                    (
+                        int(body.excluded),
+                        body.reason if body.excluded else '',
+                        policy,
+                        aid,
+                    ),
+                )
                 c.execute('INSERT INTO edits(created_at,target,before_json,after_json) VALUES (?,?,?,?)',
-                          (now(),f'asset:{aid}',json.dumps(dict(old),ensure_ascii=False),json.dumps({'excluded':body.excluded,'reason':body.reason,'display_only':bool(body.excluded and body.display_only)},ensure_ascii=False)))
+                          (now(),f'asset:{aid}',json.dumps(dict(old),ensure_ascii=False),json.dumps({'excluded':body.excluded,'reason':body.reason,'display_only':bool(body.excluded and body.display_only),'derivative_policy':policy},ensure_ascii=False)))
             if body.excluded and not body.display_only:
                 released+=cleanup_asset_cache(aid)
     with STATUS_CACHE_LOCK:
