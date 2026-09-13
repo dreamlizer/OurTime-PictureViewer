@@ -29,11 +29,13 @@ def main():
     assert 'body.is-people-view .view-chrome .toolbar > .section-heading { display: none; }' in css
     assert 'resolvePersonLabel' in ui
     assert 'rememberPersonLabel: rememberLabel' in ui
+    assert 'data-ot="group"' in ui
+    assert "['10plus', '10人及以上']" in ui
+    assert 'applyGroup: async (group' in init
     assert 'data-ot="close"' in ui
     assert "if (destroyed) return;" in ui
     assert '.ot-home-popover .ot-home-close' in css
-    assert "if(view==='places')return $('#places-view');" in app
-    assert "String(view).startsWith('place:'))return $('#places-view')" not in app
+    assert "if(view==='places'||isPhotoPlaceView(view))return $('#places-view');" in app
     assert 'function folderNormalize(' in app
     assert "list.dataset.currentPath=current;" in app
     assert 'async function loadExclusionRules(viewToken=null)' in app

@@ -50,7 +50,7 @@ def req(path: str, body=None, method: str | None = None):
 
 def add_asset(conn: sqlite3.Connection, aid: int) -> None:
     path = PHOTOS / f"合影-{aid}.jpg"
-    Image.new("RGB", (1000, 700), (105 + aid * 12, 91, 72)).save(path)
+    Image.new("RGB", (1000, 700), ((aid * 37) % 256, (aid * 73) % 256, (aid * 109) % 256)).save(path)
     sha = hashlib.sha256(path.read_bytes()).hexdigest()
     conn.execute(
         """INSERT INTO assets(id,sha256,width,height,format,metadata,captured_at,date_source,
@@ -160,6 +160,7 @@ def main() -> int:
                   const toolsBox=tools.getBoundingClientRect();
                   const firstGroup=document.querySelector('.viewer-tool-group');
                   const favorite=document.querySelector('#photo-favorite');
+                  const favoriteIcon=favorite.querySelector('svg').getBoundingClientRect();
                   const image=document.querySelector('#detail-img').getBoundingClientRect();
                   const signature=document.querySelector('#photo-signature').getBoundingClientRect();
                   const matStyle=getComputedStyle(document.querySelector('#photo-mat'));
@@ -176,6 +177,7 @@ def main() -> int:
                     arrowOpacity:parseFloat(arrowStyle.opacity),
                     favoriteAlpha:alpha(favoriteStyle.backgroundColor),
                     favoriteTextAlpha:alpha(favoriteStyle.color),
+                    favoriteCenterDelta:Math.abs((favorite.getBoundingClientRect().left+favorite.getBoundingClientRect().width/2)-(favoriteIcon.left+favoriteIcon.width/2)),
                     favoriteBorder:parseFloat(favoriteStyle.borderTopWidth),
                     favoriteLabelCount:favorite.querySelectorAll('span').length,
                     photoCaptionGap:signature.top-image.bottom,
@@ -187,7 +189,8 @@ def main() -> int:
             check(viewer_controls["toolsInset"] >= 28, "右侧工具条离开详情页边缘至少半个按钮宽度")
             check(viewer_controls["toolsGap"] <= 5 and viewer_controls["groupGap"] <= 1, "右侧工具条组间和按钮间距已收紧")
             check(viewer_controls["arrowAlpha"] <= .32 and viewer_controls["arrowOpacity"] <= .7, "翻页箭头使用更轻、更透明的承载层")
-            check(viewer_controls["favoriteAlpha"] <= .16 and viewer_controls["favoriteTextAlpha"] <= .52, "未收藏图标进一步降低存在感")
+            check(viewer_controls["favoriteAlpha"] <= .08 and viewer_controls["favoriteTextAlpha"] <= .48, "未收藏图标进一步降低存在感")
+            check(viewer_controls["favoriteCenterDelta"] <= .5, "收藏图标与背景圆片水平居中")
             check(viewer_controls["favoriteBorder"] == 0 and viewer_controls["favoriteLabelCount"] == 0, "收藏控件只保留无边框图标")
             check(abs(viewer_controls["photoCaptionGap"]) <= 1 and viewer_controls["matAlpha"] == 1, "照片与元数据条无黑缝连接")
             page.screenshot(path=str(RUN / "viewer-controls-muted.png"), full_page=False)
@@ -294,7 +297,44 @@ def main() -> int:
 
             named.click()
             check(page.locator("#face-action-popover").is_visible(), "点击已命名标签会打开单张纠错卡")
+            first_action = page.locator("#face-action-popover > button").first
+            check(first_action.get_attribute("id") == "face-action-photos" and first_action.inner_text() == "查看此人照片", "查看此人照片作为首个正向操作")
+            check(page.locator("#face-action-edit-name").is_visible(), "加粗姓名旁显示轻量修改铅笔")
+            page.click("#face-action-edit-name")
+            check(page.locator("#face-action-name-input").input_value() == "郑婷", "铅笔原位打开仅含当前姓名的编辑框")
+            page.fill("#face-action-name-input", "郑婷新")
+            page.locator("#face-action-rename button[type='submit']").click()
+            page.wait_for_function("document.querySelector('[data-face-id=\"101\"]')?.textContent.includes('郑婷新')")
+            renamed = req("/api/people/1")
+            check(renamed["name"] == "郑婷新" and renamed["alias"] == "", "快捷修改只更新正式姓名，不改别称")
+
+            page.locator('.face-name[data-face-id="101"]').click()
+            page.wait_for_selector("#face-action-popover:not([hidden])")
             page.screenshot(path=str(RUN / "face-action-popover.png"), full_page=False)
+            page.click("#face-action-photos")
+            page.wait_for_selector("#detail-dialog", state="hidden")
+            page.wait_for_function("window.__ourTimeApp.state.view==='timeline' && window.__ourTimeApp.state.person==='1'")
+            check(page.locator("#page-title").inner_text() == "全部照片", "查看此人照片会回到全部照片并启用人物筛选")
+            check("郑婷新" in page.locator('[data-ot="chips"]').inner_text(), "人物筛选标签显示刚刚更正后的姓名")
+            check(page.locator('[data-ot="person"]').is_visible() and page.locator('[data-ot="group"]').is_visible(), "人物与合影人数等筛选按钮继续保留")
+            page.screenshot(path=str(RUN / "person-photo-filter.png"), full_page=False)
+            page.set_viewport_size({"width": 390, "height": 844})
+            page.wait_for_timeout(350)
+            narrow_overflow = page.evaluate("""() => ({overflow:document.documentElement.scrollWidth > document.documentElement.clientWidth,width:document.documentElement.scrollWidth,offenders:[...document.querySelectorAll('body *')].map(element=>({element,rect:element.getBoundingClientRect()})).filter(item=>item.rect.right>390.5||item.rect.left<-.5).slice(0,8).map(item=>item.element.tagName.toLowerCase()+'#'+item.element.id+'.'+item.element.className)})""")
+            check(not narrow_overflow["overflow"], "390px 窄屏增加人数筛选后不横向溢出：" + json.dumps(narrow_overflow, ensure_ascii=False))
+            page.set_viewport_size({"width": 1440, "height": 920})
+            page.click('[data-ot="group"]')
+            page.wait_for_selector('.ot-home-popover:not([hidden]) [data-group-size="5"]')
+            check(page.locator('.ot-home-popover [data-group-size]').count() == 11, "人数筛选提供全部、1 至 9 人和 10 人以上")
+            page.click('.ot-home-popover [data-group-size="5"]')
+            page.wait_for_function("window.__ourTimeApp.state.view==='group:5' && window.__ourTimeApp.state.person==='1'")
+            page.wait_for_selector('#photo-grid [data-photo="1"]')
+            check(page.locator('#photo-grid [data-photo]').count() == 1, "人物与 5 人合影条件可叠加筛选")
+            page.locator('#photo-grid [data-photo="1"]').click()
+            page.wait_for_selector("#detail-dialog[open]")
+            page.wait_for_selector('#face-name-layer [data-face-id="101"]')
+            page.locator('.face-name[data-face-id="101"]').click()
+            page.wait_for_selector("#face-action-popover:not([hidden])")
             page.click("#face-action-split")
             page.wait_for_function("document.querySelector('[data-face-id=\"101\"]').classList.contains('unnamed')")
             split_person = face_state(101)[0]
@@ -321,9 +361,46 @@ def main() -> int:
 
             page.set_viewport_size({"width": 1440, "height": 920})
             page.evaluate("document.querySelector('#detail-dialog').close()")
-            page.evaluate("window.__ourTimeApp.setView('timeline')")
+            page.evaluate("window.__ourTimeApp.state.person=''; window.__ourTimeApp.setView('timeline')")
             page.wait_for_selector("#photo-grid [data-photo]")
-            check(page.locator("[data-group-exclude-arm]").count() == 0, "普通照片页不显示合影快捷排除按钮")
+            timeline_exclude = page.locator('[data-photo="1"] [data-group-exclude-arm]')
+            check(timeline_exclude.is_visible(), "全部照片每张卡片也显示快捷排除角标")
+            exclude_style = timeline_exclude.evaluate(
+                """button => {const frame=button.closest('.photo-frame').getBoundingClientRect();const host=button.closest('.group-card-exclude').getBoundingClientRect();const style=getComputedStyle(button);return {right:frame.right-host.right,bottom:frame.bottom-host.bottom,height:button.getBoundingClientRect().height,paddingLeft:parseFloat(style.paddingLeft),weight:Number(style.fontWeight)};}"""
+            )
+            check(exclude_style["right"] <= 4 and exclude_style["bottom"] <= 4, "排除角标更靠近照片右下角")
+            check(exclude_style["height"] <= 20 and exclude_style["paddingLeft"] <= 4 and exclude_style["weight"] >= 600, "排除角标缩小留白并稍微加粗")
+            timeline_exclude.click()
+            check(page.locator('[data-photo="1"] .group-exclude-confirm').is_visible(), "全部照片角标仍保留二次确认")
+            check(not page.locator("#detail-dialog").get_attribute("open"), "全部照片点击排除不会误打开详情")
+            page.click('[data-photo="1"] [data-group-exclude-cancel]')
+
+            with sqlite3.connect(DATA / "library.sqlite3") as conn:
+                for asset_id in range(3, 28):
+                    add_asset(conn, asset_id)
+                conn.commit()
+            page.evaluate("loadPhotos()")
+            page.wait_for_selector('[data-photo="27"]')
+            local_before = page.evaluate(
+                """() => {const first=document.querySelector('[data-photo="27"]').getBoundingClientRect();const next=document.querySelector('[data-photo="26"]');next.dataset.localRemovalWitness='kept';return {firstLeft:first.left,firstTop:first.top,nextLeft:next.getBoundingClientRect().left};}"""
+            )
+            page.click('[data-photo="27"] [data-group-exclude-arm]')
+            page.click('[data-photo="27"] [data-group-exclude-confirm]')
+            page.wait_for_function('!document.querySelector(\'[data-photo="27"]\') && waterfall.pending.size === 0')
+            page.wait_for_timeout(230)
+            local_after = page.locator('[data-photo="26"]').evaluate(
+                """element => {const rect=element.getBoundingClientRect(),page=waterfall.cache.get(0);return {witness:element.dataset.localRemovalWitness,position:element.dataset.position,left:rect.left,top:rect.top,updating:element.closest('#photo-grid').classList.contains('is-updating'),pageSize:page.layout.length,tailId:page.layout.at(-1).a.id};}"""
+            )
+            check(local_after["witness"] == "kept" and local_after["position"] == "0", "排除后保留下一张照片的原节点并前移一位")
+            check(abs(local_after["left"] - local_before["firstLeft"]) < 2 and abs(local_after["top"] - local_before["firstTop"]) < 2, "后续照片就地补到被排除照片的位置")
+            check(local_after["pageSize"] == 24 and local_after["tailId"] == 3, "局部重排会从下一页补一张，不让当前已加载页少一个位置")
+            check(not local_after["updating"], "快捷排除不会触发照片流整页刷新态")
+            with sqlite3.connect(DATA / "library.sqlite3") as conn:
+                timeline_excluded = conn.execute("SELECT excluded,exclude_reason FROM assets WHERE id=27").fetchone()
+            check(timeline_excluded == (1, "在全部照片页排除显示"), "全部照片局部退场后仍真实写入排除状态")
+            req("/api/exclusions/assets", {"ids": [27], "excluded": False}, "POST")
+            page.evaluate("loadPhotos()")
+            page.wait_for_selector('#photo-grid [data-photo="1"]')
 
             page.evaluate("window.__ourTimeApp.setView('group:5')")
             page.wait_for_selector('#photo-grid [data-photo="1"] [data-group-exclude-arm]')

@@ -403,8 +403,35 @@ function buildFaceActionPopover(){
   const dialog=$('#detail-dialog');if(!dialog)return;
   const pop=document.createElement('section');
   pop.id='face-action-popover';pop.className='face-action-popover';pop.hidden=true;
-  pop.innerHTML=`<div class="face-action-head"><span>这张照片中的</span><b id="face-action-name"></b></div><button type="button" id="face-action-split">认错了 · 从此人物移出</button><button type="button" id="face-action-ignore">这张是路人</button><small>只处理这张照片中的这张脸，不影响此人的其他照片。</small>`;
+  pop.innerHTML=`<div class="face-action-head"><span>这张照片中的</span><b id="face-action-name"></b><button type="button" id="face-action-edit-name" aria-label="修改姓名" title="修改姓名"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m4 14.7-.7 3 3-.7L15.8 7.5 13.5 5.2 4 14.7Z"/><path d="m12.3 6.4 2.3 2.3"/></svg></button></div><form id="face-action-rename" class="face-action-rename" hidden><label for="face-action-name-input">姓名</label><input id="face-action-name-input" maxlength="100" autocomplete="off"><button type="submit">保存</button><button type="button" id="face-action-rename-cancel">取消</button></form><button type="button" id="face-action-photos" class="face-action-primary">查看此人照片</button><button type="button" id="face-action-split">认错了 · 从此人物移出</button><button type="button" id="face-action-ignore">这张是路人</button><small>“认错了”和“路人”只处理这张照片中的这张脸。</small>`;
   dialog.appendChild(pop);
+  $('#face-action-photos').addEventListener('click',action(async()=>{
+    const faceId=Number(pop.dataset.faceId),face=(state.detail?.faces||[]).find(item=>Number(item.id)===faceId);if(!face)return;
+    const personId=Number(face.person_id);if(!personId)return;
+    rememberPersonLabel({id:personId,name:face.name,alias:face.alias||'',confirmed:1,ignored:0});state.person=String(personId);
+    const legacy=$('#person-filter');if(legacy)legacy.value=state.person;
+    const closed=dialog.open?new Promise(resolve=>dialog.addEventListener('close',resolve,{once:true})):Promise.resolve();
+    closeFaceActionPopover();closePhotoViewer();await closed;await setView('timeline');
+  }));
+  $('#face-action-edit-name').addEventListener('click',e=>{
+    e.preventDefault();e.stopPropagation();
+    const form=$('#face-action-rename'),input=$('#face-action-name-input');
+    form.hidden=!form.hidden;
+    if(!form.hidden){input.value=$('#face-action-name').textContent.trim();requestAnimationFrame(()=>{input.focus();input.select();const rect=pop.getBoundingClientRect(),overflow=rect.bottom-(innerHeight-12);if(overflow>0)pop.style.top=Math.max(12,rect.top-overflow)+'px';});}
+  });
+  $('#face-action-rename-cancel').addEventListener('click',()=>{$('#face-action-rename').hidden=true;$('#face-action-edit-name').focus();});
+  $('#face-action-rename').addEventListener('submit',action(async e=>{
+    e.preventDefault();
+    const faceId=Number(pop.dataset.faceId),face=(state.detail?.faces||[]).find(item=>Number(item.id)===faceId);if(!face)return;
+    const name=$('#face-action-name-input').value.trim();if(!name)throw new Error('请输入姓名');
+    const save=e.submitter||$('#face-action-rename button[type="submit"]');save.disabled=true;
+    try{
+      const result=await rememberPersonName(Number(face.person_id),name,String(face.alias||''));
+      if(result?.cancelled)return;
+      if(!result?.merged){$('#face-action-name').textContent=name;rememberPersonLabel({id:Number(face.person_id),name,alias:face.alias||'',confirmed:1,ignored:0});toast('姓名已修改');}
+      closeFaceActionPopover();
+    }finally{save.disabled=false;}
+  }));
   $('#face-action-split').addEventListener('click',action(async()=>{
     const faceId=Number(pop.dataset.faceId),face=(state.detail?.faces||[]).find(item=>Number(item.id)===faceId);if(!face)return;
     const oldPerson=Number(face.person_id),oldName=String(face.name||'').trim()||'这个人物';
@@ -426,7 +453,7 @@ function openFaceActionPopover(button,face){
   const pop=$('#face-action-popover');if(!pop)return;
   toggleFaceStylePopover(false);togglePhotoPeoplePopover(false);
   viewer.faceAction={faceId:Number(face.id),button};
-  pop.dataset.faceId=String(face.id);$('#face-action-name').textContent=String(face.name||'').trim();pop.hidden=false;
+  pop.dataset.faceId=String(face.id);$('#face-action-name').textContent=String(face.name||'').trim();$('#face-action-rename').hidden=true;pop.hidden=false;
   showFaceGuide(button);
   requestAnimationFrame(()=>{
     const rect=button.getBoundingClientRect(),width=pop.offsetWidth,height=pop.offsetHeight,pad=12;
@@ -805,22 +832,21 @@ function clearViewerImage(){
  const placeMap=$('#photo-place-map');if(placeMap)placeMap.hidden=true;
 }
 function setViewerLoading(loading){
- const dialog=$('#detail-dialog'),img=$('#detail-img'),signature=$('#photo-signature'),faces=$('#face-name-layer'),stage=document.querySelector('.viewer-stage');
+ const dialog=$('#detail-dialog'),img=$('#detail-img'),signature=$('#photo-signature'),stage=document.querySelector('.viewer-stage');
  if(!dialog)return;
  let indicator=$('#viewer-loading');
  if(!indicator&&stage){indicator=document.createElement('div');indicator.id='viewer-loading';indicator.textContent='加载中…';indicator.setAttribute('aria-live','polite');stage.appendChild(indicator);}
  clearTimeout(viewer.loadingTimer);viewer.loadingTimer=null;
  dialog.classList.toggle('is-loading',Boolean(loading));
- const hasVisibleImage=Boolean(img&&!img.hidden&&img.getAttribute('src'));
- dialog.classList.toggle('is-switching',Boolean(loading&&hasVisibleImage));
- if(indicator)indicator.hidden=true;
+ dialog.classList.remove('is-switching');
  if(loading){
-  if(!hasVisibleImage&&indicator)viewer.loadingTimer=setTimeout(()=>{if(dialog.classList.contains('is-loading'))indicator.hidden=false;},100);
+  clearViewerImage();
+  if(indicator)indicator.hidden=false;
   viewerMessage('');
  }else{
+  if(indicator)indicator.hidden=true;
   if(img)img.hidden=!img.getAttribute('src');
   if(signature)signature.hidden=!signature.childElementCount;
-  dialog.classList.remove('is-switching');
  }
 }
 function viewerImageFailed(message){
@@ -907,13 +933,48 @@ function signatureModeForWidth(width){
  const w=Number(width)||0;
  return w>=980?'wide':w>=620?'medium':'narrow';
 }
-function signatureHeightForMode(mode){
- return mode==='narrow'?88:80;
-}
 function signatureWidthForPhoto(width){
  const signature=$('#photo-signature');
  const frame=signature?.dataset.style==='tone'?12:0;
  return signature&&!signature.hidden?Math.max(width,Math.min(280,$('#image-viewport').clientWidth-frame)):width;
+}
+let signatureTextMeasure=null;
+function alignSignatureTextInk(content){
+ if(!content)return;
+ const left=content.querySelector('.signature-memory:not([hidden]),.caption-left');
+ const right=content.querySelector('.signature-file:not([hidden]),.caption-right')||content.querySelector('.signature-capture:not([hidden])');
+ if(!left||!right)return;
+ left.style.paddingBottom='0px';right.style.paddingBottom='0px';
+ const naturalHeight=parseFloat(getComputedStyle(content).height);
+ const scale=naturalHeight?content.getBoundingClientRect().height/naturalHeight:1;
+ if(!scale)return;
+ signatureTextMeasure ||= document.createElement('canvas').getContext('2d');
+ const inkBottom=group=>{
+  const walker=document.createTreeWalker(group,NodeFilter.SHOW_TEXT);
+  let node,bottom=null;
+  while((node=walker.nextNode())){
+   if(!node.textContent.trim()||node.parentElement.closest('svg'))continue;
+   const range=document.createRange();range.selectNodeContents(node);
+   const rects=[...range.getClientRects()].filter(r=>r.width&&r.height);
+   if(!rects.length)continue;
+   const style=getComputedStyle(node.parentElement);
+   signatureTextMeasure.font=`${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+   const metrics=signatureTextMeasure.measureText(node.textContent);
+   // The Range includes the font's descender space; the drawn glyphs often
+   // do not (especially Latin digits beside Chinese place names).
+   const inset=(metrics.fontBoundingBoxDescent??metrics.actualBoundingBoxDescent)-metrics.actualBoundingBoxDescent;
+   const edge=Math.max(...rects.map(r=>r.bottom))-inset*scale;
+   bottom=bottom===null?edge:Math.max(bottom,edge);
+  }
+  return bottom;
+ };
+ const a=inkBottom(left),b=inkBottom(right);
+ if(a===null||b===null)return;
+ // Use real font metrics to raise the lower ink edge, while preserving grid
+ // alignment and letting the corrected natural height participate in photo fit.
+ const target=Math.min(a,b);
+ left.style.paddingBottom=Math.max(0,(a-target)/scale).toFixed(3)+'px';
+ right.style.paddingBottom=Math.max(0,(b-target)/scale).toFixed(3)+'px';
 }
 function applySignatureMode(mode,width){
  const dialog=$('#detail-dialog');
@@ -922,11 +983,11 @@ function applySignatureMode(mode,width){
  dialog.dataset.signatureSmall=String(signatureWidthForPhoto(width)<380);
  const content=$('#photo-signature .signature-v3');
  if(Number.isFinite(width))$('#photo-mat').style.width=signatureWidthForPhoto(width)+'px';
- // Measure natural wrapped content; fixed heights used to clip long tokens.
- const groups=content?.querySelectorAll(':scope > div:not([hidden])').length||0;
- const minimum=groups<=1?64:signatureHeightForMode(mode);
- // Layout height excludes the dialog's opening scale animation.
- const height=Math.max(minimum,Math.ceil(content?parseFloat(getComputedStyle(content).height)||content.offsetHeight:0));
+ alignSignatureTextInk(content);
+ // Reserve exactly the natural caption height. A mode-specific minimum put
+ // all unused space below the text and made narrow photographs look bottom-heavy.
+ // Computed height excludes the dialog's opening scale animation.
+ const height=Math.ceil(content?parseFloat(getComputedStyle(content).height)||content.offsetHeight:0);
  dialog.style.setProperty('--viewer-signature-h',height+'px');
  return height;
 }
@@ -975,8 +1036,11 @@ function renderSignature(a,file){
  const tag=name=>Object.entries(tags).find(([key])=>key.split(':').at(-1)===name)?.[1];
  const clean=value=>String(value||'').replace(/\0/g,'').trim();
  const number=name=>{const raw=tag(name);const n=Number(raw);return Number.isFinite(n)&&n>0?n:null;};
- const make=clean(tag('Make')),model=clean(tag('Model'));
- const camera=model?(make&&model.toLowerCase().startsWith(make.toLowerCase())?model:[make,model].filter(Boolean).join(' ')):clean(a.camera);
+ const cameraTag=name=>Object.entries(tags).find(([key,value])=>key.split(':').at(-1)===name&&clean(value))?.[1];
+ const ifd=a.metadata?.IFD0||{};
+ const make=clean(cameraTag('Make'))||clean(ifd.Make)||clean(ifd['271']);
+ const model=clean(cameraTag('Model'))||clean(ifd.Model)||clean(ifd['272']);
+ const camera=model?(make&&model.toLowerCase().startsWith(make.toLowerCase())?model:[make,model].filter(Boolean).join(' ')):clean(a.camera)||make;
  const source=a.effective_source||'';
  const timeKind=source.includes('修改')?'文件时间参考':source.includes('推测')?'推测时间':source==='人工确认'?'补录时间':'拍摄时间';
  const rawDate=clean(a.effective_date);
@@ -1022,10 +1086,9 @@ function renderSignature(a,file){
    </div>
    <div id="signature-format" class="signature-file"${hasFile?'':' hidden'}>${fileMarkup}</div>
   </div>
-  <button type="button" class="signature-switch" aria-describedby="signature-switch-tip" title="">
+  <button type="button" class="signature-switch" title="">
    <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="4" width="14" height="12" rx="2"/><path d="M3 12h14M7 14h2m3 0h1"/></svg>
-  </button>
-  <span id="signature-switch-tip" class="signature-switch-tip" role="tooltip"></span>`;
+  </button>`;
  signature.hidden=false;
  signature.title=title;
  const cameraLine=camera?`<strong class="caption-camera" title="${esc(camera)}">${esc(camera)}</strong>`:'';
@@ -1036,14 +1099,15 @@ function renderSignature(a,file){
  const filesLine=hasFile?`<div class="caption-files">${fileMarkup}</div>`:'';
  const redMark='<span class="caption-brand caption-red" role="img" aria-label="拾光红色圆形字标"><svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="24" fill="#d21e28"/><text x="24" y="29" text-anchor="middle" fill="white" font-family="Ma Shan Zheng" font-size="20">拾光</text></svg></span>';
  const blueMark='<span class="caption-brand caption-blue" role="img" aria-label="拾光蓝色光学方标"><svg viewBox="0 0 40 40" aria-hidden="true"><path fill="#123cba" d="M0 0h40v40q-20-7-40 0z"/><path d="M10 25h20M20 9v10m-9-7 4 5m14-5-4 5m-7 3c0 6-3 8-7 9m12-9v7q0 2 6 1" stroke="white" stroke-width="1.7" fill="none" stroke-linecap="round"/></svg></span>';
- const galleryMark='<span class="caption-brand caption-gallery-brand" aria-label="拾光相册"><svg viewBox="0 0 36 30" aria-hidden="true"><path d="m4 23 10-16h7l-5 8h8l5-8h5L24 23h-7l5-8h-8l-5 8z" fill="currentColor"/></svg><span>拾光相册</span></span>';
+ const galleryMark=`<span class="caption-brand caption-gallery-brand" aria-label="拾光图形标识"><svg viewBox="0 0 36 30" aria-hidden="true"><path d="m4 23 10-16h7l-5 8h8l5-8h5L24 23h-7l5-8h-8l-5 8z" fill="currentColor"/></svg>${camera?'<span>拾光相册</span>':''}</span>`;
+ const handMark='<span class="caption-handmark" role="img" aria-label="拾光相册手写字标">拾光相册</span>';
  const ringMark='<span class="caption-brand caption-ring" role="img" aria-label="拾光光圈圆环标"><svg viewBox="0 0 36 36" aria-hidden="true"><circle cx="18" cy="18" r="15"/><circle cx="18" cy="18" r="10"/><path d="M18 8v6m10 4h-6m-4 10v-6M8 18h6"/><circle cx="18" cy="18" r="3"/></svg></span>';
  signatureLayouts={
   original:signature.querySelector('.signature-v3').innerHTML,
   classic:`<div class="caption-panel caption-left">${cameraLine||'<strong class="caption-camera">拾光相册</strong>'}${memoryLine}</div><div class="caption-panel caption-right caption-leica-lockup">${redMark}<div class="caption-technical">${exposureLine}${filesLine}</div></div>`,
   gallery:`<div class="caption-panel caption-left">${cameraLine||'<strong class="caption-camera">拾光相册</strong>'}${memoryLine}</div><div class="caption-panel caption-right">${galleryMark}${exposureLine}${filesLine}</div>`,
-  handwritten:`<div class="caption-panel caption-left"><div class="caption-optical-lockup">${cameraLine||'<strong class="caption-camera">拾光</strong>'}${blueMark}</div>${exposureLine}${filesLine}</div><div class="caption-panel caption-right"><span class="caption-handmark" role="img" aria-label="拾光相册手写字标">拾光相册</span>${memoryLine}</div>`,
-  tone:`<div class="caption-panel caption-left"><div class="caption-tone-lockup"><span class="caption-tone-wordmark">拾光相册</span>${ringMark}</div>${cameraLine}</div><div class="caption-panel caption-right">${exposureLine}${memoryLine}${filesLine}</div>`
+  handwritten:`<div class="caption-panel caption-left"><div class="caption-optical-lockup">${cameraLine||'<strong class="caption-camera">拾光相册</strong>'}${blueMark}</div>${exposureLine}${filesLine}</div><div class="caption-panel caption-right">${camera?handMark:''}${memoryLine}</div>`,
+  tone:`<div class="caption-panel caption-left"><div class="caption-tone-lockup">${cameraLine||'<span class="caption-tone-wordmark">拾光相册</span>'}${ringMark}</div></div><div class="caption-panel caption-right">${exposureLine}${memoryLine}${filesLine}</div>`
  };
  applySignatureStyle();
 }
@@ -1061,8 +1125,6 @@ function applySignatureStyle(){
  const next=SIGNATURE_STYLES[(signatureStyleIndex+1)%SIGNATURE_STYLES.length];
  const button=signature.querySelector('.signature-switch');
  if(button)button.setAttribute('aria-label',`点击切换标签样式；当前${style.label}，下一款${next.label}`);
- const tip=signature.querySelector('.signature-switch-tip');
- if(tip)tip.textContent=`点击切换 · ${style.label} ${signatureStyleIndex+1}/5`;
  if(style.key==='tone')updateSignaturePalette();
  const font=style.key==='handwritten'?'Ma Shan Zheng':style.key==='gallery'?'Noto Serif SC':style.key==='classic'?'Ma Shan Zheng':null;
  if(font)document.fonts.load(`20px "${font}"`).then(()=>{

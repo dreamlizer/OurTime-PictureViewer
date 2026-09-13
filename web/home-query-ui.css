@@ -182,6 +182,8 @@
 }
 @media (max-width: 420px) {
   .ot-home-ui .ot-home-button { padding-inline: 11px; }
+  .ot-home-ui .ot-home-query-left { gap: 6px; }
+  .ot-home-ui .ot-home-query-left .ot-home-button { flex: 1 1 0; min-width: 0; padding-inline: 7px; }
   .ot-home-filter-dialog { border-radius: 0; border-left: 0; }
   .ot-home-filter-dialog .ot-home-filter-header { padding: 22px 18px 18px; }
   .ot-home-filter-dialog .ot-home-filter-body { padding: 20px 18px; }

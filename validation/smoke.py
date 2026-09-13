@@ -89,6 +89,8 @@ def main():
     viewer = read(WEB / "viewer.js")
     appearance = read(WEB / "appearance.css")
     viewer_overrides = read(WEB / "viewer-overrides.css")
+    home_ui = read(WEB / "home-query-ui.js")
+    home_init = read(WEB / "home-query-init.js")
     backend = read(ROOT / "app.py")
     waterfall = read(WEB / "waterfall.js")
     sources = {"app.js": app, "viewer.js": viewer, "viewer-overrides.css": viewer_overrides, "waterfall.js": waterfall, "index.html": html}
@@ -179,19 +181,34 @@ def main():
         'data-face-id=',
         'face-hover-guide',
         'face-action-popover',
+        'face-action-photos',
+        'face-action-edit-name',
+        'rememberPersonName(Number(face.person_id)',
         'photo-people-popover',
         '/passersby`,',
     )) or "@app.post('/api/photos/{aid}/passersby')" not in backend:
         fail("照片人物缺少上下标签位置、悬停指向、单张纠错或批量路人能力")
+    if not all(value in home_ui for value in (
+        'data-ot="group"',
+        "['10plus', '10人及以上']",
+        'adapter.applyGroup',
+    )) or "applyGroup: async (group" not in home_init:
+        fail("全部照片缺少可与人物叠加的 1 至 10 人以上人数筛选")
     if not all(value in waterfall for value in (
         'data-group-exclude-arm',
         'data-group-exclude-confirm',
         'data-group-exclude-cancel',
+        "state.view==='timeline'",
     )) or not all(value in app for value in (
-        "reason:'在合影页排除显示'",
+        "'在合影页排除显示'",
+        "'在全部照片页排除显示'",
         'display_only:true',
+        'await streamRemovePhoto(id,Number(card.dataset.position))',
+    )) or not all(value in waterfall for value in (
+        'async function streamRemovePhoto',
+        "grid.classList.add('stream-reflowing')",
     )) or 'display_only:bool=False' not in backend:
-        fail("合影详情缺少二次确认的仅排除显示入口，或仍可能清理识别缓存")
+        fail("全部照片或合影详情缺少局部退场的仅排除显示入口，或仍可能整页重载、清理识别缓存")
     if not all(value in html for value in (
         'id="photo-place-map"',
         'id="places-photo-back"',
@@ -298,6 +315,26 @@ def main():
     if "正在加载照片" not in app or "正在加载照片" not in waterfall:
         fail("照片流缺少加载中文案")
     ok("切到时间/地点时先显示加载中，不先说没有照片")
+
+    if (
+        "if(loading){\n  clearViewerImage();" not in viewer
+        or "#detail-dialog.is-loading #image-viewport" not in viewer_overrides
+        or "#detail-dialog.is-loading .viewer-tools" not in viewer_overrides
+        or "#detail-dialog.is-loading .detail-info" not in viewer_overrides
+    ):
+        fail("大图切换加载态没有清空旧照片，或仍会露出旧图控件")
+    ok("大图切换时只保留加载提示，不显示上一张照片及控件")
+
+    if (
+        'placeholder="搜索已记录地点"' not in html
+        or 'class="place-search-results"' not in html
+        or "没有找到已记录的地点" not in app
+        or "#places-view .view-chrome { z-index: 1100; }" not in appearance
+        or "isolation: isolate" not in appearance
+        or "默认北京地图，可缩小到全国和世界" in html
+    ):
+        fail("地点页标题层级、精简文案或已记录地点搜索反馈没有完整接入")
+    ok("地点标题压住地图，搜索已记录地点时在输入框下即时反馈")
 
     for item in ["photo-grid", "people-grid", "person-dialog", "person-title", "person-notice", "person-faces-status", "merge-person", "quick-name-dialog", "quick-name-form", "quick-ignore-person", "detail-dialog", "photo-favorite", "favorites-count", "no-results", "empty", "stream-status", "places-view", "timeline-tools", "groups-view", "groups-list"]:
         if ('id="%s"' % item) not in html:

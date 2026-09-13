@@ -148,11 +148,21 @@ def main():
         page.wait_for_function("document.querySelector('#detail-img').complete && document.querySelector('#detail-img').naturalWidth>0 && document.querySelector('#viewer-loading')?.hidden", timeout=30000)
         page.wait_for_function("!document.querySelector('#detail-dialog').classList.contains('is-loading')", timeout=30000)
         check(page.locator('#detail-dialog:not(.is-loading)').count() == 1 and page.locator('#photo-signature').is_visible(), '快速连续翻页后只保留最新照片且 loading 已结束')
-        loading_state = page.evaluate("() => { setViewerLoading(true); return {loading:document.querySelector('#detail-dialog').classList.contains('is-loading'), switching:document.querySelector('#detail-dialog').classList.contains('is-switching'), imageHidden:document.querySelector('#detail-img').hidden, signatureHidden:document.querySelector('#photo-signature').hidden}; }")
-        check(loading_state['loading'] and (loading_state['imageHidden'] or loading_state['switching']) and loading_state['signatureHidden'] == loading_state['imageHidden'], 'Viewer 加载中进入 loading 状态，旧图按切换策略保留或隐藏，题注与照片同步')
-        page.locator('[data-close="detail-dialog"]').click()
+        loading_state = page.evaluate("""() => {
+          setViewerLoading(true);
+          const hidden = selector => getComputedStyle(document.querySelector(selector)).visibility === 'hidden';
+          return {
+            loading: document.querySelector('#detail-dialog').classList.contains('is-loading'),
+            indicatorVisible: !document.querySelector('#viewer-loading').hidden,
+            imageCleared: document.querySelector('#detail-img').hidden && !document.querySelector('#detail-img').getAttribute('src'),
+            signatureCleared: document.querySelector('#photo-signature').hidden && !document.querySelector('#photo-signature').childElementCount,
+            oldChromeHidden: ['#image-viewport','.viewer-heading','.viewer-arrow','.viewer-tools','.detail-info'].every(hidden)
+          };
+        }""")
+        check(all(loading_state.values()), 'Viewer 加载中只显示加载提示，旧图、叉号、GPS、题注、人名和操作控件全部隐藏')
+        page.keyboard.press('Escape')
         page.wait_for_function("!document.querySelector('#detail-dialog').open")
-        check(True, '加载中状态下关闭查看器仍然有效')
+        check(True, '纯净加载状态仍可用 Esc 关闭查看器')
         page.goto(URL)
         page.wait_for_selector('#home-query-host .ot-home-ui', timeout=15000)
         page.wait_for_selector('#photo-grid [data-photo]', timeout=30000)
@@ -189,7 +199,7 @@ def main():
         check(page.locator('#face-style-preview-label').evaluate('(e)=>getComputedStyle(e).writingMode') == 'horizontal-tb', '切换横排时打开的样式预览立即刷新')
         page.click('#toggle-face-dir')
         for value in ('left', 'right', 'auto'):
-            page.select_option('#face-label-position', value)
+            page.select_option('#face-label-position', value, force=True)
             check(page.evaluate("JSON.parse(localStorage.getItem('ourtime.viewer.preferences.v2')).faceLabelPosition") == value,
                   f'标签位置 {value} 写入 viewer preferences')
             page.reload()

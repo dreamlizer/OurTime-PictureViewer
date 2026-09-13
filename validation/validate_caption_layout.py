@@ -24,6 +24,10 @@ def check(page, name, fit=True):
     page.wait_for_timeout(220)
     s=page.evaluate(MEASURE)
     c=s['caption']
+    assert 0<=c['height']-s['content']['height']<1.01,(name,'fixed minimum height must not add empty space below caption',s)
+    panels=[g for g in s['groups'] if 'caption-panel' in g['kind']]
+    if len(panels)==2:
+        assert abs(panels[0]['bottom']-panels[1]['bottom'])<=1,(name,'both caption panels must align at the bottom',s)
     if s['style']=='original':
         assert s['seal']=={'background':'rgb(185, 46, 49)','radius':'50%'},(name,'original logo changed',s)
     memory=next((g for g in s['groups'] if g['kind']=='signature-memory'),None)

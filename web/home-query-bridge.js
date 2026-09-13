@@ -123,6 +123,10 @@
     };
     if (typeof bindings.restoreSelected === 'function') adapter.restoreSelected = delegate('restoreSelected', requireSelection);
     if (typeof bindings.chooseFolder === 'function') adapter.chooseFolder = context => bindings.chooseFolder(context);
+    if (typeof bindings.applyGroup === 'function') adapter.applyGroup = (group, context) => {
+      guard(context);
+      return bindings.applyGroup(value(group), context);
+    };
     if (typeof bindings.refreshPhotos === 'function') adapter.refresh = delegate('refreshPhotos');
     return Object.freeze(adapter);
   }

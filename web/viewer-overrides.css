@@ -86,7 +86,13 @@
   pointer-events:none;
 }
 #detail-dialog #viewer-loading[hidden]{display:none!important}
-#detail-dialog.is-loading #photo-mat{opacity:1}
+#detail-dialog.is-loading .viewer-heading,
+#detail-dialog.is-loading #image-viewport,
+#detail-dialog.is-loading .viewer-arrow,
+#detail-dialog.is-loading .viewer-tools,
+#detail-dialog.is-loading .detail-info,
+#detail-dialog.is-loading #viewer-message{visibility:hidden;pointer-events:none}
+#detail-dialog.is-loading #viewer-loading{visibility:visible}
 #detail-dialog #photo-mat{opacity:1;transition:opacity 140ms ease}
 #detail-dialog #photo-mat{
   overflow:visible;
@@ -137,6 +143,7 @@
   bottom:calc(var(--viewer-signature-h) + 14px);
   display:inline-flex;
   align-items:center;
+  justify-content:center;
   width:32px;
   min-width:32px;
   height:32px;
@@ -144,15 +151,16 @@
   padding:0;
   border:0;
   border-radius:50%;
-  background:rgba(18,23,20,.14);
-  color:rgba(255,255,255,.5);
+  background:rgba(18,23,20,.06);
+  color:rgba(255,255,255,.46);
   box-shadow:none;
-  backdrop-filter:blur(5px) saturate(.65);
+  backdrop-filter:none;
   font:500 11px/1 var(--sans);
   letter-spacing:.04em;
   transition:background-color 150ms ease,border-color 150ms ease,color 150ms ease,transform 150ms ease;
 }
 #detail-dialog #photo-favorite svg{
+  display:block;
   width:22px;
   height:22px;
   flex:none;
@@ -164,17 +172,17 @@
   stroke-linejoin:round;
 }
 #detail-dialog #photo-favorite:hover{
-  background:rgba(26,33,28,.5);
+  background:rgba(26,33,28,.24);
   color:#fffaf0;
   transform:translateY(-1px);
 }
 #detail-dialog #photo-favorite[aria-pressed="true"]{
   border:0;
-  background:rgba(105,47,39,.68);
-  color:#fff4d8;
-  box-shadow:0 5px 20px rgba(35,12,8,.28),inset 0 1px rgba(255,255,255,.1);
+  background:rgba(105,47,39,.1);
+  color:rgba(255,244,216,.92);
+  box-shadow:none;
 }
-#detail-dialog #photo-favorite[aria-pressed="true"] circle{fill:currentColor;fill-opacity:.14}
+#detail-dialog #photo-favorite[aria-pressed="true"] circle{fill:currentColor;fill-opacity:.22}
 #detail-dialog #photo-favorite:focus-visible{
   outline:2px solid rgba(255,247,221,.92);
   outline-offset:3px;
@@ -228,7 +236,7 @@
   align-items:center;
   column-gap:16px;
   row-gap:2px;
-  padding:16px 20px;
+  padding:16px 20px 9px;
   font-family:"Segoe UI",var(--sans);
   text-align:left;
 }
@@ -340,8 +348,7 @@
   gap:4px 10px;
   max-width:none;
   color:#737d74;
-  font-size:10px;
-  line-height:1.25;
+  font:11px/1.5 var(--sans);
   font-variant-numeric:tabular-nums;
   text-align:right;
 }
@@ -949,10 +956,24 @@
   backdrop-filter:blur(18px);
   font:11px/1.4 var(--sans);
 }
-#detail-dialog .face-action-head{display:flex;align-items:baseline;gap:5px;margin-bottom:9px;color:#717a73}
+#detail-dialog .face-action-head{display:flex;align-items:center;gap:5px;margin-bottom:9px;color:#717a73}
 #detail-dialog .face-action-head b{color:#253029;font:600 15px var(--serif)}
+#detail-dialog .face-action-head button{
+  display:grid;place-items:center;width:24px;min-width:24px;height:24px;margin-left:1px;padding:0;border:0;border-radius:7px;background:transparent;color:#748078;
+}
+#detail-dialog .face-action-head button:hover{background:#e9eee9;color:#315c49}
+#detail-dialog .face-action-head svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+#detail-dialog .face-action-rename{display:grid;grid-template-columns:1fr auto auto;gap:5px;margin:0 0 9px}
+#detail-dialog .face-action-rename[hidden]{display:none!important}
+#detail-dialog .face-action-rename label{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+#detail-dialog .face-action-rename input{min-width:0;height:31px;padding:5px 8px;border:1px solid #bfcac1;border-radius:8px;background:#fff;color:#253029;font:12px var(--sans)}
+#detail-dialog .face-action-rename input:focus{outline:2px solid rgba(87,126,100,.2);border-color:#66856f}
+#detail-dialog .face-action-rename button{height:31px;padding:5px 8px;border:1px solid #d4dcd5;border-radius:8px;background:#fff;color:#526158;font:10px var(--sans)}
+#detail-dialog .face-action-rename button[type="submit"]{border-color:#688774;background:#5a7865;color:#fff}
 #detail-dialog .face-action-popover>button{display:block;width:100%;margin-top:6px;padding:8px 9px;border:1px solid #d8ddd8;border-radius:9px;background:#fff;color:#3e4b42;text-align:left;font:11px var(--sans)}
 #detail-dialog .face-action-popover>button:hover{border-color:#8ca095;background:#f2f6f2}
+#detail-dialog .face-action-popover>#face-action-photos{margin-bottom:10px;border-color:#b8cdbd;background:#eaf3eb;color:#315f48;font-weight:650}
+#detail-dialog .face-action-popover>#face-action-photos:hover{border-color:#7e9d88;background:#deecdf}
 #detail-dialog .face-action-popover>small{display:block;margin-top:8px;color:#7b817c;font-size:9.5px;line-height:1.45}
 
 @media (prefers-reduced-motion:reduce){
@@ -1526,15 +1547,15 @@
 /* Keep the left/right composition even for portrait photographs. */
 #detail-dialog[data-signature-mode="narrow"] .signature-v3{
   column-gap:12px;
-  padding:14px 16px;
+  padding:16px 16px 9px;
 }
 #detail-dialog[data-signature-mode="narrow"] .signature-date{font-size:17px;column-gap:8px}
 #detail-dialog[data-signature-mode="narrow"] .signature-exposure{gap:3px 10px}
-#detail-dialog[data-signature-small="true"] .signature-v3{column-gap:8px;padding:12px}
+#detail-dialog[data-signature-small="true"] .signature-v3{column-gap:8px;padding:16px 12px 9px}
 #detail-dialog[data-signature-small="true"] .signature-date{font-size:15px}
 #detail-dialog[data-signature-small="true"] .signature-date>span{white-space:nowrap}
 #detail-dialog[data-signature-small="true"] .signature-file{gap:3px 8px}
-/* A quiet caption-cycling control. Tooltip is transient and never affects fit. */
+/* A quiet caption-cycling control, without a visual tooltip. */
 #detail-dialog .signature-switch{
   position:absolute;left:3px;top:1px;z-index:2;
   display:grid;place-items:center;width:16px;min-width:16px;height:16px;min-height:16px;
@@ -1547,19 +1568,10 @@
 #detail-dialog .signature-switch:focus-visible{outline:1px solid currentColor;outline-offset:1px}
 #detail-dialog .signature-v3:not(.has-memory) .signature-seal-v3,
 #detail-dialog .signature-v3:not(.has-capture):not(.has-file) .signature-seal-v3{margin-top:6px}
-#detail-dialog .signature-switch-tip{
-  position:absolute;left:3px;bottom:calc(100% + 7px);z-index:4;
-  max-width:calc(100% - 6px);padding:6px 9px;border:1px solid rgba(255,255,255,.12);border-radius:6px;
-  background:#303831;color:#f7f7f4;box-shadow:0 3px 12px #0002;
-  font:11px/1.5 "Segoe UI",var(--sans);letter-spacing:0;
-  pointer-events:none;visibility:hidden;opacity:0;transition:opacity .12s;
-}
-#detail-dialog .signature-switch:hover + .signature-switch-tip,
-#detail-dialog .signature-switch:focus-visible + .signature-switch-tip{visibility:visible;opacity:1}
 /* Four independent camera-inspired lockups; the default caption stays above. */
 #detail-dialog #photo-signature .signature-designed{
   display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.12fr);
-  align-items:center;gap:24px;padding:20px 28px;
+  align-items:end;gap:24px;padding:18px 28px 9px;
   font:11px/1.4 "Segoe UI",var(--sans);color:#242424;
 }
 #detail-dialog .caption-panel{min-width:0;display:flex;flex-direction:column;gap:5px}
@@ -1580,22 +1592,22 @@
 #detail-dialog .caption-brand svg{display:block;width:100%;height:100%}
 /* A / Leica: device left, red medallion beside the right-hand exposure line. */
 #detail-dialog #photo-signature[data-style="classic"]{background:#fff}
-#detail-dialog .caption-leica-lockup{display:flex;flex-direction:row;align-items:center;justify-content:flex-end;gap:12px}
+#detail-dialog .caption-leica-lockup{display:flex;flex-direction:row;align-items:flex-end;justify-content:flex-end;gap:12px}
 #detail-dialog .caption-red{width:38px;height:38px}
 #detail-dialog .caption-technical{display:flex;flex-direction:column;gap:5px;min-width:0;border-left:1px solid #d7d7d7;padding-left:12px}
 #detail-dialog #photo-signature[data-style="classic"] .caption-exposure{font-weight:600;font-size:11px;gap:2px 8px}
 /* B / Hasselblad: a slanted custom wordmark and orange photographic point. */
 #detail-dialog #photo-signature[data-style="gallery"]{background:#fff}
-#detail-dialog #photo-signature[data-style="gallery"] .signature-designed{padding-top:22px;padding-bottom:20px;grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+#detail-dialog #photo-signature[data-style="gallery"] .signature-designed{padding-top:14px;padding-bottom:9px;grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
 #detail-dialog .caption-gallery-brand{max-width:100%;gap:7px;color:#242424}
 #detail-dialog .caption-gallery-brand svg{width:32px;height:27px;flex:none}
-#detail-dialog .caption-gallery-brand>span{font:700 italic 22px/1.4 "Noto Serif SC",serif;letter-spacing:3px;white-space:nowrap}
+#detail-dialog .caption-gallery-brand>span{font:700 italic 22px/1.2 "Noto Serif SC",serif;letter-spacing:3px;white-space:nowrap}
 #detail-dialog #photo-signature[data-style="gallery"] .caption-exposure::before{content:"";width:5px;height:5px;flex:none;border-radius:50%;background:#ef781a;align-self:center}
 #detail-dialog #photo-signature[data-style="gallery"] .caption-exposure{font-size:9px;gap:2px 7px}
 #detail-dialog #photo-signature[data-style="gallery"] .caption-panel{gap:3px}
 /* C / Zeiss: a cobalt optical badge to the left, calligraphic signature right. */
 #detail-dialog #photo-signature[data-style="handwritten"]{background:#fff}
-#detail-dialog #photo-signature[data-style="handwritten"] .signature-designed{grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);padding-top:22px;padding-bottom:18px}
+#detail-dialog #photo-signature[data-style="handwritten"] .signature-designed{grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);padding-top:18px;padding-bottom:9px}
 #detail-dialog .caption-optical-lockup{display:flex;align-items:center;gap:12px;min-width:0;max-width:100%}
 #detail-dialog .caption-optical-lockup .caption-camera{font-size:23px;font-weight:600;letter-spacing:-.6px}
 #detail-dialog .caption-blue{width:31px;height:31px;border-left:1px solid #c8c8c8;padding-left:10px;box-sizing:content-box}
@@ -1605,8 +1617,9 @@
 /* D / vivo: the sampled color encloses the photograph as well as its footer. */
 #detail-dialog #photo-mat[data-caption-style="tone"]{border:6px solid var(--signature-tone,#3d4540);border-bottom:0;box-sizing:content-box;background:var(--signature-tone,#3d4540)}
 #detail-dialog #photo-signature[data-style="tone"]{background:var(--signature-tone,#3d4540);color:#fffaf1;box-shadow:none}
-#detail-dialog #photo-signature[data-style="tone"] .signature-designed{padding:20px 12px 14px;gap:20px;color:#f5ecdf}
+#detail-dialog #photo-signature[data-style="tone"] .signature-designed{padding:18px 12px 9px;gap:20px;color:#f5ecdf}
 #detail-dialog .caption-tone-lockup{display:flex;align-items:center;max-width:100%;gap:10px}
+#detail-dialog #photo-signature[data-style="tone"] .caption-tone-lockup .caption-camera{font:500 19px/1.2 "Segoe UI",var(--sans);letter-spacing:.2px}
 #detail-dialog .caption-tone-wordmark{font:500 19px/1.2 "Segoe UI",var(--sans);letter-spacing:1px;white-space:nowrap}
 #detail-dialog .caption-ring{width:27px;height:27px}
 #detail-dialog .caption-ring svg{fill:none;stroke:currentColor;stroke-width:1.4}
@@ -1617,10 +1630,10 @@
 #detail-dialog #photo-signature[data-style="tone"] .signature-switch{color:#e3dace}
 #detail-dialog #photo-signature[data-style="tone"] .signature-switch:hover{background:#ffffff16}
 /* Photo width, not viewport width, controls compact lockups. */
-#detail-dialog[data-signature-mode="narrow"] #photo-signature .signature-designed{padding:20px 16px 16px;gap:18px}
+#detail-dialog[data-signature-mode="narrow"] #photo-signature .signature-designed{padding:18px 16px 9px;gap:18px}
 #detail-dialog[data-signature-mode="narrow"] .caption-camera{font-size:16px}
 #detail-dialog[data-signature-mode="narrow"] .caption-optical-lockup .caption-camera{font-size:19px}
-#detail-dialog[data-signature-small="true"] #photo-signature .signature-designed{padding:20px 12px 14px;gap:12px;grid-template-columns:minmax(0,1fr) minmax(0,1.25fr)}
+#detail-dialog[data-signature-small="true"] #photo-signature .signature-designed{padding:18px 12px 9px;gap:12px;grid-template-columns:minmax(0,1fr) minmax(0,1.25fr)}
 #detail-dialog[data-signature-small="true"] .caption-camera{font-size:13px}
 #detail-dialog[data-signature-small="true"] .caption-red{width:25px;height:25px}
 #detail-dialog[data-signature-small="true"] .caption-leica-lockup{gap:6px}
@@ -1635,8 +1648,19 @@
 #detail-dialog[data-signature-small="true"] .caption-handmark{font-size:23px;letter-spacing:1px}
 #detail-dialog[data-signature-small="true"] .caption-tone-wordmark{font-size:13px;letter-spacing:0}
 #detail-dialog[data-signature-small="true"] .caption-tone-lockup{gap:5px}
+#detail-dialog[data-signature-small="true"] #photo-signature[data-style="tone"] .caption-tone-lockup .caption-camera{font-size:13px}
 #detail-dialog[data-signature-small="true"] .caption-ring{width:20px;height:20px}
 #detail-dialog[data-signature-small="true"] #photo-signature[data-style="tone"] .signature-designed{grid-template-columns:minmax(0,1fr) minmax(0,1.25fr);gap:10px}
+#detail-dialog #photo-signature[data-style="gallery"] .signature-designed{padding-top:14px}
+/* Match the final text rows, not only the edges of their layout boxes. */
+#detail-dialog .caption-memory,
+#detail-dialog .caption-files,
+#detail-dialog #photo-signature[data-style="handwritten"] .caption-memory,
+#detail-dialog #photo-signature[data-style="tone"] .caption-memory,
+#detail-dialog #photo-signature[data-style="tone"] .caption-files{font:10px/1.4 var(--sans)}
+#detail-dialog #photo-signature[data-style="tone"] .caption-camera{font:10px/1.4 var(--sans)}
+#detail-dialog[data-signature-small="true"] #photo-signature[data-style="gallery"] .signature-designed{padding-top:18px}
+
 @media(max-width:979px){
   #detail-dialog .face-style-popover,
   #detail-dialog .people-manage-popover{left:12px;right:58px;width:auto;top:auto;bottom:12px;transform:none}

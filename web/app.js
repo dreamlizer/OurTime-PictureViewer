@@ -674,10 +674,10 @@ function syncPlaceModeChrome(photo=null){
   const single=Boolean(photo);
   const heading=$('#places-heading'),help=$('#places-help'),back=$('#places-photo-back'),actions=$('.place-map-actions'),list=$('#places-list');
   if(heading)heading.textContent=single?(prettyPlace(photo.effective_place)||'照片定位'):'按地点看';
-  if(help)help.textContent=single?'地图上只显示这张照片的定位。点击缩略图可返回大图。':'默认北京地图，可缩小到全国和世界。圆点按视野聚合，点击查看该处照片。';
+  if(help){help.textContent=single?'地图上只显示这张照片的定位。点击缩略图可返回大图。':'';help.hidden=!single;}
   if(back)back.hidden=!single;
   if(actions)actions.hidden=single;
-  if(list){list.hidden=single;if(single)list.replaceChildren();}
+  if(list){list.hidden=true;if(single)list.replaceChildren();}
 }
 async function loadPlaceMap(){
   const map=ensurePlaceMap();
@@ -738,14 +738,15 @@ globalThis.showPhotoPlaceMap=showPhotoPlaceMap;
 async function loadPlaces(reset=true, viewToken=null){
   syncPlaceModeChrome(null);
   const q=($('#places-search')&&$('#places-search').value||'').trim();
-  if(reset){state.placeStream={items:[],offset:0,total:0,more:true,loading:false,q:q,unknown:0,dated:0}; state.placeGeneration=(state.placeGeneration||0)+1; if(state.placeAbort)state.placeAbort.abort(); state.placeAbort=new AbortController(); const list=$('#places-list'); if(list&&reset){list.classList.add('is-switching'); list.innerHTML='';}}
+  const list=$('#places-list'),search=$('#places-search'),status=$('#places-stream-status');
+  if(reset){state.placeStream={items:[],offset:0,total:0,more:true,loading:false,q:q,unknown:0,dated:0}; state.placeGeneration=(state.placeGeneration||0)+1; if(state.placeAbort)state.placeAbort.abort(); state.placeAbort=new AbortController(); if(list){list.classList.add('is-switching');list.innerHTML=q?'<div class="place-search-empty">正在搜索已记录地点…</div>':'';list.hidden=!q;}if(search)search.setAttribute('aria-expanded',String(Boolean(q)));}
   const stream=state.placeStream; if(stream.loading||(!reset&&!stream.more))return; stream.loading=true;
-  const status=$('#places-stream-status'); if(status&&q)status.textContent=reset?'正在搜索地点…':'继续加载…';
+  if(status)status.hidden=Boolean(q);
   try{
     if(!q){
+      if(list){list.hidden=true;list.classList.remove('is-switching');}
+      if(search)search.setAttribute('aria-expanded','false');
       await loadPlaceMap();
-      const list=$('#places-list');
-      if(list && (!viewToken || isCurrentView(viewToken))) list.classList.remove('is-switching');
       return;
     }
     const ticket=state.placeGeneration; const data=await api('/api/places?'+new URLSearchParams({q:stream.q,offset:String(stream.offset),limit:'24'}), {signal:state.placeAbort&&state.placeAbort.signal}); if(ticket!==state.placeGeneration||(viewToken&&!isCurrentView(viewToken)))return;
@@ -753,8 +754,8 @@ async function loadPlaces(reset=true, viewToken=null){
     stream.items=reset?data.places:stream.items.concat(data.places||[]);
     stream.offset=stream.items.length; stream.more=stream.items.length<data.total;
     const unknownCard=stream.unknown?'<button class="facet-card" data-place="unknown"><b>地点未记录</b><span>'+fmt(stream.unknown)+' 张</span></button>':'';
-    $('#places-list').classList.remove('is-switching'); $('#places-list').innerHTML=(stream.items.map(p=>'<button class="facet-card" data-place="'+esc(p.place)+'"><b>'+esc(prettyPlace(p.place))+'</b><span>'+fmt(p.count)+' 张</span></button>').join('')+unknownCard)||'<div class="no-results">还没有可按地点汇总的照片。</div>';
-    if(q&&status)status.textContent=stream.more?'向下滚动继续加载':(stream.items.length?'已显示全部':'');
+    list.classList.remove('is-switching');list.hidden=false;list.innerHTML=(stream.items.map(p=>'<button class="facet-card" data-place="'+esc(p.place)+'"><b>'+esc(prettyPlace(p.place))+'</b><span>'+fmt(p.count)+' 张</span></button>').join('')+unknownCard)||'<div class="place-search-empty">没有找到已记录的地点</div>';
+    if(stream.more)list.insertAdjacentHTML('beforeend','<div class="place-search-more">继续输入，缩小结果范围</div>');
   }finally{stream.loading=false;}
 }
 function pickMergeTarget(ids,items){const selected=new Set((ids||[]).map(Number));const pool=(items||[]).filter(p=>selected.has(Number(p.id)));if(!pool.length)return null;const rank=(a,b)=>(b.photo_count-a.photo_count)||(a.id-b.id);const named=pool.filter(p=>p.confirmed&&p.name).slice().sort(rank);const rest=pool.slice().sort(rank);const target=named[0]||rest[0];if(target&&target.ignored&&rest.some(p=>!p.ignored))return rest.find(p=>!p.ignored)||null;return target||null;}
@@ -949,10 +950,11 @@ document.addEventListener('click',action(async e=>{
   const id=Number(card.dataset.photo);if(!id)return;
   groupExcludeAction.disabled=true;
   try{
-   await api('/api/exclusions/assets',{method:'POST',body:JSON.stringify({ids:[id],excluded:true,reason:'在合影页排除显示',display_only:true})});
+   const reason=String(state.view||'').startsWith('group:')?'在合影页排除显示':'在全部照片页排除显示';
+   await api('/api/exclusions/assets',{method:'POST',body:JSON.stringify({ids:[id],excluded:true,reason,display_only:true})});
    card.classList.add('group-exclude-removing');
    toast('已排除显示，原照片和识别信息均保留');
-   await loadPhotos();
+   await streamRemovePhoto(id,Number(card.dataset.position));
    refreshStatus().catch(()=>{});
   }finally{groupExcludeAction.disabled=false;}
   return;

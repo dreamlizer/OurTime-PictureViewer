@@ -250,17 +250,24 @@ body:has(#objects-view:not([hidden])) #library-view { display: none; }
 .group-card.empty { text-align: left; padding: 0; opacity: .7; }
 
 /* Map: a full-width canvas and restrained controls using the same palette. */
+#places-view .view-chrome { z-index: 1100; }
 #places-view .toolbar { margin-bottom: 14px; }
 .place-map-actions { flex-basis: 100%; order: 3; gap: 8px; margin-top: 2px; }
-.place-map-actions .people-search { margin-left: auto; }
+.place-search-wrap { position: relative; margin-left: auto; }
+.place-map-actions .people-search { margin-left: 0; }
 .place-map-actions .people-search input { width: 180px; }
+.place-search-results { position: absolute; top: calc(100% + 8px); right: 0; z-index: 1200; display: grid; width: min(380px, calc(100vw - 48px)); max-height: min(430px, 55vh); overflow: auto; padding: 7px; border: 1px solid var(--control-line); border-radius: 9px; background: #fff; box-shadow: 0 12px 32px rgba(38,51,47,.18); }
+.place-search-results .facet-card { width: 100%; padding: 10px 11px; border: 0; border-bottom: 1px solid var(--line); border-radius: 5px; background: transparent; }
+.place-search-results .facet-card:last-of-type { border-bottom: 0; }
+.place-search-results .facet-card b { font-size: 13px; font-weight: 500; }
+.place-search-empty, .place-search-more { padding: 12px 11px; color: var(--muted); font-size: 12px; }
+.place-search-more { border-top: 1px solid var(--line); font-size: 11px; }
 #places-basemap { border: 1px solid var(--control-line); border-radius: 7px; padding: 7px 30px 7px 10px; background-color: #fff; }
 #places-basemap { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2352615a' stroke-width='1.8'%3E%3Cpath d='m7 10 5 5 5-5'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 8px center; }
 .place-zoom { border-inline: 1px solid var(--line); padding-inline: 10px; gap: 5px; }
 .place-zoom input { width: 65px; min-width: 0; padding: 7px 4px; border: 1px solid var(--control-line); }
 .place-zoom .small { width: 34px; padding-inline: 0; }
-.places-map { height: clamp(340px, 62vh, 760px); margin: 0 0 20px; border-color: #bac8be; border-radius: 12px; background: #e8eee9; }
-#places-list.facet-list { max-width: none; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+.places-map { position: relative; z-index: 0; isolation: isolate; height: clamp(340px, 62vh, 760px); margin: 0 0 20px; border-color: #bac8be; border-radius: 12px; background: #e8eee9; }
 .place-popup-wrap .leaflet-popup-content-wrapper { background: #fff; border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 6px 28px #26332f24; }
 .place-popup-wrap .leaflet-popup-tip { background: #fff; }
 .place-popup-kicker { font: 12px/1.5 var(--sans); letter-spacing: 0; color: var(--muted); }
@@ -687,7 +694,7 @@ body.is-home-view .chrome-row {
   #library-view .filters { flex: 1 1 100%; margin-left: 0; }
   #library-view .filters > .search { flex: 1; }
   #library-view .filters > .search input { width: 100%; }
-  .place-map-actions .people-search { margin-left: 0; }
+  .place-search-wrap { margin-left: 0; }
   .scan-layout { grid-template-columns: minmax(0,1fr); }
   .group-card.wide { grid-column: span 1; }
 }
@@ -749,6 +756,9 @@ body.is-home-view .chrome-row {
   .masthead .stats button:nth-child(odd) { border-left: 0; }
   #library-view .filters { gap: 8px; }
   #library-view .filters > .search { flex-basis: 100%; }
+  .place-search-wrap, .place-search-wrap .people-search { width: 100%; }
+  .place-search-wrap .people-search input { flex: 1; min-width: 0; width: auto; }
+  .place-search-results { left: 0; right: auto; width: 100%; }
   #person-filter { flex: 1; max-width: none; }
   #library-view .directory-filter input { flex-basis: calc(100% - 70px); }
   #library-view .directory-filter .text-button { min-height: 36px; }

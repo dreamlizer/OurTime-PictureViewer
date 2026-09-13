@@ -113,17 +113,58 @@ def main() -> int:
         check(page.locator("#detail-dialog").is_visible(), "没有坐标时明确提示并保持当前大图")
         page.keyboard.press("Escape")
         page.wait_for_function("!document.querySelector('#detail-dialog').open")
+        page.goto(URL, wait_until="domcontentloaded")
+        page.wait_for_selector('[data-view="places"]')
         page.locator('[data-view="places"]').click()
         page.wait_for_function("state.view==='places'")
         page.wait_for_function("!document.querySelector('.place-map-actions').hidden")
+        page.wait_for_selector("#places-view.is-ready")
         normal = page.evaluate(
             """() => ({
               heading:document.querySelector('#places-heading').textContent,
+              helpHidden:document.querySelector('#places-help').hidden,
               actionsHidden:document.querySelector('.place-map-actions').hidden,
-              listHidden:document.querySelector('#places-list').hidden
+              listHidden:document.querySelector('#places-list').hidden,
+              searchPlaceholder:document.querySelector('#places-search').placeholder
             })"""
         )
-        check(normal == {"heading": "按地点看", "actionsHidden": False, "listHidden": False}, "退出单张地图后普通地点地图完整恢复")
+        check(
+            normal == {
+                "heading": "按地点看",
+                "helpHidden": True,
+                "actionsHidden": False,
+                "listHidden": True,
+                "searchPlaceholder": "搜索已记录地点",
+            },
+            "普通地点地图恢复，说明文案已精简并明确搜索范围",
+        )
+        page.locator("#places-search").fill("望京")
+        page.wait_for_selector('#places-list:not([hidden]) [data-place*="望京"]')
+        search = page.evaluate(
+            """() => ({
+              expanded:document.querySelector('#places-search').getAttribute('aria-expanded'),
+              results:[...document.querySelectorAll('#places-list [data-place]')].map(node=>node.dataset.place),
+              dropdownTop:document.querySelector('#places-list').getBoundingClientRect().top,
+              inputBottom:document.querySelector('#places-search').getBoundingClientRect().bottom
+            })"""
+        )
+        check(search["expanded"] == "true" and any("望京" in place for place in search["results"]), "搜索能找到照片库内已记录的望京地点")
+        check(search["dropdownTop"] >= search["inputBottom"] - 1, "地点搜索结果直接显示在输入框下方")
+        page.screenshot(path=str(REPORT.with_name("places-search-results.png")), full_page=False)
+        page.locator("#places-search").fill("")
+        page.wait_for_function("document.querySelector('#places-list').hidden")
+        page.evaluate("window.scrollTo(0, document.querySelector('#places-map').offsetTop + 180)")
+        page.wait_for_timeout(200)
+        sticky = page.evaluate(
+            """() => {
+              const chrome=document.querySelector('#places-view .view-chrome');
+              const rect=chrome.getBoundingClientRect();
+              const top=document.elementFromPoint(rect.left+Math.min(80,rect.width/2),rect.top+Math.min(18,rect.height/2));
+              return {position:getComputedStyle(chrome).position,top:rect.top,ownsTop:chrome.contains(top)};
+            }"""
+        )
+        check(sticky["position"] == "sticky" and sticky["top"] >= 100 and sticky["ownsTop"], "地点标题和工具栏滚动时固定在地图上方且不被遮住")
+        page.screenshot(path=str(REPORT.with_name("places-sticky-header.png")), full_page=False)
         check(not errors, "真实浏览器链路没有 JavaScript 错误")
         browser.close()
 

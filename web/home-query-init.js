@@ -75,6 +75,10 @@
       }));
     },
     getTimeline: async ({ signal } = {}) => app.api('/api/timeline', { signal }),
+    applyGroup: async (group, { signal } = {}) => {
+      if (signal && signal.aborted) throw new DOMException('Aborted', 'AbortError');
+      await app.setView(group ? 'group:' + group : 'timeline');
+    },
     setSelecting: async on => {
       app.state.selecting = Boolean(on);
       app.state.selected.clear();

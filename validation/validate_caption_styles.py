@@ -1,4 +1,4 @@
-"""Real viewer cycles, tooltip, palette and five-style geometry. No library writes."""
+"""Real viewer cycles, quiet button, palette and five-style geometry. No library writes."""
 import json
 from pathlib import Path
 from playwright.sync_api import sync_playwright
@@ -25,7 +25,7 @@ def main():
             page.evaluate('document.fonts.ready')
             results.append(check(page,'real-'+style))
             button.hover()
-            assert tip.is_visible() and '点击切换' in tip.inner_text()
+            assert tip.count()==0 and button.get_attribute('title')=='','Switch must not show a custom or native tooltip'
             page.mouse.move(5,5)
             assert not tip.is_visible()
             page.locator('#photo-signature').screenshot(path=str(OUT/f'{style}.png'))

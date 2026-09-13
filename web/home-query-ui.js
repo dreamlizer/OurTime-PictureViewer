@@ -58,6 +58,7 @@
       + '<span class="ot-home-query-left">'
       + '<button data-ot="person" class="ot-home-button" type="button">人物</button>'
       + '<button data-ot="time" class="ot-home-button" type="button">时间</button>'
+      + '<button data-ot="group" class="ot-home-button" type="button">人数</button>'
       + '<button data-ot="place" class="ot-home-button" type="button">地点</button>'
       + '<button data-ot="folder" class="ot-home-button" type="button">文件夹</button>'
       + '</span><span class="ot-home-query-right">'
@@ -93,8 +94,10 @@
       if (!raw || typeof raw !== 'object' || raw.then) throw new TypeError('readState must return a synchronous object.');
       const sort = text(raw.sort || 'date_desc');
       if (!SORTS.has(sort)) throw new Error('Unsupported homepage sort: ' + sort);
+      const scopeKey = text(raw.scopeKey);
       return {
         active: raw.active === true, scopeKey: text(raw.scopeKey), query: queryOf(raw.query), sort,
+        group: scopeKey.startsWith('group:') ? scopeKey.slice(6) : '',
         selecting: raw.selecting === true,
         selectedCount: Number.isFinite(Number(raw.selectedCount)) ? Math.max(0, Math.floor(Number(raw.selectedCount))) : 0,
         selectionKind: raw.selectionKind === 'restore' ? 'restore' : 'exclude',
@@ -102,6 +105,7 @@
       };
     }
     const isGroup = s => String(s.scopeKey || '').startsWith('group:');
+    const groupLabel = key => key === '10plus' ? '10人及以上' : key ? key + '人' : '';
     function report(error) {
       const el = all('error');
       el.textContent = error ? (text(error.message || error) || '操作未完成，请重试。') : '';
@@ -129,6 +133,7 @@
       if (time) entries.push(['time', time]);
       if (s.query.place) entries.push(['place', '地点：' + s.query.place]);
       if (s.query.directory) entries.push(['directory', '文件夹：' + shortPath(s.query.directory)]);
+      if (s.group) entries.push(['group', '人数：' + groupLabel(s.group)]);
       box.hidden = !entries.length;
       for (const [key, display] of entries) {
         const button = document.createElement('button');
@@ -150,19 +155,20 @@
       all('sort').value = s.sort;
       const grouped = isGroup(s);
       root.classList.toggle('ot-home-group', grouped);
+      all('group').hidden = typeof adapter.applyGroup !== 'function';
       const recognizedSort=all('sort').querySelector('option[value="recognized_desc"]');
       if(recognizedSort){recognizedSort.hidden=!grouped;recognizedSort.disabled=!grouped;}
       all('place').hidden = grouped; all('folder').hidden = grouped; all('select').hidden = grouped;
       root.querySelector('.ot-home-query').hidden = s.selecting;
       all('batch').hidden = !s.selecting;
-      mark('person', s.query.person); mark('time', s.query.dateFrom || s.query.dateTo);
+      mark('person', s.query.person); mark('time', s.query.dateFrom || s.query.dateTo); mark('group', s.group);
       mark('place', s.query.place); mark('folder', s.query.directory);
       all('selected-count').textContent = '已选择 ' + s.selectedCount + ' 张';
       all('exclude').hidden = s.selectionKind === 'restore';
       all('edit').hidden = s.selectionKind === 'restore';
       all('restore').hidden = s.selectionKind !== 'restore';
       all('restore').disabled = busy || !s.selectedCount || typeof adapter.restoreSelected !== 'function';
-      for (const key of ['person','time','place','folder','select','sort','visible','cancel-selection','refresh']) if (all(key)) all(key).disabled = busy || folderPending;
+      for (const key of ['person','time','group','place','folder','select','sort','visible','cancel-selection','refresh']) if (all(key)) all(key).disabled = busy || folderPending;
       for (const key of ['clear-selection','exclude','edit']) all(key).disabled = busy || !s.selectedCount;
       all('notice').hidden = !s.refreshAvailable || s.selecting || typeof adapter.refresh !== 'function';
       chips(s);
@@ -305,6 +311,23 @@
       }
       renderTime();
     }
+    function openGroup(anchor) {
+      const s = snapshot();
+      const choices = [['', '全部人数'], ...Array.from({ length: 9 }, (_, index) => [String(index + 1), (index + 1) + '人']), ['10plus', '10人及以上']];
+      setPopover('group', anchor, '<header class="ot-home-pop-header"><strong>照片人数</strong><button data-ot="close" class="ot-home-close" type="button" aria-label="关闭筛选">关闭</button></header><div data-ot="group-list" class="ot-home-option-list"></div>');
+      const list = popover.querySelector('[data-ot="group-list"]');
+      for (const [value, label] of choices) {
+        const button = document.createElement('button'); button.type = 'button';
+        button.className = 'ot-home-option' + (s.group === value ? ' is-current' : '');
+        button.dataset.groupSize = value; button.textContent = label; list.appendChild(button);
+      }
+      listen(popover.querySelector('[data-ot="close"]'), 'click', () => closePopover());
+      listen(list, 'click', event => {
+        const button = event.target.closest('[data-group-size]');
+        if (!button || typeof adapter.applyGroup !== 'function') return;
+        const before = snapshot(); void runAction(signal => adapter.applyGroup(button.dataset.groupSize, context(before, signal))).then(ok => { if (ok) closePopover(); });
+      });
+    }
     function renderPlaces() {
       if (openKind !== 'place') return;
       const s = snapshot(); const list = popover.querySelector('[data-ot="place-list"]'); if (!list) return;
@@ -358,6 +381,7 @@
     }
     listen(all('person'), 'click', () => { if (openKind === 'person') closePopover(); else openPerson(all('person')); });
     listen(all('time'), 'click', () => { if (openKind === 'time') closePopover(); else void openTime(all('time')); });
+    listen(all('group'), 'click', () => { if (openKind === 'group') closePopover(); else openGroup(all('group')); });
     listen(all('place'), 'click', () => { if (openKind === 'place') closePopover(); else openPlace(all('place')); });
     listen(all('folder'), 'click', () => void chooseFolder());
     listen(all('select'), 'click', async () => {
@@ -377,6 +401,7 @@
       if (key === 'time') { next.dateFrom = ''; next.dateTo = ''; }
       else if (key === 'place') next.place = '';
       else if (key === 'directory') next.directory = '';
+      else if (key === 'group') { if (typeof adapter.applyGroup === 'function') await runAction(signal => adapter.applyGroup('', context(s, signal))); return; }
       else if (key.startsWith('person:')) next.person = personIds(s.query.person).filter(id => id !== key.slice(7)).join(',');
       await applyQuery(next);
     });
