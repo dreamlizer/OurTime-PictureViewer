@@ -812,6 +812,7 @@ function ensurePlaceMap(){
   map.addLayer(cluster);
   state.placeCluster=cluster; state.placeMapTimer=null;
   map.on('moveend zoomend',()=>{updatePlaceZoomInput();clearTimeout(state.placeMapTimer);state.placeMapTimer=setTimeout(()=>{if(state.view==='places')loadPlaceMap();},180);}); updatePlaceZoomInput();
+  window.OurTimeMapAreaEditor?.bind(map);
   return map;
 }
 function syncPlaceModeChrome(photo=null){
@@ -828,10 +829,12 @@ function syncPlaceModeChrome(photo=null){
 }
 async function loadPlaceMap(){
   const map=ensurePlaceMap();
+  if(window.OurTimeMapAreaEditor?.isActive())return;
   map.invalidateSize();
   const b=placeGpsBounds(map.getBounds());
   const params=new URLSearchParams({west:b.west,south:b.south,east:b.east,north:b.north,zoom:String(Math.round(map.getZoom()))});
   const data=await api('/api/places?'+params);
+  if(window.OurTimeMapAreaEditor?.isActive())return;
   $('#places-total').textContent=data.truncated
     ?'地点较多，显示 '+fmt((data.clusters||[]).length)+' / '+fmt(data.total_clusters||0)+' 个聚合点'
     :(data.clusters&&data.clusters.length?fmt(data.clusters.reduce(function(n,x){return n+(x.count||0);},0))+' 张在当前视野':'当前视野还没有坐标点');
@@ -901,6 +904,7 @@ async function refreshPhotoPlaceRadiusPreview({fit=true}={}){
   renderPhotoPlaceRange(data,{fit});
 }
 async function openPhotoPlaceEditor(){
+  window.OurTimeMapAreaEditor?.cancel({silent:true});
   const saved=state.photoMap,photo=saved&&saved.photo;if(!saved||!photo)throw new Error('没有可修改的定位照片');
   const editor=$('#photo-place-editor');editor.hidden=false;saved.editorOpen=true;
   $('#photo-place-source-thumb').src='/api/thumb/'+Number(photo.id);
@@ -953,6 +957,7 @@ async function loadPhotoPlace(viewToken=null){
   setText('#places-total','1 张照片');
 }
 async function showPhotoPlaceMap(photo,options={}){
+  window.OurTimeMapAreaEditor?.cancel({silent:true});
   const id=Number(photo&&photo.id);
   if(!id||!hasPhotoCoordinates(photo))throw new Error('这张照片没有定位坐标');
   state.photoMap={id,photo:{...photo},context:options.context?{...options.context}:null,returnView:options.returnView||state.view,returnMode:options.returnMode||'photo',absolute:Number(options.absolute),radiusM:PHOTO_PLACE_RADIUS_DEFAULT,nearby:null,rangeLayers:[],editorOpen:false};
@@ -964,6 +969,7 @@ async function showPhotoPlaceMap(photo,options={}){
   await loadPhotoPlace(viewToken);if(isCurrentView(viewToken))revealPanel(panel,viewToken);
 }
 async function reopenPhotoFromPlaceMap(){
+  window.OurTimeMapAreaEditor?.cancel({silent:true});
   const saved=state.photoMap;if(!saved||!saved.id)throw new Error('没有可返回的照片');
   const id=Number(saved.id),context=saved.context?{...saved.context}:null;
   const returnView=saved.returnView&&String(saved.returnView).startsWith('photo-place:')?'timeline':(saved.returnView||'timeline');

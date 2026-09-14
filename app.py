@@ -41,6 +41,13 @@ from library_db import (
     register_collations, upsert_place_rule,
 )
 from browse_queries import directory_predicate as directory_clause, fetch_people, fetch_photos, nearby_photo_spec
+from map_area_service import (
+    map_area_preview_payload,
+    map_area_selection_fingerprint,
+    map_area_wgs84_to_gcj02,
+    normalize_map_area,
+    select_map_area_rows,
+)
 
 mimetypes.add_type('font/ttf', '.ttf')
 
@@ -2423,6 +2430,114 @@ def rename_place(body:PlaceRenameRequest):
     catalog=place_catalog()
     matched=target in catalog
     return {'updated':len(ids),'name':target,'matched':bool(matched or remembered), 'remembered':remembered}
+
+
+class MapAreaPreviewRequest(BaseModel):
+    coordinate_space:str
+    bounds:dict
+
+
+class MapAreaApplyRequest(MapAreaPreviewRequest):
+    selection_fingerprint:str=Field(min_length=64,max_length=64)
+    place:str=Field(min_length=1,max_length=200)
+    confirm_many:bool=False
+    operation_id:str|None=None
+
+
+def map_area_from_body(body):
+    try:
+        return normalize_map_area(body.coordinate_space,body.bounds)
+    except ValueError as exc:
+        raise ApiProblem(400,str(exc),'invalid_request') from exc
+
+
+@app.post('/api/places/area/preview')
+def preview_map_area(body:MapAreaPreviewRequest):
+    area=map_area_from_body(body)
+    with db() as c:
+        c.execute('BEGIN')
+        rows=select_map_area_rows(c,area,ACTIVE_ASSET)
+        return map_area_preview_payload(area,rows)
+
+
+@app.post('/api/places/area/apply')
+def apply_map_area(body:MapAreaApplyRequest,request:Request):
+    area=map_area_from_body(body)
+    place=(body.place or '').strip()
+    if not place:
+        raise ApiProblem(400,'请填写地点名称','invalid_request')
+    if not re.fullmatch(r'[0-9a-fA-F]{64}',body.selection_fingerprint or ''):
+        raise ApiProblem(400,'选集指纹无效','invalid_request')
+    operation_id=operation_id_from(body,request)
+    operation_payload={
+        'coordinate_space':area['coordinate_space'],
+        'bounds':area['bounds'],
+        'selection_fingerprint':body.selection_fingerprint.lower(),
+        'place':place,
+        'confirm_many':bool(body.confirm_many),
+    }
+    with operation_lock(operation_id):
+        with db() as c:
+            c.execute('BEGIN IMMEDIATE')
+            operation_id,receipt=prepare_operation(
+                c,'place_area_edit',operation_id,operation_payload
+            )
+            if receipt is not None:
+                return receipt
+            rows=select_map_area_rows(c,area,ACTIVE_ASSET)
+            fingerprint=map_area_selection_fingerprint(area,rows)
+            if fingerprint!=body.selection_fingerprint.lower():
+                raise ApiProblem(
+                    409,'选区内照片或地点已经变化，请重新框选确认',
+                    'selection_changed',
+                )
+            if not rows:
+                raise ApiProblem(400,'框内未找到有定位的照片','invalid_request')
+            if len(rows)>1000 and not body.confirm_many:
+                raise ApiProblem(
+                    409,f'所选范围包含 {len(rows)} 张照片，请再次明确确认',
+                    'large_selection_confirmation_required',
+                    matched=len(rows),
+                )
+            updated=0
+            stamp=now()
+            audit_bounds=dict(area['bounds'])
+            for row in rows:
+                before=row['manual_place']
+                if (before or '')==place:
+                    continue
+                c.execute(
+                    'UPDATE assets SET manual_place=? WHERE id=?',
+                    (place,row['id']),
+                )
+                c.execute(
+                    'INSERT INTO edits(created_at,target,before_json,after_json) VALUES (?,?,?,?)',
+                    (
+                        stamp,
+                        f'asset:{row["id"]}',
+                        json.dumps({'manual_place':before},ensure_ascii=False),
+                        json.dumps({
+                            'manual_place':place,
+                            'source':'map_rectangle',
+                            'operation_id':operation_id,
+                            'coordinate_space':area['coordinate_space'],
+                            'bounds':audit_bounds,
+                        },ensure_ascii=False,sort_keys=True),
+                    ),
+                )
+                updated+=1
+            result={
+                'matched':len(rows),
+                'updated':updated,
+                'unchanged':len(rows)-updated,
+                'name':place,
+                'message':(
+                    f'选中 {len(rows)} 张，修改 {updated} 张，'
+                    f'{len(rows)-updated} 张原本已是该地点；原图 GPS 未改变'
+                ),
+            }
+            return finish_operation(c,operation_id,result)
+
 
 @app.get('/api/places')
 def places(q:str='', offset:int=0, limit:int=80, west:float|None=None, south:float|None=None, east:float|None=None, north:float|None=None, zoom:float=11):

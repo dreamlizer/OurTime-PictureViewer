@@ -18,6 +18,7 @@ REQUIRED = [
 ]
 CROSS = {
     "viewer.js": ["esc", "prettyPlace", "basename", "fmt", "api", "action", "toast", "hasPhotoCoordinates", "showPhotoPlaceMap"],
+    "map-area-editor.js": ["fmt", "api", "action", "toast", "hasPhotoCoordinates", "placeMapPoint", "ensurePlaceMap", "closePhotoPlaceEditor", "loadPlaceMap", "syncPlaceModeChrome", "isPhotoPlaceView"],
     "waterfall.js": ["esc", "basename", "fmt", "api", "action"],
 }
 passed = []
@@ -89,17 +90,19 @@ def main():
     viewer = read(WEB / "viewer.js")
     appearance = read(WEB / "appearance.css")
     viewer_overrides = read(WEB / "viewer-overrides.css")
+    map_area = read(WEB / "map-area-editor.js")
+    map_area_css = read(WEB / "map-area-editor.css")
     home_ui = read(WEB / "home-query-ui.js")
     home_init = read(WEB / "home-query-init.js")
     backend = read(ROOT / "app.py")
     browse_queries = read(ROOT / "browse_queries.py")
     waterfall = read(WEB / "waterfall.js")
-    sources = {"app.js": app, "viewer.js": viewer, "viewer-overrides.css": viewer_overrides, "waterfall.js": waterfall, "index.html": html}
+    sources = {"app.js": app, "map-area-editor.js": map_area, "viewer.js": viewer, "viewer-overrides.css": viewer_overrides, "waterfall.js": waterfall, "index.html": html}
 
-    order = re.findall(r'src="/(app\.js|viewer\.js|waterfall\.js)"', html)
-    if order != ["app.js", "viewer.js", "waterfall.js"]:
-        fail("index.html 脚本顺序应为 app.js -> viewer.js -> waterfall.js，实际 %s" % order)
-    ok("index.html 先加载 app.js，再加载 viewer.js / waterfall.js")
+    order = re.findall(r'src="/(app\.js|map-area-editor\.js|viewer\.js|waterfall\.js)"', html)
+    if order != ["app.js", "map-area-editor.js", "viewer.js", "waterfall.js"]:
+        fail("index.html 脚本顺序应为 app.js -> map-area-editor.js -> viewer.js -> waterfall.js，实际 %s" % order)
+    ok("index.html 先加载 app.js / map-area-editor.js，再加载 viewer.js / waterfall.js")
 
     for name in REQUIRED:
         defined = first_def(app, name)
@@ -241,6 +244,30 @@ def main():
     )) or "syncPhotoPlaceButton(state.detail)" not in viewer:
         fail("单张照片地图缺少 0.15 倍聚焦、GCJ/WGS 坐标适配、1–10000 米范围复核、九张预览或返回大图链路")
     ok("单张照片地图已接入 GCJ/WGS 坐标适配、1–10000 米范围复核、九张预览和完整大图浏览")
+    if not all(value in html for value in (
+        'id="map-area-start"',
+        'id="map-area-editor"',
+        'id="map-area-many"',
+        'src="/map-area-editor.js"',
+        'href="/map-area-editor.css"',
+    )) or not all(value in map_area for value in (
+        "/api/places/area/preview",
+        "/api/places/area/apply",
+        "selection_fingerprint",
+        "operationRequest(",
+        "setPointerCapture",
+        "pointercancel",
+        "requires_large_confirmation",
+    )) or not all(value in backend for value in (
+        "@app.post('/api/places/area/preview')",
+        "@app.post('/api/places/area/apply')",
+        "'place_area_edit'",
+        "'selection_changed'",
+        "'large_selection_confirmation_required'",
+        "'BEGIN IMMEDIATE'",
+    )) or ".map-area-selection" not in map_area_css:
+        fail("地图矩形框选缺少公共入口、完整预览、指纹提交或绘制状态")
+    ok("地点总览与单张位置页共用矩形框选、完整选集预览和安全提交")
     if not all(path in viewer for path in (
         "/api/face-label-bg/1.png",
         "/api/face-label-bg/2.png",

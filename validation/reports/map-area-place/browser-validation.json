@@ -1,0 +1,59 @@
+{
+  "status": "PASS",
+  "isolated_data": true,
+  "random_port": true,
+  "checks": [
+    {
+      "status": "PASS",
+      "message": "总览显式进入框选后地图视野被冻结"
+    },
+    {
+      "status": "PASS",
+      "message": "真实拖框返回完整数量并显示不超过九张的合成预览"
+    },
+    {
+      "status": "PASS",
+      "message": "绘框过程中地图中心没有移动"
+    },
+    {
+      "status": "PASS",
+      "message": "保存成功后退出框选并恢复地图拖动"
+    },
+    {
+      "status": "PASS",
+      "message": "确认只修改框内人工地点并逐张留痕"
+    },
+    {
+      "status": "PASS",
+      "message": "单张位置页共用框选流程且390px面板不横向溢出"
+    },
+    {
+      "status": "PASS",
+      "message": "取消框选不写入且原1到10000米半径入口仍可用"
+    },
+    {
+      "status": "PASS",
+      "message": "连续开关三次没有残留编辑会话"
+    },
+    {
+      "status": "PASS",
+      "message": "慢预览A晚到时不会覆盖较新的预览B"
+    },
+    {
+      "status": "PASS",
+      "message": "浏览器遇到指纹冲突时整批不写并要求重新预览"
+    },
+    {
+      "status": "PASS",
+      "message": "冲突没有偷写新的地点"
+    },
+    {
+      "status": "PASS",
+      "message": "浏览器流程没有pageerror"
+    }
+  ],
+  "screenshots": [
+    "rectangle-preview.png",
+    "single-photo-narrow.png"
+  ]
+}
