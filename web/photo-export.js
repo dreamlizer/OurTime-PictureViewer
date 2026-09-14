@@ -42,6 +42,12 @@
     const origin=location.origin.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
     return String(value||'').replace(new RegExp(`url\\((['"]?)${origin}(/api/face-label-bg/[1-9]\\.png)\\1\\)`,'gi'),'url("$2")');
   }
+  function serializeFrozenMat(node){
+    return node.outerHTML.replace(
+      /url\(&quot;(\/api\/face-label-bg\/[1-9]\.png)&quot;\)/gi,
+      "url('$1')"
+    );
+  }
   function copyComputedStyle(source,target,pseudo=null){
     const computed=getComputedStyle(source,pseudo);
     FROZEN_STYLE_PROPS.forEach(name=>{
@@ -97,7 +103,7 @@
       id,
       snapshot:{
         snapshot_version:2,
-        mat_html:clone.outerHTML,
+        mat_html:serializeFrozenMat(clone),
         dialog_attrs:attrs,
         dialog_style:style,
         geometry:{

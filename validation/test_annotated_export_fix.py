@@ -17,10 +17,40 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from photo_export import render_annotated_image
+from photo_export import _snapshot_html, render_annotated_image
 
 
 class AnnotatedExportFixTests(unittest.TestCase):
+    def test_browser_serialized_allowed_label_background_is_accepted(self):
+        snapshot = {
+            "snapshot_version": 2,
+            "geometry": {
+                "image_width": 800,
+                "image_height": 500,
+                "mat_width": 800,
+                "mat_height": 610,
+            },
+            "dialog_attrs": {"data-face-theme": "ivory"},
+            "dialog_style": '--face-label-s-image:url("/api/face-label-bg/1.png")',
+            "mat_html": """
+              <figure id="photo-mat" style="position:relative;width:800px;height:610px">
+                <img id="detail-img" style="width:800px;height:500px">
+                <button class="face-name"
+                  style="background-image:url(&quot;/api/face-label-bg/1.png&quot;)">人物一</button>
+              </figure>
+            """,
+        }
+
+        mat, _ = _snapshot_html(snapshot)
+
+        self.assertIn("/api/face-label-bg/1.png", mat)
+        snapshot["mat_html"] = snapshot["mat_html"].replace(
+            "/api/face-label-bg/1.png",
+            "/api/original/1",
+        )
+        with self.assertRaisesRegex(ValueError, "不允许的图片资源"):
+            _snapshot_html(snapshot)
+
     def test_frozen_v2_snapshot_renders_jpeg_by_default_and_optional_png(self):
         with tempfile.TemporaryDirectory() as folder:
             temp = Path(folder)

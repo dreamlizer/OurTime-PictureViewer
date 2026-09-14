@@ -5,6 +5,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import socket
 import sqlite3
 import subprocess
@@ -258,6 +259,11 @@ def main() -> int:
                         check(
                             all(token not in markup for token in ("viewer-photo-close", "photo-favorite", "photo-place-map", "signature-switch")),
                             f"{slug} 冻结快照排除全部交互控件",
+                            checks,
+                        )
+                        check(
+                            not re.search(r"url\(&quot;/api/face-label-bg/[1-9]\.png&quot;\)", markup, re.I),
+                            f"{slug} 合法人名标签底图不会被 HTML 引号转义误拦",
                             checks,
                         )
                         viewer_path = REPORT_DIR / f"{slug}-viewer.png"

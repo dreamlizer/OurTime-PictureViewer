@@ -5,6 +5,7 @@ asset id plus a restricted, computed-style DOM snapshot from the open viewer.
 """
 import io
 import re
+from html import unescape
 from pathlib import Path
 
 from PIL import Image, ImageOps
@@ -24,6 +25,13 @@ _LABEL_URL = re.compile(r"^/api/face-label-bg/[1-9]\.png$", re.I)
 _URL_VALUE = re.compile(r"url\(\s*(['\"]?)(.*?)\1\s*\)", re.I)
 
 
+def _allowed_label_url(value):
+    candidate = unescape(str(value).strip())
+    if len(candidate) >= 2 and candidate[0] == candidate[-1] and candidate[0] in "\"'":
+        candidate = candidate[1:-1].strip()
+    return bool(_LABEL_URL.fullmatch(candidate))
+
+
 def _snapshot_html(snapshot):
     if not isinstance(snapshot, dict):
         raise ValueError("缺少冻结版式")
@@ -38,7 +46,7 @@ def _snapshot_html(snapshot):
     if not re.search(r'<img\b[^>]*\bid=["\']detail-img["\']', mat, re.I):
         raise ValueError("冻结版式缺少原图占位")
     for _, value in _URL_VALUE.findall(mat):
-        if not _LABEL_URL.fullmatch(value.strip()):
+        if not _allowed_label_url(value):
             raise ValueError("冻结版式包含不允许的图片资源")
     if not isinstance(attrs, dict) or len(attrs) > 24:
         raise ValueError("冻结版式属性不符合导出安全限制")
@@ -55,7 +63,7 @@ def _snapshot_html(snapshot):
         if not _STYLE_NAME.fullmatch(name) or len(value) > 500:
             raise ValueError("冻结版式样式不符合导出安全限制")
         for _, url in _URL_VALUE.findall(value):
-            if not _LABEL_URL.fullmatch(url.strip()):
+            if not _allowed_label_url(url):
                 raise ValueError("冻结版式样式不符合导出安全限制")
         if re.search(r"(?:javascript|file|https?)\s*:", value, re.I):
             raise ValueError("冻结版式样式不符合导出安全限制")
