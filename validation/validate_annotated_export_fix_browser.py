@@ -257,7 +257,7 @@ def main() -> int:
                         check(snapshot["id"] == aid, f"{slug} 快速切换后冻结当前照片而非上一张", checks)
                         markup = snapshot["snapshot"]["mat_html"]
                         check(
-                            all(token not in markup for token in ("viewer-photo-close", "photo-favorite", "photo-place-map", "signature-switch")),
+                            all(token not in markup for token in ("viewer-photo-close", "photo-favorite", "photo-place-map", "photo-export-control", "signature-switch")),
                             f"{slug} 冻结快照排除全部交互控件",
                             checks,
                         )

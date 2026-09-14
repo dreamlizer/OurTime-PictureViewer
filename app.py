@@ -3192,6 +3192,7 @@ def export_annotated_photo(aid:int, payload:AnnotatedExportRequest, request:Requ
         return Response(content,media_type=media_type,headers={
             'Content-Disposition':f"attachment; filename*=UTF-8''{safe_filename}",
             'X-OurTime-Export-Format':output_format,
+            'X-OurTime-Export-Renderer':'same-origin-fonts-v1',
         })
     finally:
         EXPORT_RENDER_LOCK.release()

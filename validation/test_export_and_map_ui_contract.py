@@ -14,6 +14,10 @@ class ExportAndMapUiContractTests(unittest.TestCase):
         self.assertIn("snapshot_version:2", source)
         self.assertIn("getComputedStyle", source)
         self.assertIn("export-annotated-format", source)
+        self.assertIn("photo-export-control", source)
+        self.assertIn("X-OurTime-Export-Renderer", source)
+        self.assertIn("mat.append(control)", source)
+        self.assertIn("<svg", source)
         self.assertIn("JPEG", source)
         self.assertIn("PNG", source)
 

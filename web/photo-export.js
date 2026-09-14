@@ -2,6 +2,7 @@
 (()=>{
   'use strict';
   const $=window.$||((selector)=>document.querySelector(selector));
+  const EXPECTED_RENDERER='same-origin-fonts-v1';
   const exportButton=()=>document.querySelector('#export-annotated-photo');
   const EXPORT_STYLE_VARS=['--face-font-size','--face-font-family','--face-text-color','--face-bg-color','--face-bg-opacity','--face-bg-rgba','--face-radius','--face-padding-x','--face-padding-y','--face-shadow','--face-label-s-image','--face-label-m-image','--face-label-l-image','--viewer-signature-h','--viewer-image-inset','--signature-tone'];
   const FROZEN_STYLE_PROPS=[
@@ -88,7 +89,7 @@
     const id=Number(window.__ourTimeApp.state.detail.id);
     const clone=mat.cloneNode(true);
     freezeTree(mat,clone);
-    clone.querySelectorAll('.viewer-photo-close,.photo-favorite,.photo-place-map,.face-hover-guide,.face-hover-box,.signature-switch').forEach(node=>node.remove());
+    clone.querySelectorAll('.viewer-photo-close,.photo-favorite,.photo-place-map,.photo-export-control,.face-hover-guide,.face-hover-box,.signature-switch').forEach(node=>node.remove());
     clone.querySelectorAll('.is-linked,.is-linking').forEach(node=>node.classList.remove('is-linked','is-linking'));
     clone.querySelector('#detail-img')?.classList.remove('viewer-photo-arriving','viewer-photo-forward','viewer-photo-backward');
     // The backend binds this placeholder to the same asset's original file.
@@ -141,6 +142,9 @@
         const body=await response.json().catch(()=>({}));
         throw new Error(body.detail||'导出失败');
       }
+      if(response.headers.get('X-OurTime-Export-Renderer')!==EXPECTED_RENDERER){
+        throw new Error('导出服务仍是旧版本，请重新启动拾光后重试');
+      }
       const actual=response.headers.get('X-OurTime-Export-Format')||format;
       const extension=actual==='png'?'png':'jpg';
       const label=actual==='png'?'PNG':'JPEG';
@@ -161,8 +165,10 @@
     }
   }
   function install(){
-    const actions=document.querySelector('.viewer-tool-actions');
-    if(!actions||exportButton())return;
+    const mat=document.querySelector('#photo-mat');
+    if(!mat||exportButton())return;
+    const control=document.createElement('div');
+    control.className='photo-export-control';
     const picker=document.createElement('select');
     picker.id='export-annotated-format';
     picker.title='带标签照片格式';
@@ -171,11 +177,12 @@
     const button=document.createElement('button');
     button.type='button';
     button.id='export-annotated-photo';
-    button.title='按当前版式导出带标签照片';
-    button.setAttribute('aria-label','按当前版式导出带标签照片');
-    button.textContent='导出';
+    button.title='导出当前带标签照片';
+    button.setAttribute('aria-label','导出当前带标签照片');
+    button.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3m0 0-4 4m4-4 4 4"/><path d="M5 11v8h14v-8"/></svg>';
     button.addEventListener('click',()=>run());
-    actions.append(picker,button);
+    control.append(button,picker);
+    mat.append(control);
   }
   install();
   window.__ourTimeAnnotatedExport={ready,freeze,run};
