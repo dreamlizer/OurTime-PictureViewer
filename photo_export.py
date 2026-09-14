@@ -14,6 +14,8 @@ MAX_PIXELS = 40_000_000
 MAX_EDGE = 12_000
 SUPPORTED = {"JPEG", "PNG"}
 _BAD = re.compile(r"<(?:script|iframe|object|form)\b|\bon\w+\s*=|(?:javascript|file|https?)\s*:", re.I)
+_STYLE_NAME = re.compile(r"^--(?:face-(?:font-size|font-family|text-color|bg-color|bg-opacity|bg-rgba|radius|padding-x|padding-y|shadow|label-[sml]-image)|viewer-signature-h|viewer-image-inset|signature-tone)$")
+_LABEL_URL = re.compile(r"^url\(\s*['\"]?/api/face-label-bg/[1-9]\.png['\"]?\s*\)$", re.I)
 
 
 def _snapshot_html(snapshot):
@@ -28,8 +30,16 @@ def _snapshot_html(snapshot):
     cleaned = {str(k): str(v)[:300] for k, v in attrs.items()
                if str(k).startswith("data-")}
     style = str(snapshot.get("dialog_style", ""))[:4000]
-    if style and ("url(" in style.lower() or not re.fullmatch(r"[\w\s:#(),.%+'\"/;\-]+", style)):
-        raise ValueError("冻结版式样式不符合导出安全限制")
+    for declaration in filter(None, (part.strip() for part in style.split(";"))):
+        if ":" not in declaration:
+            raise ValueError("冻结版式样式不符合导出安全限制")
+        name, value = (part.strip() for part in declaration.split(":", 1))
+        if not _STYLE_NAME.fullmatch(name) or len(value) > 500:
+            raise ValueError("冻结版式样式不符合导出安全限制")
+        if "url(" in value.lower() and not _LABEL_URL.fullmatch(value):
+            raise ValueError("冻结版式样式不符合导出安全限制")
+        if re.search(r"(?:javascript|file|https?)\s*:", value, re.I):
+            raise ValueError("冻结版式样式不符合导出安全限制")
     pairs = [f'{k}="{v.replace(chr(34), "")}"' for k, v in cleaned.items()]
     if style:
         pairs.append(f'style="{style.replace(chr(34), "")}"')

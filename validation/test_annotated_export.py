@@ -20,17 +20,20 @@ def main():
         for x in range(0, 5000, 25): draw.line((x, 0, x, 3000), fill=(x % 255, 80, 110), width=2)
         for y in range(0, 3000, 25): draw.line((0, y, 5000, y), fill=(80, y % 255, 110), width=1)
         image.save(source, quality=96)
+        label = Image.new("RGBA", (38, 82), (91, 57, 35, 180)); label.save(root / "label.png")
         before = hashlib.sha256(source.read_bytes()).hexdigest()
         class Handler(http.server.SimpleHTTPRequestHandler):
             def log_message(self, *_): pass
             def do_GET(self):
                 if self.path == "/api/original/1":
                     self.send_response(200); self.send_header("Content-Type", "image/jpeg"); self.end_headers(); self.wfile.write(source.read_bytes()); return
+                if self.path == "/api/face-label-bg/4.png":
+                    self.send_response(200); self.send_header("Content-Type", "image/png"); self.end_headers(); self.wfile.write((root / "label.png").read_bytes()); return
                 self.send_error(404)
         server = socketserver.TCPServer(("127.0.0.1", 0), Handler); port = server.server_address[1]
         thread = threading.Thread(target=server.serve_forever, daemon=True); thread.start()
         try:
-            snap = {"dialog_attrs":{"data-face-theme":"classic"},"geometry":{"image_width":1000,"image_height":600,"mat_width":1000},"mat_html":'''<figure id="photo-mat"><img id="detail-img" src="/api/preview/1"><div id="face-name-layer" class="face-name-layer"><button class="face-name" style="left:110px;top:150px">王小明</button></div><figcaption id="photo-signature"><div class="signature-v3"><span class="signature-seal">拾</span><div class="signature-capture"><strong>2026 年秋 · 北京</strong><small>SONY · 35mm · f/2</small></div></div></figcaption></figure>'''}
+            snap = {"dialog_attrs":{"data-face-theme":"tea"},"dialog_style":'--face-label-s-image: url("/api/face-label-bg/4.png"); --face-font-size: 15px; --face-font-family: "Microsoft YaHei"; --face-bg-opacity: 0.7;',"geometry":{"image_width":1000,"image_height":600,"mat_width":1000},"mat_html":'''<figure id="photo-mat"><img id="detail-img" src="/api/preview/1"><div id="face-name-layer" class="face-name-layer"><button class="face-name" data-face-label-size="s" style="left:110px;top:150px">王小明</button></div><figcaption id="photo-signature"><div class="signature-v3"><span class="signature-seal">拾</span><div class="signature-capture"><strong>2026 年秋 · 北京</strong><small>SONY · 35mm · f/2</small></div></div></figcaption></figure>'''}
             png = render_annotated_png(original=source, snapshot=snap, base_url=f"http://127.0.0.1:{port}/", web_root=Path(__file__).parents[1] / "web", aid=1)
         finally:
             server.shutdown(); server.server_close()
