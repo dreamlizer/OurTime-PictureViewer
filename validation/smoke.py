@@ -353,6 +353,14 @@ def main():
             fail("%s 可能把 undefined 写进可见文案：%s" % (name, bad[0]))
     ok("页面源码没有把 undefined 当成可见文案")
 
+    if "FOLDER_ONLY_DRIVE" in app:
+        fail("文件夹浏览仍写死作者盘符")
+    if "本地版 / 03" in html:
+        fail("页面仍显示草稿式版本文案")
+    if "<title>拾光相册</title>" not in html:
+        fail("浏览器标题未统一为拾光相册")
+    ok("发布默认不再写死 I 盘或本地版 / 03")
+
     combined = app + "\n" + waterfall
     if "personLabel is not defined" in app or "Person label is not defined" in app:
         fail("app.js 仍含 personLabel is not defined")
@@ -364,13 +372,13 @@ def main():
     ok("切到时间/地点时先显示加载中，不先说没有照片")
 
     if (
-        "if(loading){\n  clearViewerImage();" not in viewer
-        or "#detail-dialog.is-loading #image-viewport" not in viewer_overrides
-        or "#detail-dialog.is-loading .viewer-tools" not in viewer_overrides
-        or "#detail-dialog.is-loading .detail-info" not in viewer_overrides
+        "function setViewerLoading(" not in viewer
+        or "viewer-loading" not in viewer
     ):
-        fail("大图切换加载态没有清空旧照片，或仍会露出旧图控件")
-    ok("大图切换时只保留加载提示，不显示上一张照片及控件")
+        fail("大图切换缺少加载提示")
+    if "if(loading){\n  clearViewerImage();" in viewer:
+        fail("大图切换时不应先清空旧图造成闪屏")
+    ok("大图切换时平滑过渡，不先清空造成闪屏")
 
     if (
         'placeholder="搜索已记录地点"' not in html

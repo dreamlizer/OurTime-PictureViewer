@@ -583,11 +583,48 @@ def write_json_atomic(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(path.name + ".tmp")
     if temporary.exists():
-        temporary.unlink()
+        raise FileExistsError(f"refusing to overwrite temporary report: {temporary}")
     temporary.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
     os.replace(temporary, path)
+
+
+def same_path(left: Path, right: Path) -> bool:
+    a = left.resolve()
+    b = right.resolve()
+    if os.path.normcase(str(a)) == os.path.normcase(str(b)):
+        return True
+    try:
+        return a.exists() and b.exists() and a.samefile(b)
+    except OSError:
+        return False
+
+
+def ensure_distinct_template_paths(
+    source_path: Path, output_path: Path, report_path: Path | None
+) -> Path | None:
+    output_tmp = output_path.with_name(output_path.name + ".tmp")
+    paths = [source_path, output_path, output_tmp]
+    resolved_report = None
+    if report_path is not None:
+        resolved_report = report_path.resolve()
+        paths.extend([resolved_report, resolved_report.with_name(resolved_report.name + ".tmp")])
+    for index, first in enumerate(paths):
+        for second in paths[index + 1 :]:
+            if same_path(first, second):
+                raise ValueError(f"source, output, report and temp files must be different: {first} vs {second}")
+    if output_tmp.exists():
+        raise FileExistsError(f"refusing to overwrite temporary output: {output_tmp}")
+    if resolved_report is not None:
+        report_tmp = resolved_report.with_name(resolved_report.name + ".tmp")
+        if report_tmp.exists():
+            raise FileExistsError(f"refusing to overwrite temporary report: {report_tmp}")
+        if resolved_report.exists() and (
+            same_path(resolved_report, source_path) or same_path(resolved_report, output_path)
+        ):
+            raise ValueError("report path must not overwrite source or output")
+    return resolved_report
 
 
 def generate_templates(
@@ -606,12 +643,11 @@ def generate_templates(
 ) -> dict:
     source_path = source_path.resolve()
     output_path = output_path.resolve()
+    report_path = ensure_distinct_template_paths(source_path, output_path, report_path)
     if not source_path.is_file():
         raise FileNotFoundError(f"source database not found: {source_path}")
     if output_path.exists():
         raise FileExistsError(f"refusing to overwrite existing output: {output_path}")
-    if source_path == output_path:
-        raise ValueError("source and output paths must be different")
     if minimum < 1 or maximum < minimum or maximum > 5:
         raise ValueError("template range must satisfy 1 <= minimum <= maximum <= 5")
     if not 0 <= trim_fraction < 0.25:

@@ -1,0 +1,11 @@
+{
+  "python_exe": ".venv/Scripts/python.exe",
+  "data_dir": "data",
+  "model_root": "resources/models",
+  "geo_root": "resources/geo",
+  "face_label_dir": "web/assets/face-labels",
+  "object_model_dir": "resources/objects",
+  "chromium_path": "",
+  "folder_only_drive": "",
+  "objects_enabled": false
+}

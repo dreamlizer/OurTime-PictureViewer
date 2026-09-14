@@ -9,6 +9,7 @@ import re
 from datetime import datetime
 from html import unescape
 from pathlib import Path
+import os
 
 from PIL import Image, ImageOps
 
@@ -132,6 +133,23 @@ def _allowed_label_url(value):
     return bool(_LABEL_URL.fullmatch(candidate))
 
 
+def _export_url_allowed(url, base_url, aid):
+    if url in {"about:blank"}:
+        return True
+    if url.startswith("data:") or url.startswith("file:"):
+        return False
+    if not str(url).startswith(str(base_url)):
+        return False
+    path = str(url)[len(str(base_url)):].split("?", 1)[0]
+    if path in {"", "api/health", f"api/original/{int(aid)}"}:
+        return True
+    if _LABEL_URL.fullmatch("/" + path):
+        return True
+    if path.startswith("vendor/fonts/") and ".." not in path:
+        return True
+    return False
+
+
 def _snapshot_html(snapshot):
     if not isinstance(snapshot, dict):
         raise ValueError("缺少冻结版式")
@@ -227,7 +245,11 @@ def render_annotated_image(
     except ImportError as exc:
         raise RuntimeError("本机未安装可选的 Playwright/Chromium 渲染组件") from exc
     with sync_playwright() as p:
-        browser = p.chromium.launch()
+        launch_kwargs = {}
+        chromium = os.environ.get("PHOTO_CHROMIUM")
+        if chromium:
+            launch_kwargs["executable_path"] = chromium
+        browser = p.chromium.launch(**launch_kwargs)
         try:
             page = browser.new_page(
                 viewport={
@@ -237,6 +259,12 @@ def render_annotated_image(
                 device_scale_factor=1,
             )
             try:
+                page.route(
+                    "**/*",
+                    lambda route: route.continue_()
+                    if _export_url_allowed(route.request.url, base_url, aid)
+                    else route.abort(),
+                )
                 # Give the frozen document the same localhost origin as the
                 # viewer so bundled webfonts are not blocked as cross-origin.
                 page.goto(f"{base_url}api/health", wait_until="load", timeout=20_000)

@@ -5,14 +5,14 @@
 ## 怎么跑
 
 - 用户入口：双击 `启动拾光.vbs`；停止：`停止拾光.vbs`。页面 http://127.0.0.1:8765 。
-- 启动器优先用项目 `.venv\Scripts\python.exe`，否则 `C:\Users\A\PycharmProjects\ImageBrowser\.venv\Scripts\python.exe`。
+- 启动器优先用项目 `.venv\Scripts\python.exe`，或 config.local.json / PHOTO_PYTHON 指定的解释器。
 - 技术入口：`python app.py --port 8765`。API 只监听 127.0.0.1。
 - 隔离验证必须另给 `PHOTO_LIBRARY_DATA`（及需要时的 `PHOTO_WEB_ROOT`），不要打正式 `data/`。
 - 正式扫描若在跑，不要重启、停止或改扫描参数，除非用户明确要求。已识别人脸不要重算。
 
 ## 技术栈
 
-FastAPI + uvicorn + SQLite WAL；前端是 `web/` 静态 HTML/CSS/JS，无构建。ExifTool 13.59 常驻读元数据；Pillow / pillow-heif 做预览；InsightFace buffalo_l 优先走 GPU（DirectML，CUDA 可用时优先），失败回 CPU。地名优先用 `G:\CodexModels\geo\osm\beijing-places.json`，区边界和 GeoNames 兜底。人脸模型默认 `G:\CodexModels\insightface`。可用 `PHOTO_MODEL_ROOT`、`PHOTO_GEO_ROOT`、`PHOTO_LIBRARY_DATA` 覆盖。
+FastAPI + uvicorn + SQLite WAL；前端是 `web/` 静态 HTML/CSS/JS，无构建。ExifTool 13.59 常驻读元数据；Pillow / pillow-heif 做预览；InsightFace buffalo_l 优先走 GPU（DirectML，CUDA 可用时优先），失败回 CPU。地名优先用 `resources/geo`，区边界和 GeoNames 兜底。人脸模型默认 `resources/models`。可用 `PHOTO_MODEL_ROOT`、`PHOTO_GEO_ROOT`、`PHOTO_LIBRARY_DATA` 覆盖。
 
 ## 目录与约定
 
@@ -45,5 +45,5 @@ smoke 至少要拦住这些：
 
 ## 当前状态和下一步
 
-版本 0.3。2026-09-10：正式六盘元数据已入库（D–I，不含 C；G 盘整盘排除）。人脸 GPU 补扫已结束（`completed_with_errors`），已识别 `face_state=1` 不重算。2026-09-10 曾按 0.50 收回未命名散组，并把 1–2 张脸的未命名组人工整理为路人；这是历史整理，不是自动路人规则。备份 data/backups/library-20260910-160440-before-face-merge.sqlite3。库存和任务状态以 `/api/status` 为准。物体识别已接但工作台入口已隐藏；库内旧标签保留不删，不继续扫描。默认首页为时间线；原全部照片入口改为文件夹，按盘符勾选，取消勾走现有排除（不删原文件）。文件夹浏览仍只看 I 盘；“添加照片”目录选择器可看本机固定磁盘和可移动磁盘，普通界面统一在添加照片页提交扫描。扫描新照片走增量，已入库会跳过。新脸先将带 `suggested_person_id` 的待确认碎片折叠到对应正式人物，再按统一的 0.52 相似度阈值归入已命名人物、用户确认的路人或未命名候选组；只有两个真正不同人物的分数相差不足 0.08 时才保留待确认，仍有歧义的候选只作提示，不进入后续自动匹配索引。低于阈值的陌生人进入待确认，同一照片仍禁止两张脸归入同一人物。不得按出现次数自动判断路人。下一步仍是人工核对人物。地点细名以离线库 + 少量手填覆盖为准，不要让用户补完全库。单张照片地图可按该照片 GPS 复核 1–500 米范围，九张缩略图只作预览，大图浏览必须覆盖范围内全部照片；批量确认只写人工地点并逐张留痕，不改原图 GPS。地点页 Leaflet 用 `web/vendor/` 本地脚本，底图仍需联网。人物详情默认分页返回人脸，合并后不要一次渲染整组。
+版本 0.3。2026-09-10：正式六盘元数据已入库（D–I，不含 C；G 盘整盘排除）。人脸 GPU 补扫已结束（`completed_with_errors`），已识别 `face_state=1` 不重算。2026-09-10 曾按 0.50 收回未命名散组，并把 1–2 张脸的未命名组人工整理为路人；这是历史整理，不是自动路人规则。备份 data/backups/library-20260910-160440-before-face-merge.sqlite3。库存和任务状态以 `/api/status` 为准。物体识别已接但工作台入口已隐藏；库内旧标签保留不删，不继续扫描。默认首页为时间线；原全部照片入口改为文件夹，按盘符勾选，取消勾走现有排除（不删原文件）。文件夹浏览默认看本机磁盘，作者可用本机配置限制盘符；“添加照片”目录选择器可看本机固定磁盘和可移动磁盘，普通界面统一在添加照片页提交扫描。扫描新照片走增量，已入库会跳过。新脸先将带 `suggested_person_id` 的待确认碎片折叠到对应正式人物，再按统一的 0.52 相似度阈值归入已命名人物、用户确认的路人或未命名候选组；只有两个真正不同人物的分数相差不足 0.08 时才保留待确认，仍有歧义的候选只作提示，不进入后续自动匹配索引。低于阈值的陌生人进入待确认，同一照片仍禁止两张脸归入同一人物。不得按出现次数自动判断路人。下一步仍是人工核对人物。地点细名以离线库 + 少量手填覆盖为准，不要让用户补完全库。单张照片地图可按该照片 GPS 复核 1–500 米范围，九张缩略图只作预览，大图浏览必须覆盖范围内全部照片；批量确认只写人工地点并逐张留痕，不改原图 GPS。地点页 Leaflet 用 `web/vendor/` 本地脚本，底图仍需联网。人物详情默认分页返回人脸，合并后不要一次渲染整组。
 浏览器的全部照片、文件夹、地点、合影、收藏和人物档案视图统一固定顶栏、标题和工具区；390px 等窄屏不得横向溢出。大图左下角、资料栏上方的收藏状态写入 SQLite，不回写原照片。大图“素笺”主题使用 `web/vendor/fonts/` 内置屏幕阅读版文楷；“茶棕”主题只提供同目录内置的 Ma Shan Zheng、Long Cang、Liu Jian Mao Cao 三款毛笔字体并默认 Ma Shan Zheng；“暗朱”主题只提供 ZCOOL XiaoWei、Noto Serif SC、Zhi Mang Xing 三款题签字体并默认 ZCOOL XiaoWei。图片标签的字号和底牌透明度可调，其他主题和固定样式控件按 `viewer.js` 的主题合同执行。

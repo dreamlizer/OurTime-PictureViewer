@@ -1792,7 +1792,7 @@ async function displayPhoto(id){
   renderSignature(state.detail,scoped||files[0]);
   updateZoom(true);
   renderFaceNames(state.detail);
-  viewerMessage(draft?'这张照片有尚未保存的补录，已暂存在本页。':!state.detail.in_library?'已排除 · 缓存已清理':'');
+  viewerMessage(draft?'这张照片有尚未保存的补录，已暂存在本页。':!state.detail.in_library?'此照片已退出展示':'');
   await waitViewerFrames(2);
   if(request===viewer.presentation&&$('#detail-dialog').open&&state.detail?.id===id)setViewerLoading(false);
   return true;

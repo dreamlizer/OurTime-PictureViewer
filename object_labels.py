@@ -43,7 +43,9 @@ LABELS = [
     ("文件扫描件", "a photo of a scanned document"),
 ]
 
-MODEL_DIR = Path(r"G:\CodexModels\siglip2-so400m-patch16-384")
+from ourtime_config import OBJECT_MODEL_DIR
+
+MODEL_DIR = OBJECT_MODEL_DIR
 _ONNX_DIR = MODEL_DIR / "onnx"
 _LOCK = threading.Lock()
 _SESSION = None

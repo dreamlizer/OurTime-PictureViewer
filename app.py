@@ -48,15 +48,26 @@ from map_area_service import (
     normalize_map_area,
     select_map_area_rows,
 )
+from ourtime_config import (
+    APP_NAME,
+    APP_VERSION,
+    BASE,
+    DATA,
+    FACE_LABEL_DIR,
+    FACE_LABEL_FILES,
+    FOLDER_ONLY_DRIVE,
+    GEO_ROOT,
+    MODEL_ROOT,
+    OBJECTS_ENABLED,
+    export_renderer_available,
+    face_labels_available,
+    face_model_available,
+    geo_data_available,
+    runtime_identity,
+)
 
 mimetypes.add_type('font/ttf', '.ttf')
 
-BASE = Path(__file__).resolve().parent
-DATA = Path(os.environ.get('PHOTO_LIBRARY_DATA', str(BASE / 'data'))).resolve()
-FACE_LABEL_DIR = DATA / '人名标签'
-FACE_LABEL_FILES = {f'{i}.png' for i in range(1, 10)}
-MODEL_ROOT = Path(os.environ.get('PHOTO_MODEL_ROOT', 'G:/CodexModels/insightface'))
-GEO_ROOT = Path(os.environ.get('PHOTO_GEO_ROOT', 'G:/CodexModels/geo'))
 PLACES = PlaceIndex(GEO_ROOT)
 PREVIEW_LOCK = threading.BoundedSemaphore(2)
 DB = DATA / 'library.sqlite3'
@@ -212,14 +223,7 @@ def refuse_unlocked_legacy_owner():
 
 
 def capture_runtime_version():
-    try:
-        return subprocess.run(
-            ['git','rev-parse','HEAD'],cwd=BASE,capture_output=True,text=True,
-            encoding='ascii',errors='replace',timeout=3,
-            creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0),
-        ).stdout.strip() or 'working-tree'
-    except (OSError,subprocess.SubprocessError):
-        return 'working-tree'
+    return runtime_identity()
 
 
 def initialize_application():
@@ -1604,6 +1608,8 @@ def begin_scan_locked(body,operation_id):
         'roots':roots,'with_faces':bool(body.with_faces),
         'include_system':bool(body.include_system),'workers':int(body.workers),
     }
+    if body.with_faces and not face_model_available():
+        raise HTTPException(409,'未找到人脸模型，无法开始自动识别。可以把模型放到 resources/models，或先只添加照片、稍后再识别。')
     with db() as c:
         operation_id,existing=prepare_operation(c,'scan',operation_id,request_payload)
     if existing:return existing
@@ -1671,6 +1677,7 @@ def health():
             os.path.normcase(str(DATA)).encode('utf-8')
         ).hexdigest(),
         'runtime_version':RUNTIME_VERSION,'owner':bool(APP_OWNER),
+        'product_name':APP_NAME,'version':APP_VERSION,
     }
 
 
@@ -1750,7 +1757,24 @@ def status():
             pass
     payload={'stats':{k:v or 0 for k,v in stats.items()},'job':job,'errors':errors,'metadata_per_second':round(speed,2),
             'face_average_seconds':round(face_average_seconds,3),'inventory':inventory,
-            'capabilities':{'heif':HEIF,'exiftool':bool(EXIFTOOL),'exiftool_mode':'常驻进程','face_model':(MODEL_ROOT/'models/buffalo_l/w600k_r50.onnx').exists(),'geo':(GEO_ROOT/'geonames/cities500.zip').exists(),'data_dir':str(DATA),'face_runtime':current_face_runtime(),'object_model':model_ready(),'object_runtime':object_runtime() if model_ready() else '未找到','version':'0.3','pid':os.getpid()}}
+            'capabilities':{
+                'heif':HEIF,
+                'exiftool':bool(EXIFTOOL),
+                'exiftool_mode':'常驻进程' if EXIFTOOL else '未找到',
+                'face_model':face_model_available(),
+                'geo':geo_data_available(),
+                'face_labels':face_labels_available(),
+                'export_renderer':export_renderer_available(),
+                'objects_enabled':bool(OBJECTS_ENABLED),
+                'folder_only_drive':FOLDER_ONLY_DRIVE,
+                'data_dir':str(DATA),
+                'face_runtime':current_face_runtime() if face_model_available() else '未找到模型',
+                'object_model':False if not OBJECTS_ENABLED else model_ready(),
+                'object_runtime':'功能未启用' if not OBJECTS_ENABLED else (object_runtime() if model_ready() else '未找到'),
+                'product_name':APP_NAME,
+                'version':APP_VERSION,
+                'pid':os.getpid(),
+            }}
     with STATUS_CACHE_LOCK:
         STATUS_CACHE['at']=time.monotonic()
         STATUS_CACHE['payload']=payload
@@ -2049,10 +2073,13 @@ def folders(path:str='',scope:str='browse'):
     if not path:
         roots=drives()['roots']
         if scope=='browse':
-            roots=[p for p in roots if str(p).upper().startswith('I:')]
+            if FOLDER_ONLY_DRIVE:
+                roots=[p for p in roots if str(p).upper().startswith(FOLDER_ONLY_DRIVE)]
         return {'path':'','parent':None,'scope':scope,'items':[{'name':p,'path':p} for p in roots]}
     p=Path(path).expanduser().resolve()
     if not p.is_dir(): raise HTTPException(400,'文件夹不存在或无法访问')
+    if scope=='browse' and FOLDER_ONLY_DRIVE and not str(p).upper().startswith(FOLDER_ONLY_DRIVE):
+        raise HTTPException(400,'当前设置只浏览指定磁盘')
     if str(p).startswith('\\\\'): raise HTTPException(400,'第一版只浏览本机目录')
     try:
         items=[]
@@ -2071,11 +2098,7 @@ def asset_dict(row):
     d=dict(row)
     d['face_status']='committed_pending_publish' if d.get('face_state')==2 else None
     if d.get('face_state')==2:
-        d['face_status_message']=(
-            '人脸结果已提交，裁剪发布失败，等待隔离恢复'
-            if d.get('face_error')
-            else '人脸结果已提交，裁剪文件待恢复'
-        )
+        d['face_status_message']='人脸信息已保存，预览仍待完成'
     else:
         d['face_status_message']=None
     d['effective_date']=d['manual_date'] or d['captured_at']
@@ -2222,10 +2245,13 @@ def list_objects(limit:int=40):
         rows=c.execute('SELECT label, count(*) n, avg(score) score FROM object_tags GROUP BY label ORDER BY n DESC, score DESC LIMIT ?',(min(max(limit,1),80),)).fetchall()
         tagged=c.execute('SELECT count(DISTINCT asset_id) FROM object_tags').fetchone()[0]
         pending=c.execute('SELECT count(*) FROM assets a WHERE '+ACTIVE_ASSET+' AND coalesce(object_state,0)=0 AND a.error IS NULL').fetchone()[0]
-    return {'items':[dict(r) for r in rows],'tagged':tagged,'pending':pending,'ready':model_ready(),'runtime':object_runtime() if model_ready() else '未找到'}
+    enabled=bool(OBJECTS_ENABLED)
+    return {'items':[dict(r) for r in rows],'tagged':tagged,'pending':pending,'enabled':enabled,'ready':enabled and model_ready(),'runtime':'功能未启用' if not enabled else (object_runtime() if model_ready() else '未找到')}
 
 @app.post('/api/objects/probe')
 def probe_objects(body:ObjectProbeRequest):
+    if not OBJECTS_ENABLED:
+        raise HTTPException(403,'物体识别未启用')
     if not model_ready():
         raise HTTPException(400,'未找到本地 SigLIP2 模型')
     with db() as c:
@@ -2249,6 +2275,8 @@ def probe_objects(body:ObjectProbeRequest):
 
 @app.post("/api/objects/scan")
 def start_object_scan(body:ObjectProbeRequest):
+    if not OBJECTS_ENABLED:
+        raise HTTPException(403,'物体识别未启用')
     if not model_ready():
         raise HTTPException(400,"未找到本地 SigLIP2 模型")
     with OBJECT_JOB_LOCK:
@@ -3225,7 +3253,8 @@ def thumbnail(aid:int):
             except (OSError,HTTPException):
                 pass
         if not active:
-            return Response('<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480"><rect width="100%" height="100%" fill="#e9e5dc"/><text x="50%" y="50%" text-anchor="middle" fill="#78776c" font-size="24">已排除 · 缓存已清理</text></svg>',media_type='image/svg+xml')
+            label='此照片已退出展示' if path.exists() else '已排除，预览需在浏览时重建'
+            return Response('<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480"><rect width="100%" height="100%" fill="#e9e5dc"/><text x="50%" y="50%" text-anchor="middle" fill="#78776c" font-size="24">'+label+'</text></svg>',media_type='image/svg+xml')
     if not path.exists():
         return Response('<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480"><rect width="100%" height="100%" fill="#e9e5dc"/><text x="50%" y="50%" text-anchor="middle" fill="#78776c" font-size="24">预览不可用</text></svg>',media_type='image/svg+xml')
     return FileResponse(path,media_type='image/jpeg')

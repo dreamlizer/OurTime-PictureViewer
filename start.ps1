@@ -1,11 +1,8 @@
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'ourtime-config.ps1')
 $projectRoot = $PSScriptRoot
-$dataRoot = if ($env:PHOTO_LIBRARY_DATA) {
-    [IO.Path]::GetFullPath($env:PHOTO_LIBRARY_DATA)
-} else {
-    Join-Path $projectRoot 'data'
-}
-$port = if ($env:PHOTO_LIBRARY_PORT) { [int]$env:PHOTO_LIBRARY_PORT } else { 8765 }
+$dataRoot = [IO.Path]::GetFullPath($env:PHOTO_LIBRARY_DATA)
+$port = [int]$env:PHOTO_LIBRARY_PORT
 $serverUrl = "http://127.0.0.1:$port"
 $normalizedData = [IO.Path]::GetFullPath($dataRoot).ToLowerInvariant()
 $sha = [Security.Cryptography.SHA256]::Create()
@@ -17,7 +14,7 @@ try {
     $sha.Dispose()
 }
 
-New-Item -ItemType Directory -Path $dataRoot -Force | Out-Null
+Assert-OurTimeWritable $dataRoot
 
 function Test-OurTimePage {
     try {
@@ -42,20 +39,18 @@ function Test-OurTimeOwnedPort {
 
 try {
     if (Test-OurTimePage) {
-        if (-not (Test-OurTimeOwnedPort)) { throw "port $port is already used by another service." }
+        if (-not (Test-OurTimeOwnedPort)) { throw "端口 $port 已被其他程序占用，拾光没有改用别的资料库。" }
         if ($env:PHOTO_NO_BROWSER -ne '1') { Start-Process $serverUrl }
         exit 0
     }
 } catch {
-    if ($_.Exception.Message -like '*already used*') { throw }
+    if ($_.Exception.Message -like '*已被其他程序占用*') { throw }
 }
 
-$pythonCandidates = @(
-    (Join-Path $projectRoot '.venv\Scripts\python.exe'),
-    'C:\Users\A\PycharmProjects\ImageBrowser\.venv\Scripts\python.exe'
-)
-$pythonExe = $pythonCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
-if (-not $pythonExe) { throw 'Python runtime was not found. See README.md.' }
+$pythonExe = Get-OurTimePython
+if (-not $pythonExe) {
+    throw "未找到 Python。请在本目录创建 .venv 并安装 requirements.txt，或在 config.local.json 指定 python_exe。说明见 docs/SETUP.md"
+}
 
 $env:NO_ALBUMENTATIONS_UPDATE = '1'
 $env:PHOTO_LIBRARY_PORT = [string]$port
@@ -77,4 +72,4 @@ for ($attempt = 0; $attempt -lt 45; $attempt++) {
     }
     if ($process.HasExited) { break }
 }
-throw "Startup failed. See $stderrLog"
+throw "启动失败，请查看 $stderrLog"

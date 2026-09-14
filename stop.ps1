@@ -1,10 +1,7 @@
 $ErrorActionPreference = 'Stop'
-$dataRoot = if ($env:PHOTO_LIBRARY_DATA) {
-    [IO.Path]::GetFullPath($env:PHOTO_LIBRARY_DATA)
-} else {
-    Join-Path $PSScriptRoot 'data'
-}
-$port = if ($env:PHOTO_LIBRARY_PORT) { [int]$env:PHOTO_LIBRARY_PORT } else { 8765 }
+. (Join-Path $PSScriptRoot 'ourtime-config.ps1')
+$dataRoot = [IO.Path]::GetFullPath($env:PHOTO_LIBRARY_DATA)
+$port = [int]$env:PHOTO_LIBRARY_PORT
 $serverUrl = "http://127.0.0.1:$port"
 $pidFile = Join-Path $dataRoot 'server.pid'
 $normalizedData = [IO.Path]::GetFullPath($dataRoot).ToLowerInvariant()

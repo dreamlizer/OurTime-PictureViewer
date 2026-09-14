@@ -3,6 +3,8 @@ runtime/
 .venv/
 __pycache__/
 *.pyc
+config.local.json
+config.json
 validation/work/
 validation/reports/
 validation/*backup*/
