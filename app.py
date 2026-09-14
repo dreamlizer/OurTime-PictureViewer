@@ -3159,6 +3159,7 @@ def original(aid:int):
 
 class AnnotatedExportRequest(BaseModel):
     snapshot: dict
+    format: str = 'jpeg'
 
 EXPORT_RENDER_LOCK = threading.BoundedSemaphore(1)
 
@@ -3170,16 +3171,28 @@ def export_annotated_photo(aid:int, payload:AnnotatedExportRequest, request:Requ
     try:
         path=original_path(aid)
         try:
-            from photo_export import render_annotated_png
-            png=render_annotated_png(original=path,snapshot=payload.snapshot,
-                base_url=str(request.base_url),web_root=BASE/'web',aid=aid)
+            from photo_export import render_annotated_image
+            output_format=str(payload.format or 'jpeg').strip().lower()
+            if output_format == 'jpg':
+                output_format='jpeg'
+            server_port=int((request.scope.get('server') or ('127.0.0.1',8765))[1])
+            content=render_annotated_image(original=path,snapshot=payload.snapshot,
+                base_url=f'http://127.0.0.1:{server_port}/',web_root=BASE/'web',aid=aid,
+                output_format=output_format)
         except ValueError as exc:
             raise HTTPException(422,str(exc))
+        except OSError:
+            raise HTTPException(422,'原图读取失败，未生成导出文件')
         except RuntimeError as exc:
             raise HTTPException(503,str(exc))
-        filename=f'{path.stem}-拾光标签-{datetime.now():%Y%m%d-%H%M%S}.png'
+        extension='jpg' if output_format == 'jpeg' else 'png'
+        media_type='image/jpeg' if output_format == 'jpeg' else 'image/png'
+        filename=f'{path.stem}-拾光标签-{datetime.now():%Y%m%d-%H%M%S}.{extension}'
         safe_filename=quote(filename, safe='')
-        return Response(png,media_type='image/png',headers={'Content-Disposition':f"attachment; filename*=UTF-8''{safe_filename}"})
+        return Response(content,media_type=media_type,headers={
+            'Content-Disposition':f"attachment; filename*=UTF-8''{safe_filename}",
+            'X-OurTime-Export-Format':output_format,
+        })
     finally:
         EXPORT_RENDER_LOCK.release()
 

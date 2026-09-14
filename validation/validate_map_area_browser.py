@@ -159,6 +159,15 @@ def main():
                     "总览显式进入框选后地图视野被冻结",
                     results,
                 )
+                check(
+                    page.locator("#map-area-start").evaluate(
+                        """button => button.dataset.phase==='armed'
+                          && button.textContent.includes('框选中')
+                          && getComputedStyle(button).animationName==='map-area-pulse'"""
+                    ),
+                    "进入框选后按钮以闪烁文案明确提示仍在框选状态",
+                    results,
+                )
                 map_drag(page, 39.895, 116.395, 39.905, 116.405)
                 page.wait_for_function(
                     "() => document.getElementById('map-area-summary').textContent.includes('2 张')"
@@ -166,6 +175,15 @@ def main():
                 check(
                     page.locator("#map-area-samples img").count() == 2,
                     "真实拖框返回完整数量并显示不超过九张的合成预览",
+                    results,
+                )
+                check(
+                    page.locator("#map-area-start").evaluate(
+                        """button => button.dataset.phase==='selected'
+                          && button.textContent.includes('框选已完成')
+                          && getComputedStyle(button).animationName==='none'"""
+                    ),
+                    "框选完成后按钮停止闪烁并明确显示已完成",
                     results,
                 )
                 center_after = page.evaluate(
@@ -190,6 +208,15 @@ def main():
                         "() => !OurTimeMapAreaEditor.isActive() && state.placeMap.dragging.enabled()"
                     ),
                     "保存成功后退出框选并恢复地图拖动",
+                    results,
+                )
+                check(
+                    page.locator("#map-area-start").evaluate(
+                        """button => button.dataset.phase==='idle'
+                          && button.getAttribute('aria-pressed')==='false'
+                          && button.textContent.includes('框选修改地点')"""
+                    ),
+                    "退出后按钮恢复普通状态，用户可一眼确认已退出",
                     results,
                 )
                 with sqlite3.connect(data / "library.sqlite3") as connection:

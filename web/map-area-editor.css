@@ -4,17 +4,34 @@
   gap: 6px;
   margin-left: 4px;
 }
-.map-area-start svg {
-  width: 16px;
-  height: 16px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.5;
-}
 .map-area-start[aria-pressed="true"] {
   border-color: var(--green);
   background: #e4eee7;
   color: var(--green);
+}
+.map-area-start[data-phase="armed"],
+.map-area-start[data-phase="drawing"],
+.map-area-start[data-phase="previewing"] {
+  border-color: #b35a33;
+  background: #fff0e7;
+  color: #8b3d21;
+  animation: map-area-pulse 1s ease-in-out infinite;
+}
+.map-area-start[data-phase="selected"] {
+  border-color: var(--green);
+  background: #dcebe0;
+  color: #1f5a3d;
+  box-shadow: inset 0 0 0 1px rgba(31, 90, 61, .1);
+}
+.map-area-start[data-phase="stale"] {
+  border-color: #b57919;
+  background: #fff4da;
+  color: #80520d;
+  animation: map-area-pulse 1s ease-in-out infinite;
+}
+@keyframes map-area-pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(179, 90, 51, 0); }
+  50% { opacity: .68; box-shadow: 0 0 0 4px rgba(179, 90, 51, .12); }
 }
 .places-map-shell.map-area-mode #places-map {
   cursor: crosshair;
@@ -159,6 +176,17 @@
 .map-area-editor.is-loading .map-area-name,
 .map-area-editor.is-loading #map-area-save {
   opacity: .58;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .map-area-start[data-phase="armed"],
+  .map-area-start[data-phase="drawing"],
+  .map-area-start[data-phase="previewing"],
+  .map-area-start[data-phase="stale"] {
+    animation: none;
+    outline: 2px dashed currentColor;
+    outline-offset: 2px;
+  }
 }
 
 @media (max-width: 620px) {

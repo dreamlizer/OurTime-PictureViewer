@@ -30,6 +30,22 @@
   let previousTouchAction = '';
 
   const element = id => document.getElementById(id);
+  const buttonPhases = {
+    idle: { pressed: false, label: '框选修改地点' },
+    armed: { pressed: true, label: '框选中（点此退出）' },
+    drawing: { pressed: true, label: '正在框选…' },
+    previewing: { pressed: true, label: '正在计算选区…' },
+    selected: { pressed: true, label: '框选已完成（点此退出）' },
+    stale: { pressed: true, label: '选区已变化（点此退出）' }
+  };
+
+  function setButtonPhase(phase) {
+    const button = element('map-area-start');
+    const config = buttonPhases[phase] || buttonPhases.idle;
+    button.dataset.phase = phase in buttonPhases ? phase : 'idle';
+    button.setAttribute('aria-pressed', String(config.pressed));
+    button.querySelector('span').textContent = config.label;
+  }
 
   function bind(nextMap) {
     if (!nextMap || map === nextMap) return;
@@ -149,6 +165,7 @@
     element('map-area-hint').hidden = false;
     element('map-area-hint').textContent =
       message || '拖动框选照片范围，Esc 取消';
+    setButtonPhase('armed');
   }
 
   async function start() {
@@ -174,9 +191,7 @@
     element('map-area-editor').hidden = true;
     element('map-area-hint').hidden = false;
     element('map-area-hint').textContent = '拖动框选照片范围，Esc 取消';
-    const button = element('map-area-start');
-    button.setAttribute('aria-pressed', 'true');
-    button.querySelector('span').textContent = '退出框选';
+    setButtonPhase('armed');
   }
 
   function cancel({ silent = false } = {}) {
@@ -196,8 +211,7 @@
     setBusy(false);
     restoreMap();
     const button = element('map-area-start');
-    button.setAttribute('aria-pressed', 'false');
-    button.querySelector('span').textContent = '框选修改地点';
+    setButtonPhase('idle');
     button.disabled = submitting;
     if (!silent) toast('已取消框选，没有修改地点');
   }
@@ -234,6 +248,7 @@
     element('map-area-editor').hidden = true;
     element('map-area-hint').hidden = false;
     element('map-area-hint').textContent = '正在框选；松开鼠标后计算完整选集';
+    setButtonPhase('drawing');
     container.setPointerCapture(pointerId);
   }
 
@@ -322,6 +337,7 @@
     element('map-area-many').checked = false;
     element('map-area-retry').hidden = true;
     element('map-area-editor').classList.remove('is-loading');
+    setButtonPhase('selected');
     updateSaveState();
   }
 
@@ -339,6 +355,7 @@
     element('map-area-retry').hidden = true;
     element('map-area-save').disabled = true;
     element('map-area-hint').hidden = true;
+    setButtonPhase('previewing');
     try {
       const data = await api('/api/places/area/preview', {
         method: 'POST',
@@ -355,6 +372,7 @@
       element('map-area-preview-note').textContent = error.message || '请重试预览';
       element('map-area-retry').hidden = false;
       element('map-area-save').disabled = true;
+      setButtonPhase('stale');
     } finally {
       if (token === generation) previewController = null;
     }
@@ -368,6 +386,7 @@
     element('map-area-editor').hidden = true;
     element('map-area-hint').hidden = false;
     element('map-area-hint').textContent = '拖动重新框选照片范围，Esc 取消';
+    setButtonPhase('armed');
   }
 
   function photoInsidePreview(photo, data) {
@@ -430,6 +449,7 @@
         element('map-area-summary').textContent = '所选照片发生变化';
         element('map-area-preview-note').textContent = '本次没有写入。请重新预览后再确认。';
         element('map-area-retry').hidden = false;
+        setButtonPhase('stale');
       }
       throw error;
     } finally {
