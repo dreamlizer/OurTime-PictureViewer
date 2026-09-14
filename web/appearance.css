@@ -5,9 +5,9 @@
   --ui-sidebar-bg: #eef2ef;
   --ui-surface: #ffffff;
   --ui-text: #25342f;
-  --ui-muted: #65756d;
+  --ui-muted: #596a61;
   --ui-border: #d9e1dc;
-  --ui-control-border: #b8c7bd;
+  --ui-control-border: #7b8f83;
   --ui-accent: #285c49;
   --ui-accent-hover: #214d3d;
   --ui-soft: #edf3ef;
@@ -43,7 +43,7 @@ body { font: 14px/1.6 var(--sans); background: var(--paper); color: var(--ink); 
 button, a, input, textarea, select, summary { -webkit-tap-highlight-color: transparent; }
 button, a, summary { touch-action: manipulation; }
 button { transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease; }
-button:disabled { opacity: .5; cursor: not-allowed; }
+button:disabled { opacity: 1; color: #76847b; background-color: #e7ece8; border-color: #cbd5ce; cursor: not-allowed; }
 button:focus-visible, a:focus-visible, summary:focus-visible,
 [tabindex]:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
   outline: 2px solid var(--focus); outline-offset: 3px;
@@ -185,8 +185,8 @@ input:disabled, select:disabled, textarea:disabled { background-color: #e9eeea; 
 /* Keep the 42px caption height required by the virtual masonry layout. */
 #photo-grid .card-caption { height: var(--caption-h); padding: 7px 1px 9px; }
 #photo-grid .card-caption .card-meta { display: flex; gap: 8px; align-items: baseline; }
-#photo-grid .card-caption b { font-size: 12px; font-weight: 500; color: #415048; line-height: 20px; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#photo-grid .card-caption span { color: var(--muted); font-size: 11px; flex: 0 1 auto; min-width: 0; max-width: 56%; text-overflow: ellipsis; }
+#photo-grid .card-caption b { font-size: 13px; font-weight: 500; color: #34463d; line-height: 20px; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#photo-grid .card-caption span { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; flex: 0 1 auto; min-width: 0; max-width: 56%; text-overflow: ellipsis; }
 .copy-badge { padding: 2px 7px; color: #3c5445; background: #fffffff0; border: 1px solid #dce2de; border-radius: 5px; font-size: 11px; }
 #photo-grid .stream-motion { transform: none; transition: opacity 140ms ease; }
 #photo-grid .stream-motion .photo-frame::after { background: transparent; opacity: 0; transition: opacity 140ms ease; }
@@ -217,10 +217,10 @@ input:disabled, select:disabled, textarea:disabled { background-color: #e9eeea; 
 #people-jump-pending[aria-pressed="true"] { background: #e1e9e2; border-color: #aabdaf; color: #315342; }
 .people-grid { grid-template-columns: repeat(auto-fill, minmax(152px, 1fr)); gap: 20px 16px; align-items: stretch; }
 .person-card { width: auto; min-width: 0; padding: 22px 12px 11px; border: 1px solid var(--line); border-radius: 12px; background: #fff; color: var(--ink); }
-.person-card.person-named { background: #e3e8df; border-color: #c9d2c8; }
+.person-card.person-named { background: #f0f5f1; border-color: #d3dfd6; }
 .person-card.person-unnamed { background: #fbfcf9; border-color: #e7e9e2; }
 .person-card:hover { border-color: #8fa697; background: #f5f8f4; }
-.person-card.person-named:hover { background: #dce4da; }
+.person-card.person-named:hover { background: #e8f0ea; }
 .person-card.selected { border-color: var(--green); outline: 2px solid var(--green); outline-offset: 0; background: #edf5ef; }
 .person-card img { width: 90px; height: 90px; border-radius: 50%; margin: 0 0 8px; background: #e9eeea; }
 .person-card .person-open { padding: 0 2px 2px; width: 100%; background: none; border: 0; }

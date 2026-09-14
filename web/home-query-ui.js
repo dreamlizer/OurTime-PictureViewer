@@ -101,6 +101,7 @@
     const folderControl = all('folder');
     folderControl.setAttribute('aria-haspopup', 'dialog');
     folderControl.setAttribute('aria-controls', 'folder-dialog');
+    folderControl.setAttribute('aria-expanded', 'false');
     for (const [value, label] of SORTS) all('sort').add(new window.Option(label, value));
     let destroyed = false, busy = false, lastScope = null, lastFocus = null, openKind = '', openAnchor = null;
     let people = [], peopleLabels = new Map(), places = [], timeline = { years: [], months: [] };
@@ -410,10 +411,14 @@
       if (folderPending || typeof adapter.chooseFolder !== 'function') return;
       const s = snapshot(); folderPending = true; report(null); sync();
       try {
+        window.setTimeout(() => {
+          const dialog = document.querySelector('#folder-dialog');
+          folderControl.setAttribute('aria-expanded', String(Boolean(dialog && dialog.open)));
+        }, 0);
         const path = await adapter.chooseFolder({ current: s.query.directory, signal: life.signal });
         if (path != null) await applyQuery({ ...s.query, directory: text(path) });
       } catch (error) { if (error.name !== 'AbortError') report(error); }
-      finally { folderPending = false; if (!destroyed) sync(); }
+      finally { folderPending = false; folderControl.setAttribute('aria-expanded', 'false'); if (!destroyed) sync(); }
     }
     async function doSelection(method) {
       const s = snapshot();
@@ -425,6 +430,7 @@
     listen(all('group'), 'click', () => { if (openKind === 'group') closePopover(); else openGroup(all('group')); });
     listen(all('place'), 'click', () => { if (openKind === 'place') closePopover(); else openPlace(all('place')); });
     listen(all('folder'), 'click', () => void chooseFolder());
+    listen(document.querySelector('#folder-dialog'), 'close', () => folderControl.setAttribute('aria-expanded', 'false'));
     listen(all('select'), 'click', async () => {
       const s = snapshot(); if (!s.active) return;
       const ok = await runAction(signal => adapter.setSelecting(true, context(s, signal)));

@@ -193,6 +193,38 @@ class M3CloseoutTests(unittest.TestCase):
             )
         return True
 
+    def test_root_disconnect_discards_only_the_uncommitted_batch(self):
+        root = Path(self.temp.name) / "removable-root"
+        root.mkdir()
+        first, second = root / "first.jpg", root / "second.jpg"
+        first.write_bytes(b"x")
+        second.write_bytes(b"x")
+        with self.module.db() as connection:
+            insert_asset(connection, 1, first)
+            insert_asset(connection, 2, second)
+
+        calls = []
+        moved = root.with_name("removable-root-offline")
+
+        def disconnecting_stat(path):
+            path = Path(path)
+            calls.append(path)
+            if path == first:
+                root.rename(moved)
+                raise FileNotFoundError(path)
+            return path.stat()
+
+        result = self.module.reconcile_missing_files(root, stat_path=disconnecting_stat)
+        self.assertTrue(result["interrupted"])
+        self.assertIn("不可访问", result["reason"])
+        self.assertEqual(0, result["missing"])
+        self.assertEqual([first, second], calls)
+        with self.module.db() as connection:
+            self.assertEqual([(1, 1), (2, 1)], [tuple(row) for row in connection.execute(
+                "SELECT id,exists_now FROM files ORDER BY id"
+            )])
+        self.assert_database_clean()
+
     def test_export_uses_one_read_snapshot_and_releases_failures(self):
         with self.module.db() as connection:
             insert_asset(connection, 1, WORK / "export-1.jpg")

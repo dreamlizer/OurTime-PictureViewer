@@ -1315,12 +1315,17 @@ def reconcile_missing_files(root, *, stop_event=STOP, stat_path=None,
                             error_callback=None, batch_size=250):
     root_path=Path(root)
     stat_path=stat_path or (lambda path:path.stat())
-    result={'checked':0,'missing':0,'errors':0,'root_accessible':False}
-    try:
-        root_path.stat()
-        if not root_path.is_dir():
-            raise NotADirectoryError(str(root_path))
-    except OSError as exc:
+    result={'checked':0,'missing':0,'errors':0,'root_accessible':False,
+            'interrupted':False,'reason':''}
+    def root_error():
+        try:
+            root_path.stat()
+            if not root_path.is_dir():
+                raise NotADirectoryError(str(root_path))
+        except OSError as exc:
+            return exc
+        return None
+    if (exc:=root_error()) is not None:
         result['errors']=1
         if error_callback:error_callback(root_path,exc)
         return result
@@ -1329,6 +1334,13 @@ def reconcile_missing_files(root, *, stop_event=STOP, stat_path=None,
     last_id=0
     page=max(1,min(int(batch_size),1000))
     while not stop_event.is_set():
+        # A removable root can disappear between pages.  Treat that as an
+        # interrupted reconciliation, never as a batch of deleted files.
+        if (exc:=root_error()) is not None:
+            result['errors']+=1;result['interrupted']=True
+            result['reason']='照片目录在核对途中不可访问：'+str(exc)
+            if error_callback:error_callback(root_path,exc)
+            break
         with db() as c:
             rows=c.execute(
                 'SELECT id,path,size,mtime_ns FROM files '
@@ -1348,6 +1360,14 @@ def reconcile_missing_files(root, *, stop_event=STOP, stat_path=None,
                 result['errors']+=1
                 if error_callback:error_callback(path,exc)
         if missing:
+            # FileNotFoundError is evidence only while its containing root is
+            # still available.  Do this outside the write transaction so a
+            # disconnected drive cannot turn an uncommitted batch into loss.
+            if (exc:=root_error()) is not None:
+                result['errors']+=1;result['interrupted']=True
+                result['reason']='照片目录在核对途中不可访问：'+str(exc)
+                if error_callback:error_callback(root_path,exc)
+                break
             with db() as c:
                 for file_id,path,size,mtime_ns in missing:
                     result['missing']+=c.execute(

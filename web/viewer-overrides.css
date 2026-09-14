@@ -86,12 +86,6 @@
   pointer-events:none;
 }
 #detail-dialog #viewer-loading[hidden]{display:none!important}
-#detail-dialog.is-loading .viewer-heading,
-#detail-dialog.is-loading #image-viewport,
-#detail-dialog.is-loading .viewer-arrow,
-#detail-dialog.is-loading .viewer-tools,
-#detail-dialog.is-loading .detail-info,
-#detail-dialog.is-loading #viewer-message{visibility:hidden;pointer-events:none}
 #detail-dialog.is-loading #viewer-loading{visibility:visible}
 #detail-dialog #photo-mat{opacity:1;transition:opacity 140ms ease}
 #detail-dialog #photo-mat{
@@ -1049,17 +1043,17 @@
   transition:opacity 140ms ease,transform 140ms ease;
 }
 #detail-dialog #detail-img.viewer-photo-arriving.viewer-photo-forward{
-  animation:viewer-photo-forward 170ms cubic-bezier(.2,.72,.3,1);
+  animation:viewer-photo-forward 140ms ease-out;
 }
 #detail-dialog #detail-img.viewer-photo-arriving.viewer-photo-backward{
-  animation:viewer-photo-backward 170ms cubic-bezier(.2,.72,.3,1);
+  animation:viewer-photo-backward 140ms ease-out;
 }
 @keyframes viewer-photo-forward{
-  from{opacity:.58;transform:translateX(8px) scale(.997)}
+  from{opacity:.72}
   to{opacity:1;transform:none}
 }
 @keyframes viewer-photo-backward{
-  from{opacity:.58;transform:translateX(-8px) scale(.997)}
+  from{opacity:.72}
   to{opacity:1;transform:none}
 }
 @media(prefers-reduced-motion:reduce){
