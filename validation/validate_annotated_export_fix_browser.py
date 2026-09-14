@@ -273,7 +273,11 @@ def main() -> int:
                         )
                         viewer_path.write_bytes(clean_viewer)
                         page.locator("#photo-mat").screenshot(path=str(REPORT_DIR / f"{slug}-viewer-with-controls.png"))
-                        page.locator("#export-annotated-format").select_option("jpeg")
+                        check(
+                            page.locator("#export-annotated-format").count() == 0,
+                            f"{slug} 右侧工具栏不再显示冗余 JPG/PNG 选择器",
+                            checks,
+                        )
                         with page.expect_download(timeout=45_000) as download_info:
                             page.locator("#export-annotated-photo").click()
                         download = download_info.value
@@ -301,9 +305,8 @@ def main() -> int:
                     page.wait_for_function(
                         "() => state.detail?.id===1 && document.querySelector('#detail-img').naturalWidth>0 && !document.querySelector('#detail-dialog').classList.contains('is-loading')"
                     )
-                    page.locator("#export-annotated-format").select_option("png")
                     with page.expect_download(timeout=45_000) as png_download_info:
-                        page.locator("#export-annotated-photo").click()
+                        page.evaluate("() => window.__ourTimeAnnotatedExport.run('png')")
                     png_path = REPORT_DIR / "multi-vertical-export.png"
                     check(
                         png_download_info.value.suggested_filename

@@ -125,8 +125,7 @@
   }
   async function run(requestedFormat){
     const button=exportButton();
-    const picker=document.querySelector('#export-annotated-format');
-    const format=String(requestedFormat||picker?.value||'jpeg').toLowerCase();
+    const format=String(requestedFormat||'jpeg').toLowerCase();
     let frozen;
     try{
       if(document.fonts?.ready)await document.fonts.ready;
@@ -137,7 +136,6 @@
       return;
     }
     button.disabled=true;
-    if(picker)picker.disabled=true;
     button.dataset.exporting='true';
     try{
       const response=await fetch(`/api/photos/${frozen.id}/export-annotated`,{
@@ -167,21 +165,14 @@
       window.viewerMessage?.(error.message||'导出失败');
     }finally{
       button.disabled=false;
-      if(picker)picker.disabled=false;
       delete button.dataset.exporting;
     }
   }
   function install(){
     const mat=document.querySelector('#photo-mat');
     if(!mat||exportButton())return;
-    const actions=document.querySelector('.viewer-tool-actions');
     const control=document.createElement('div');
     control.className='photo-export-control';
-    const picker=document.createElement('select');
-    picker.id='export-annotated-format';
-    picker.title='带标签照片格式';
-    picker.setAttribute('aria-label','带标签照片导出格式');
-    picker.innerHTML='<option value="jpeg" selected>JPG</option><option value="png">PNG</option>';
     const button=document.createElement('button');
     button.type='button';
     button.id='export-annotated-photo';
@@ -190,8 +181,6 @@
     button.addEventListener('click',()=>run());
     control.append(button);
     mat.append(control);
-    if(actions)actions.append(picker);
-    else picker.hidden=true;
   }
   install();
   window.__ourTimeAnnotatedExport={ready,freeze,run};

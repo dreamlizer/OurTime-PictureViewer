@@ -326,12 +326,19 @@ def main() -> int:
 
             page.click("#face-style-button")
             page.wait_for_selector("#face-style-popover:not([hidden])")
+            check(
+                page.locator("#face-label-position").input_value() == "manual",
+                "存在手动位置时布局选择器明确显示本张为手动位置",
+            )
             with page.expect_response(
                 lambda response: response.url.endswith("/api/photos/1/face-labels/reset")
             ):
-                page.click("#face-label-reset-photo")
+                page.select_option("#face-label-position", "top")
             page.wait_for_function(
-                "document.querySelector('#face-name-layer [data-face-id=\"101\"]').dataset.labelManual!=='true'"
+                """() => {
+                  const label=document.querySelector('#face-name-layer [data-face-id="101"]');
+                  return label.dataset.labelManual!=='true' && label.classList.contains('top');
+                }"""
             )
             reset_detail = request_json(base_url, "/api/photos/1")["faces"][0]
             with sqlite3.connect(data / "library.sqlite3") as connection:
@@ -342,7 +349,46 @@ def main() -> int:
                 reset_detail["label_x_ratio"] is None
                 and reset_detail["label_y_ratio"] is None
                 and other_count == 1,
-                "恢复自动只清理当前照片并保留其他照片位置",
+                "选择靠上会清理当前照片手动位置并保留其他照片位置",
+            )
+
+            page.click("#face-style-close")
+            drag_label(page, 101, 0.36, 0.72)
+            page.wait_for_timeout(150)
+            saved_before_failed_reset = request_json(base_url, "/api/photos/1")["faces"][0]
+            page.click("#face-style-button")
+            page.route(
+                "**/api/photos/1/face-labels/reset",
+                lambda route: route.fulfill(
+                    status=503,
+                    content_type="application/json",
+                    body='{"detail":"forced reset failure"}',
+                ),
+            )
+            page.select_option("#face-label-position", "right")
+            page.wait_for_timeout(180)
+            check(
+                page.locator('#face-name-layer [data-face-id="101"]').get_attribute("data-label-manual") == "true"
+                and page.locator("#face-label-position").input_value() == "manual",
+                "布局重置失败时保留手动标签且不伪装为已清理",
+            )
+            page.unroute("**/api/photos/1/face-labels/reset")
+            with page.expect_response(
+                lambda response: response.url.endswith("/api/photos/1/face-labels/reset")
+            ):
+                page.select_option("#face-label-position", "auto")
+            page.wait_for_function(
+                """() => {
+                  const label=document.querySelector('#face-name-layer [data-face-id="101"]');
+                  return label.dataset.labelManual!=='true'
+                    && document.querySelector('#face-label-position').value==='auto';
+                }"""
+            )
+            reset_after_failure = request_json(base_url, "/api/photos/1")["faces"][0]
+            check(
+                saved_before_failed_reset["label_x_ratio"] is not None
+                and reset_after_failure["label_x_ratio"] is None,
+                "失败后重新选择自动可清空手动位置并恢复自动排列",
             )
             check(not errors, "浏览器没有 pageerror")
             browser.close()

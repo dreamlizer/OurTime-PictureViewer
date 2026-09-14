@@ -9,19 +9,17 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ExportAndMapUiContractTests(unittest.TestCase):
-    def test_export_freezes_computed_dom_and_exposes_both_formats(self):
+    def test_export_freezes_computed_dom_without_redundant_toolbar_picker(self):
         source = (ROOT / "web" / "photo-export.js").read_text(encoding="utf-8")
         self.assertIn("snapshot_version:2", source)
         self.assertIn("getComputedStyle", source)
-        self.assertIn("export-annotated-format", source)
+        self.assertNotIn("export-annotated-format", source)
         self.assertIn("photo-export-control", source)
         self.assertIn("X-OurTime-Export-Renderer", source)
         self.assertIn("mat.append(control)", source)
-        self.assertIn("actions.append(picker)", source)
-        self.assertNotIn("control.append(button,picker)", source)
+        self.assertNotIn("actions.append(picker)", source)
         self.assertIn("<svg", source)
         self.assertIn("JPEG", source)
-        self.assertIn("PNG", source)
 
     def test_map_area_button_has_no_decorative_box_and_reports_phase(self):
         html = (ROOT / "web" / "index.html").read_text(encoding="utf-8")

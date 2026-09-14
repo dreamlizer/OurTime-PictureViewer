@@ -276,7 +276,7 @@ function buildFaceStylePopover(){
     </div>
     <div class="face-style-group">
       <div class="face-style-group-title">布局</div>
-      <label class="face-style-field"><span>标签位置</span><select id="face-label-position"><option value="auto">自动</option><option value="left">优先左侧</option><option value="right">优先右侧</option><option value="top">优先上方</option><option value="bottom">优先下方</option></select></label>
+      <label class="face-style-field"><span>标签位置</span><select id="face-label-position"><option value="manual" disabled>本张已手动调整</option><option value="auto">自动</option><option value="left">优先左侧</option><option value="right">优先右侧</option><option value="top">优先上方</option><option value="bottom">优先下方</option></select></label>
       <label class="face-style-field"><span>待命名标记</span><select id="face-unnamed-marker"><option value="plus">默认加号</option><option value="pulse">呼吸绿点</option><option value="ring">静态绿环</option></select></label>
       <button type="button" id="face-label-reset-photo" class="face-label-reset-photo">恢复本张自动排列</button>
     </div>
@@ -302,7 +302,7 @@ function buildFaceStylePopover(){
     }
     updateFaceStyle({fontFamily:e.target.value});
   });
-  bind('#face-label-position','change',e=>{viewer.faceLabelPosition=FACE_LABEL_POSITIONS.has(e.target.value)?e.target.value:'auto';saveViewerPrefs();if(state.detail)renderFaceNames(state.detail);});
+  bind('#face-label-position','change',e=>{void selectFaceLabelPosition(e.target.value);});
   bind('#face-label-reset-photo','click',()=>resetCurrentPhotoFaceLabels());
   bind('#face-unnamed-marker','change',e=>{
     viewer.faceUnnamedMarker=FACE_UNNAMED_MARKERS.has(e.target.value)?e.target.value:'plus';
@@ -314,7 +314,12 @@ function buildFaceStylePopover(){
   bind('#face-bg-opacity','input',e=>updateFaceStyle({backgroundOpacity:Number(e.target.value)/100}));
   bind('#face-radius','change',e=>updateFaceStyle({radius:Number(e.target.value)}));
   bind('#face-shadow','change',e=>updateFaceStyle({shadow:e.target.checked}));
-  bind('#face-style-reset','click',()=>{viewer.faceStyle={...DEFAULT_FACE_STYLE};viewer.faceLabelPosition='auto';viewer.faceUnnamedMarker='plus';applyFaceStyle();saveViewerPrefs();if(state.detail)renderFaceNames(state.detail);});
+  bind('#face-style-reset','click',()=>{
+    viewer.faceStyle={...DEFAULT_FACE_STYLE};
+    viewer.faceUnnamedMarker='plus';
+    applyFaceStyle();
+    void selectFaceLabelPosition('auto');
+  });
   buildLocalFontDialog();
   applyFaceStyle();
 }
@@ -816,7 +821,7 @@ function toggleFaceStylePopover(force){
   const open=force==null?pop.hidden:!!force;
   if(open){togglePhotoPeoplePopover(false);closeFaceActionPopover();}
   pop.hidden=!open;if(btn)btn.setAttribute('aria-expanded',String(open));
-  if(open)applyFaceStyle();
+  if(open){applyFaceStyle();syncFaceLabelResetButton();}
 }
 function updateToolVisuals(){
   const dir=$('#toggle-face-dir');
@@ -1400,10 +1405,13 @@ function effectiveFaceLabelPosition(face){
 }
 function syncFaceLabelResetButton(){
   const button=$('#face-label-reset-photo');
-  if(!button)return;
   const hasManual=(state.detail?.faces||[]).some(face=>Boolean(effectiveFaceLabelPosition(face)));
-  button.disabled=!hasManual;
-  button.title=hasManual?'清除这张照片保存的标签位置':'本张照片正在自动排列';
+  if(button){
+    button.disabled=!hasManual;
+    button.title=hasManual?'清除这张照片保存的标签位置':'本张照片正在自动排列';
+  }
+  const position=$('#face-label-position');
+  if(position)position.value=hasManual?'manual':viewer.faceLabelPosition;
 }
 function applyFaceLabelPositionToState(faceId,position){
   const face=(state.detail?.faces||[]).find(item=>Number(item.id)===Number(faceId));
@@ -1466,7 +1474,7 @@ async function persistFaceLabelPosition(faceId,position){
 }
 async function resetCurrentPhotoFaceLabels(){
   const photoId=Number(state.detail?.id);
-  if(!photoId)return;
+  if(!photoId)return false;
   const button=$('#face-label-reset-photo');
   if(button)button.disabled=true;
   await Promise.allSettled([...faceLabelPendingWrites]);
@@ -1485,11 +1493,24 @@ async function resetCurrentPhotoFaceLabels(){
       renderFaceNames(state.detail);
       toast('已恢复本张自动排列');
     }
+    return true;
   }catch(error){
     toast(error.message||'恢复自动排列失败',true);
+    return false;
   }finally{
     syncFaceLabelResetButton();
   }
+}
+async function selectFaceLabelPosition(value){
+  const next=FACE_LABEL_POSITIONS.has(value)?value:'auto';
+  viewer.faceLabelPosition=next;
+  saveViewerPrefs();
+  const hasManual=(state.detail?.faces||[]).some(face=>Boolean(effectiveFaceLabelPosition(face)));
+  if(hasManual){
+    await resetCurrentPhotoFaceLabels();
+    return;
+  }
+  if(state.detail)renderFaceNames(state.detail);
 }
 function rectOverlapArea(a,b){
  const w=Math.max(0,Math.min(a.x+a.w,b.x+b.w)-Math.max(a.x,b.x));
