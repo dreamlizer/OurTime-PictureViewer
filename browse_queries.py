@@ -365,8 +365,8 @@ def nearby_photo_spec(conn, anchor_id, radius_m):
         raise ValueError('照片编号或半径无效') from exc
     if anchor_id < 1:
         raise ValueError('照片编号无效')
-    if not 1 <= radius_m <= 500:
-        raise ValueError('地点范围必须在 1 到 500 米之间')
+    if not 1 <= radius_m <= 10_000:
+        raise ValueError('地点范围必须在 1 到 10000 米之间')
     anchor = conn.execute(
         'SELECT id,latitude,longitude FROM assets WHERE id=?',
         (anchor_id,),

@@ -2146,7 +2146,7 @@ def nearby_photos(aid:int, radius_m:int=100):
 
 class NearbyPlaceRequest(BaseModel):
     place:str=Field(min_length=1,max_length=200)
-    radius_m:int=Field(default=100,ge=1,le=500)
+    radius_m:int=Field(default=100,ge=1,le=10000)
 
 
 @app.post('/api/photos/{aid}/nearby-place')

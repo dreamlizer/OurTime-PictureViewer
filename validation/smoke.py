@@ -237,10 +237,10 @@ def main():
     )) or not all(value in backend for value in (
         "def nearby_photos(",
         "def set_nearby_place(",
-        "radius_m:int=Field(default=100,ge=1,le=500)",
+        "radius_m:int=Field(default=100,ge=1,le=10000)",
     )) or "syncPhotoPlaceButton(state.detail)" not in viewer:
-        fail("单张照片地图缺少 0.15 倍聚焦、GCJ/WGS 坐标适配、500 米范围复核、九张预览或返回大图链路")
-    ok("单张照片地图已接入 GCJ/WGS 坐标适配、500 米内复核、九张预览和完整大图浏览")
+        fail("单张照片地图缺少 0.15 倍聚焦、GCJ/WGS 坐标适配、1–10000 米范围复核、九张预览或返回大图链路")
+    ok("单张照片地图已接入 GCJ/WGS 坐标适配、1–10000 米范围复核、九张预览和完整大图浏览")
     if not all(path in viewer for path in (
         "/api/face-label-bg/1.png",
         "/api/face-label-bg/2.png",

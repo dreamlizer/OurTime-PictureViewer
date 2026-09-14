@@ -344,11 +344,12 @@ async function toggleFolderInclusion(path, include){
     const data=await api('/api/exclusions');
     const hit=(data.roots||[]).find(r=>folderKey(r.path||'')===folderKey(path||''));
     if(hit) await api('/api/exclusions/roots/'+hit.id,{method:'DELETE'});
-    toast('已重新纳入浏览');
+    toast('已重新纳入浏览，已有档案可重新显示');
   }else{
     await api('/api/exclusions/roots',{method:'POST',body:JSON.stringify({path})});
-    toast('已从工作台屏蔽，原文件还在');
+    toast('已取消包含此文件夹；其他目录有相同副本的照片仍会显示');
   }
+  if(state.folderNav)state.folderNav.cache={};
   await loadFolderBrowser(state.folderPath||'');
   refreshStatus().catch(()=>{});
 }
@@ -747,6 +748,7 @@ const BEIJING_VIEW={lat:39.9042,lng:116.4074,zoom:11};
 const WORLD_VIEW={lat:30,lng:20,zoom:2};
 const PHOTO_PLACE_FACTOR=.15;
 const PHOTO_PLACE_RADIUS_DEFAULT=100;
+const PHOTO_PLACE_RADIUS_MAX=10000;
 function hasPhotoCoordinates(photo){return Boolean(photo&&photo.latitude!==null&&photo.latitude!==''&&photo.longitude!==null&&photo.longitude!==''&&Number.isFinite(Number(photo.latitude))&&Number.isFinite(Number(photo.longitude)));}
 const PLACE_BASEMAPS={
   gaode:{url:'https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}',options:{subdomains:'1234',maxZoom:18,attribution:'高德地图'}},
@@ -886,7 +888,7 @@ function renderPhotoPlaceRange(data,{fit=true}={}){
 async function refreshPhotoPlaceRadiusPreview({fit=true}={}){
   const saved=state.photoMap;if(!saved||!saved.id)return;
   const radius=Number($('#photo-place-radius').value),summary=$('#photo-place-range-summary'),save=$('#photo-place-save');
-  if(!Number.isInteger(radius)||radius<1||radius>500){summary.textContent='请输入 1 到 500 米';save.disabled=true;return;}
+  if(!Number.isInteger(radius)||radius<1||radius>PHOTO_PLACE_RADIUS_MAX){summary.textContent='请输入 1 到 10000 米';save.disabled=true;return;}
   const ticket=(saved.previewTicket||0)+1;saved.previewTicket=ticket;saved.radiusM=radius;
   summary.textContent='正在查看范围…';save.disabled=true;
   const data=await api(`/api/photos/${Number(saved.id)}/nearby?radius_m=${radius}`);
@@ -923,7 +925,7 @@ async function savePhotoPlaceRange(){
   const saved=state.photoMap;if(!saved||!saved.id)throw new Error('没有可修改的定位照片');
   const place=$('#photo-place-name').value.trim(),radius=Number($('#photo-place-radius').value),button=$('#photo-place-save');
   if(!place)throw new Error('请填写地点名称');
-  if(!Number.isInteger(radius)||radius<1||radius>500)throw new Error('地点范围必须在 1 到 500 米之间');
+  if(!Number.isInteger(radius)||radius<1||radius>PHOTO_PLACE_RADIUS_MAX)throw new Error('地点范围必须在 1 到 10000 米之间');
   button.disabled=true;
   try{
     const result=await api(`/api/photos/${Number(saved.id)}/nearby-place`,{method:'POST',body:JSON.stringify({place,radius_m:radius})});

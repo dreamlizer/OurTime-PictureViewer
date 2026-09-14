@@ -51,6 +51,8 @@ def sha256(path: Path) -> str:
 def seed() -> dict[int, float]:
     distances = {index + 1: float(distance) for index, distance in enumerate(range(0, 440, 40))}
     distances[12] = 620.0
+    distances[13] = 9_800.0
+    distances[14] = 10_200.0
     originals: dict[int, str] = {}
     with closing(sqlite3.connect(DATA / "library.sqlite3")) as connection:
         for asset_id, distance in distances.items():
@@ -105,17 +107,21 @@ def main() -> int:
         distances, originals = seed()
         map_data = request_json("/api/places?west=116.3&south=39.8&east=116.5&north=40.1&zoom=15.3")
         check(any(item["anchor_id"] == 1 for item in map_data["clusters"]), "地图点返回同一网格内可用于地点编辑的定位照片")
+        minimum = request_json("/api/photos/1/nearby?radius_m=1")
+        check(minimum["total"] == 1, "1 米范围只包含定位基准照片")
         nearby = request_json("/api/photos/1/nearby?radius_m=500")
         check(nearby["total"] == 11 and len(nearby["samples"]) == 9, "500 米范围返回全部数量并固定九张预览")
         check(all(item["distance_m"] <= 500 for item in nearby["points"]), "范围预览不混入半径外照片")
         sequence = request_json("/api/photos?nearby=1&radius_m=500&sequence=true&limit=200")
         check(sequence["total"] == 11 and len(sequence["ids"]) == 11, "大图序列包含范围内全部照片而不是九张样片")
+        expanded = request_json("/api/photos/1/nearby?radius_m=10000")
+        check(expanded["total"] == 13, "10000 米范围包含半径内照片且排除半径外照片")
         try:
-            request_json("/api/photos/1/nearby?radius_m=501")
+            request_json("/api/photos/1/nearby?radius_m=10001")
         except urllib.error.HTTPError as error:
-            check(error.code == 400, "后端拒绝超过 500 米的预览范围")
+            check(error.code == 400, "后端拒绝超过 10000 米的预览范围")
         else:
-            raise AssertionError("后端接受了超过 500 米的范围")
+            raise AssertionError("后端接受了超过 10000 米的范围")
 
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(channel="chrome", headless=True)
@@ -135,6 +141,9 @@ def main() -> int:
 
             page.locator("#places-photo-edit").click()
             page.wait_for_selector("#photo-place-editor:not([hidden])")
+            radius_input = page.locator("#photo-place-radius")
+            check(radius_input.get_attribute("min") == "1" and radius_input.get_attribute("max") == "10000",
+                  "地点范围输入允许 1 到 10000 米")
             geometry = page.evaluate("""() => {const values=Object.fromEntries(['photo-place-editor','places-map'].map(id => {const r=document.getElementById(id).getBoundingClientRect();return [id,{top:r.top,bottom:r.bottom,height:r.height}];}));const c=document.querySelector('#places-view .view-chrome').getBoundingClientRect();values.chrome={top:c.top,bottom:c.bottom,height:c.height};return values;}""")
             check(geometry["photo-place-editor"]["top"] >= geometry["places-map"]["top"] + 8, "地点修改面板完整落在地图画布内")
             check(geometry["photo-place-editor"]["top"] >= geometry["chrome"]["bottom"] + 8, "地点修改面板不被固定标题栏遮挡")
