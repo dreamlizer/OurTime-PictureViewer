@@ -2,14 +2,14 @@
 (()=>{
   const $=window.$||((selector)=>document.querySelector(selector));
   const exportButton=()=>document.querySelector('#export-annotated-photo');
-  const ready=()=>{const dialog=$('#detail-dialog'),image=$('#detail-img');return Boolean(dialog?.open&&!dialog.classList.contains('is-loading')&&window.state?.detail?.id&&image?.complete&&image.naturalWidth&&!window.viewer?.loader);};
+  const ready=()=>{const dialog=$('#detail-dialog'),image=$('#detail-img'),detail=window.__ourTimeApp?.state?.detail;return Boolean(dialog?.open&&!dialog.classList.contains('is-loading')&&detail?.id&&image?.complete&&image.naturalWidth);};
   function freeze(){
     const dialog=$('#detail-dialog'),mat=$('#photo-mat'),image=$('#detail-img');
     if(!ready())throw new Error('照片仍在准备中，请稍候再导出');
     const clone=mat.cloneNode(true);clone.querySelectorAll('.viewer-photo-close,.photo-favorite,.photo-place-map,.face-hover-guide,.face-hover-box').forEach(node=>node.remove());
     const ir=image.getBoundingClientRect(),mr=mat.getBoundingClientRect(),attrs={};
     [...dialog.attributes].forEach(attr=>{if(attr.name.startsWith('data-'))attrs[attr.name]=attr.value;});
-    return {id:Number(window.state.detail.id),snapshot:{mat_html:clone.outerHTML,dialog_attrs:attrs,dialog_style:dialog.style.cssText,geometry:{image_width:ir.width,image_height:ir.height,mat_width:mr.width}}};
+    return {id:Number(window.__ourTimeApp.state.detail.id),snapshot:{mat_html:clone.outerHTML,dialog_attrs:attrs,dialog_style:dialog.style.cssText,geometry:{image_width:ir.width,image_height:ir.height,mat_width:mr.width}}};
   }
   async function run(){
     const button=exportButton();let frozen;try{frozen=freeze();}catch(error){window.viewerMessage?.(error.message);return;}
