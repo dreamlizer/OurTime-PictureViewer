@@ -167,6 +167,7 @@
   function install(){
     const mat=document.querySelector('#photo-mat');
     if(!mat||exportButton())return;
+    const actions=document.querySelector('.viewer-tool-actions');
     const control=document.createElement('div');
     control.className='photo-export-control';
     const picker=document.createElement('select');
@@ -177,12 +178,13 @@
     const button=document.createElement('button');
     button.type='button';
     button.id='export-annotated-photo';
-    button.title='导出当前带标签照片';
     button.setAttribute('aria-label','导出当前带标签照片');
     button.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3m0 0-4 4m4-4 4 4"/><path d="M5 11v8h14v-8"/></svg>';
     button.addEventListener('click',()=>run());
-    control.append(button,picker);
+    control.append(button);
     mat.append(control);
+    if(actions)actions.append(picker);
+    else picker.hidden=true;
   }
   install();
   window.__ourTimeAnnotatedExport={ready,freeze,run};

@@ -17,6 +17,8 @@ class ExportAndMapUiContractTests(unittest.TestCase):
         self.assertIn("photo-export-control", source)
         self.assertIn("X-OurTime-Export-Renderer", source)
         self.assertIn("mat.append(control)", source)
+        self.assertIn("actions.append(picker)", source)
+        self.assertNotIn("control.append(button,picker)", source)
         self.assertIn("<svg", source)
         self.assertIn("JPEG", source)
         self.assertIn("PNG", source)

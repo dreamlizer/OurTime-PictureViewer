@@ -228,30 +228,6 @@
   outline-offset:3px;
 }
 #detail-dialog #export-annotated-photo:disabled{opacity:.55;cursor:wait}
-#detail-dialog #export-annotated-format{
-  width:0;
-  min-width:0;
-  height:28px;
-  padding:0;
-  border:1px solid transparent;
-  border-radius:14px;
-  background:rgba(19,24,21,.34);
-  color:#fffaf0;
-  font:500 10px/1 var(--sans);
-  opacity:0;
-  pointer-events:none;
-  transform:translateX(-5px);
-  transition:width 150ms ease,padding 150ms ease,border-color 150ms ease,opacity 120ms ease,transform 150ms ease;
-}
-#detail-dialog .photo-export-control:hover #export-annotated-format,
-#detail-dialog .photo-export-control:focus-within #export-annotated-format{
-  width:58px;
-  padding:0 7px;
-  border-color:rgba(255,255,255,.18);
-  opacity:1;
-  pointer-events:auto;
-  transform:none;
-}
 #detail-dialog #photo-place-map{
   position:absolute;
   z-index:11;
