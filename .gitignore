@@ -5,6 +5,7 @@ __pycache__/
 *.pyc
 config.local.json
 config.json
+dist/
 validation/work/
 validation/reports/
 validation/*backup*/
