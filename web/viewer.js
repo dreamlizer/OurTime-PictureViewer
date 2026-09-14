@@ -278,6 +278,7 @@ function buildFaceStylePopover(){
       <div class="face-style-group-title">布局</div>
       <label class="face-style-field"><span>标签位置</span><select id="face-label-position"><option value="auto">自动</option><option value="left">优先左侧</option><option value="right">优先右侧</option><option value="top">优先上方</option><option value="bottom">优先下方</option></select></label>
       <label class="face-style-field"><span>待命名标记</span><select id="face-unnamed-marker"><option value="plus">默认加号</option><option value="pulse">呼吸绿点</option><option value="ring">静态绿环</option></select></label>
+      <button type="button" id="face-label-reset-photo" class="face-label-reset-photo">恢复本张自动排列</button>
     </div>
     <div class="face-style-group">
       <div class="face-style-group-title">外观</div>
@@ -302,6 +303,7 @@ function buildFaceStylePopover(){
     updateFaceStyle({fontFamily:e.target.value});
   });
   bind('#face-label-position','change',e=>{viewer.faceLabelPosition=FACE_LABEL_POSITIONS.has(e.target.value)?e.target.value:'auto';saveViewerPrefs();if(state.detail)renderFaceNames(state.detail);});
+  bind('#face-label-reset-photo','click',()=>resetCurrentPhotoFaceLabels());
   bind('#face-unnamed-marker','change',e=>{
     viewer.faceUnnamedMarker=FACE_UNNAMED_MARKERS.has(e.target.value)?e.target.value:'plus';
     applyFaceStyle();
@@ -1379,6 +1381,116 @@ function faceLabelText(face, alias){
   if(face.name) return alias&&face.alias?(face.name+' / '+face.alias):face.name;
   return '+';
 }
+const faceLabelCommittedPositions=new Map();
+const faceLabelOptimisticPositions=new Map();
+const faceLabelWriteRevisions=new Map();
+const faceLabelPendingCounts=new Map();
+const faceLabelPendingWrites=new Set();
+let faceLabelDrag=null;
+let suppressFaceLabelEditUntil=0;
+function storedFaceLabelPosition(face){
+  const x=face?.label_x_ratio,y=face?.label_y_ratio;
+  if(x===null||x===undefined||y===null||y===undefined)return null;
+  const nx=Number(x),ny=Number(y);
+  return Number.isFinite(nx)&&Number.isFinite(ny)&&nx>=0&&nx<=1&&ny>=0&&ny<=1
+    ?{x:nx,y:ny}:null;
+}
+function effectiveFaceLabelPosition(face){
+  return faceLabelOptimisticPositions.get(Number(face?.id))||storedFaceLabelPosition(face);
+}
+function syncFaceLabelResetButton(){
+  const button=$('#face-label-reset-photo');
+  if(!button)return;
+  const hasManual=(state.detail?.faces||[]).some(face=>Boolean(effectiveFaceLabelPosition(face)));
+  button.disabled=!hasManual;
+  button.title=hasManual?'清除这张照片保存的标签位置':'本张照片正在自动排列';
+}
+function applyFaceLabelPositionToState(faceId,position){
+  const face=(state.detail?.faces||[]).find(item=>Number(item.id)===Number(faceId));
+  if(!face)return;
+  face.label_x_ratio=position?position.x:null;
+  face.label_y_ratio=position?position.y:null;
+}
+async function persistFaceLabelPosition(faceId,position){
+  const photoId=Number(state.detail?.id),fid=Number(faceId);
+  if(!photoId||!fid)return;
+  const revision=(faceLabelWriteRevisions.get(fid)||0)+1;
+  faceLabelWriteRevisions.set(fid,revision);
+  if(!faceLabelCommittedPositions.has(fid)){
+    const face=(state.detail?.faces||[]).find(item=>Number(item.id)===fid);
+    faceLabelCommittedPositions.set(fid,storedFaceLabelPosition(face));
+  }
+  faceLabelOptimisticPositions.set(fid,position);
+  applyFaceLabelPositionToState(fid,position);
+  faceLabelPendingCounts.set(fid,(faceLabelPendingCounts.get(fid)||0)+1);
+  syncFaceLabelResetButton();
+  const payload={x_ratio:position.x,y_ratio:position.y};
+  const write=viewerCaptureEntityWrite('faceLabel',fid,payload,revision);
+  let pending;
+  pending=window.__ourTimeApp.queueEntityWrite(
+    'face-label',fid,
+    ()=>window.__ourTimeApp.operationRequest(
+      `/api/photos/${photoId}/faces/${fid}/label-position`,
+      {method:'PUT',body:JSON.stringify({...write.payload,operation_id:write.operationId})},
+      write.operationId
+    )
+  ).then(receipt=>{
+    const saved={x:Number(receipt.x_ratio),y:Number(receipt.y_ratio)};
+    faceLabelCommittedPositions.set(fid,saved);
+    if(faceLabelWriteRevisions.get(fid)===revision){
+      faceLabelOptimisticPositions.set(fid,saved);
+      applyFaceLabelPositionToState(fid,saved);
+    }
+  }).catch(error=>{
+    if(faceLabelWriteRevisions.get(fid)===revision){
+      const fallback=faceLabelCommittedPositions.get(fid)||null;
+      if(fallback)faceLabelOptimisticPositions.set(fid,fallback);
+      else faceLabelOptimisticPositions.delete(fid);
+      applyFaceLabelPositionToState(fid,fallback);
+      if(Number(state.detail?.id)===photoId)renderFaceNames(state.detail);
+      toast('标签位置未保存，已恢复原位',true);
+    }
+  }).finally(()=>{
+    const remaining=Math.max(0,(faceLabelPendingCounts.get(fid)||1)-1);
+    if(remaining)faceLabelPendingCounts.set(fid,remaining);
+    else{
+      faceLabelPendingCounts.delete(fid);
+      if(faceLabelWriteRevisions.get(fid)===revision){
+        faceLabelOptimisticPositions.delete(fid);
+      }
+    }
+    faceLabelPendingWrites.delete(pending);
+    syncFaceLabelResetButton();
+  });
+  faceLabelPendingWrites.add(pending);
+}
+async function resetCurrentPhotoFaceLabels(){
+  const photoId=Number(state.detail?.id);
+  if(!photoId)return;
+  const button=$('#face-label-reset-photo');
+  if(button)button.disabled=true;
+  await Promise.allSettled([...faceLabelPendingWrites]);
+  try{
+    await window.__ourTimeApp.operationRequest(
+      `/api/photos/${photoId}/face-labels/reset`,{method:'POST'}
+    );
+    if(Number(state.detail?.id)===photoId){
+      for(const face of state.detail?.faces||[]){
+        const fid=Number(face.id);
+        faceLabelCommittedPositions.set(fid,null);
+        faceLabelOptimisticPositions.delete(fid);
+        face.label_x_ratio=null;
+        face.label_y_ratio=null;
+      }
+      renderFaceNames(state.detail);
+      toast('已恢复本张自动排列');
+    }
+  }catch(error){
+    toast(error.message||'恢复自动排列失败',true);
+  }finally{
+    syncFaceLabelResetButton();
+  }
+}
 function rectOverlapArea(a,b){
  const w=Math.max(0,Math.min(a.x+a.w,b.x+b.w)-Math.max(a.x,b.x));
  const h=Math.max(0,Math.min(a.y+a.h,b.y+b.h)-Math.max(a.y,b.y));
@@ -1460,7 +1572,7 @@ function layoutFaceNameButtons(layer, faces, alias){
   });
   items.sort((a,b)=>a.cy-b.cy||a.cx-b.cx);
   layer.innerHTML=items.map(it=>{
-    const hint=it.named?`${it.label}；点击管理这张脸`:(it.passerby?'路人；点击可重新命名':'命名人物');
+    const hint=it.named?`${it.label}；拖动调整位置，双击管理这张脸`:(it.passerby?'路人；拖动调整位置，双击可重新命名':'拖动调整位置，双击命名人物');
     return `<button type="button" class="face-name${it.named?'':' unnamed'}${it.passerby?' passerby':''}" data-face-id="${Number(it.face.id)||''}" data-face-person="${it.face.person_id}" title="${esc(hint)}" aria-label="${esc(hint)}">${esc(it.label)}</button>`;
   }).join('')+'<svg class="face-hover-guide" aria-hidden="true"><path></path><circle r="2.6"></circle></svg><span class="face-hover-box" aria-hidden="true"></span>';
   const buttons=[...layer.querySelectorAll('.face-name')];
@@ -1470,12 +1582,31 @@ function layoutFaceNameButtons(layer, faces, alias){
   const sides=faceLabelSides(items,ox,imgW,vertical);
   const preferredSide=sides[0];
   const faceRects=items.map(item=>({x:item.fx,y:item.fy,w:item.fw,h:item.fh}));
-  buttons.forEach((btn,i)=>{
+  const geometries=buttons.map((btn,i)=>{
     const it=items[i];
     it.btn=btn;
     if(it.named)applyFaceLabelProfile(btn,it.label);
     const w=Math.max(18, btn.offsetWidth);
     const h=Math.max(18, btn.offsetHeight);
+    const fid=Number(it.face.id);
+    if(!faceLabelPendingCounts.has(fid)){
+      faceLabelCommittedPositions.set(fid,storedFaceLabelPosition(it.face));
+    }
+    return {btn,it,w,h,index:i,manual:effectiveFaceLabelPosition(it.face)};
+  });
+  geometries.filter(item=>item.manual).forEach(item=>{
+    const {btn,w,h,manual}=item;
+    const chosen=clampFaceLabel({
+      x:ox+manual.x*imgW-w/2,
+      y:oy+manual.y*imgH-h/2,
+      w,h,btn,manual:true
+    },layerW,layerH,4);
+    btn.dataset.labelManual='true';
+    btn.classList.add('manual');
+    placed.push(chosen);
+  });
+  geometries.filter(item=>!item.manual).forEach(item=>{
+    const {btn,it,w,h,index:i}=item;
     const offsetsBySide=new Map(sides.map(side=>[side,faceLabelOffsets(side,w,h,layerW,layerH)]));
     const candidates=new Map();
     for(const side of sides){
@@ -1514,9 +1645,10 @@ function layoutFaceNameButtons(layer, faces, alias){
       }
     }
     chosen=chosen||clampFaceLabel(faceLabelCandidate(it,sides[0],vertical,w,h,0,gap),layerW,layerH,4);
+    chosen.btn=btn;
     placed.push(chosen);
     btn.classList.add(chosen.side);
-    if(!it.named)btn.setAttribute('title',it.passerby?'路人；点击可重新命名':'命名人物');
+    if(!it.named)btn.setAttribute('title',it.passerby?'路人；拖动调整位置，双击可重新命名':'拖动调整位置，双击命名人物');
   });
   placed.forEach((rect,index)=>{
     const maxRatio=placed.reduce((max,other,otherIndex)=>otherIndex===index?max:Math.max(max,rectOverlapRatio(rect,other)),0);
@@ -1524,6 +1656,7 @@ function layoutFaceNameButtons(layer, faces, alias){
     rect.btn.style.left=Math.round(rect.x)+'px';
     rect.btn.style.top=Math.round(rect.y)+'px';
   });
+  syncFaceLabelResetButton();
 }
 function faceForLabel(button){
   const faceId=Number(button?.dataset.faceId);
@@ -1566,6 +1699,7 @@ function hideFaceGuide(force=false){
 }
 function renderFaceNames(photo){
  const layer=$('#face-name-layer'); if(!layer)return;
+ if(faceLabelDrag)return;
  const show=viewer.faceNames!==false;
  const alias=viewer.faceAlias===true;
   const vertical=faceLabelsVertical();
@@ -1801,7 +1935,61 @@ $('#zoom-fit').addEventListener('click',()=>{viewer.fit=true;updateZoom(true);})
 $('#zoom-actual').addEventListener('click',()=>zoomTo(1));
 $('#detail-img').addEventListener('load',()=>{updateSignaturePalette();updateZoom(true);renderFaceNames(state.detail);});
 const faceLayer=$('#face-name-layer');
-faceLayer&&faceLayer.addEventListener('pointerdown',e=>{if(e.target.closest('[data-face-person]')){e.stopPropagation();drag=null;}});
+function finishFaceLabelDrag(event,cancelled=false){
+ const current=faceLabelDrag;
+ if(!current||event.pointerId!==current.pointerId)return;
+ faceLabelDrag=null;
+ current.button.classList.remove('is-dragging');
+ try{current.button.releasePointerCapture(event.pointerId);}catch(error){}
+ if(cancelled||!current.moved){
+   if(cancelled){
+     current.button.style.left=current.startLeft+'px';
+     current.button.style.top=current.startTop+'px';
+   }
+   return;
+ }
+ suppressFaceLabelEditUntil=performance.now()+550;
+ const image=$('#detail-img'),layer=$('#face-name-layer');
+ const imageRect=image.getBoundingClientRect(),layerRect=layer.getBoundingClientRect();
+ const left=parseFloat(current.button.style.left)||0;
+ const top=parseFloat(current.button.style.top)||0;
+ const x=Math.max(0,Math.min(1,(left+current.button.offsetWidth/2-(imageRect.left-layerRect.left))/imageRect.width));
+ const y=Math.max(0,Math.min(1,(top+current.button.offsetHeight/2-(imageRect.top-layerRect.top))/imageRect.height));
+ current.button.dataset.labelManual='true';
+ current.button.classList.add('manual');
+ void persistFaceLabelPosition(current.faceId,{x,y});
+}
+faceLayer&&faceLayer.addEventListener('pointerdown',e=>{
+ const button=e.target.closest('[data-face-person]');
+ if(!button||e.button!==0)return;
+ e.stopPropagation();
+ drag=null;
+ const startLeft=parseFloat(button.style.left)||0,startTop=parseFloat(button.style.top)||0;
+ faceLabelDrag={
+   button,
+   faceId:Number(button.dataset.faceId),
+   pointerId:e.pointerId,
+   startX:e.clientX,startY:e.clientY,startLeft,startTop,moved:false
+ };
+ button.setPointerCapture(e.pointerId);
+});
+faceLayer&&faceLayer.addEventListener('pointermove',e=>{
+ const current=faceLabelDrag;
+ if(!current||e.pointerId!==current.pointerId)return;
+ const dx=e.clientX-current.startX,dy=e.clientY-current.startY;
+ if(!current.moved&&Math.hypot(dx,dy)<5)return;
+ current.moved=true;
+ e.preventDefault();
+ current.button.classList.add('is-dragging');
+ const pad=4;
+ const maxLeft=Math.max(pad,faceLayer.clientWidth-current.button.offsetWidth-pad);
+ const maxTop=Math.max(pad,faceLayer.clientHeight-current.button.offsetHeight-pad);
+ current.button.style.left=Math.min(Math.max(pad,current.startLeft+dx),maxLeft)+'px';
+ current.button.style.top=Math.min(Math.max(pad,current.startTop+dy),maxTop)+'px';
+ showFaceGuide(current.button);
+});
+faceLayer&&faceLayer.addEventListener('pointerup',e=>finishFaceLabelDrag(e));
+faceLayer&&faceLayer.addEventListener('pointercancel',e=>finishFaceLabelDrag(e,true));
 faceLayer&&faceLayer.addEventListener('pointerover',e=>{const button=e.target.closest('.face-name');if(button)showFaceGuide(button);});
 faceLayer&&faceLayer.addEventListener('pointerout',e=>{const button=e.target.closest('.face-name');if(button&&!button.contains(e.relatedTarget))hideFaceGuide();});
 faceLayer&&faceLayer.addEventListener('focusin',e=>{const button=e.target.closest('.face-name');if(button)showFaceGuide(button);});
@@ -1812,6 +2000,19 @@ faceLayer&&faceLayer.addEventListener('click',e=>{
  e.preventDefault();
  e.stopPropagation();
  outsidePhotoDown=false;
+ if(e.detail===0&&performance.now()>=suppressFaceLabelEditUntil){
+   const face=faceForLabel(b);
+   if(faceHasUsableName(face))openFaceActionPopover(b,face);
+   else if(typeof openQuickName==='function')openQuickName(Number(b.dataset.facePerson));
+ }else showFaceGuide(b);
+});
+faceLayer&&faceLayer.addEventListener('dblclick',e=>{
+ const b=e.target.closest('[data-face-person]');
+ if(!b)return;
+ e.preventDefault();
+ e.stopPropagation();
+ outsidePhotoDown=false;
+ if(performance.now()<suppressFaceLabelEditUntil)return;
  const face=faceForLabel(b);
  if(faceHasUsableName(face))openFaceActionPopover(b,face);
  else if(typeof openQuickName==='function')openQuickName(Number(b.dataset.facePerson));

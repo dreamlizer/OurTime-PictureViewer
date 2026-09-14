@@ -224,7 +224,7 @@ def main() -> int:
             page.wait_for_function("document.querySelector('#detail-img').naturalWidth>0")
             page.wait_for_selector('#face-name-layer [data-face-id="101"]')
 
-            page.locator('[data-face-id="201"]').click()
+            page.locator('#face-name-layer [data-face-id="201"]').dblclick()
             page.wait_for_selector("#quick-name-dialog[open]")
             check(page.locator('#quick-name-dialog [data-close="quick-name-dialog"]').count() == 1, "快速命名只保留右上角关闭入口")
             check(page.locator("#quick-name-confirm").inner_text() == "确认姓名", "姓名输入区下面使用含义明确的确认姓名按钮")
@@ -259,7 +259,7 @@ def main() -> int:
             page.locator('#quick-name-dialog [data-close="quick-name-dialog"]').click()
             page.wait_for_selector("#quick-name-dialog", state="hidden")
 
-            page.locator('[data-face-id="401"]').click()
+            page.locator('#face-name-layer [data-face-id="401"]').dblclick()
             page.wait_for_selector("#quick-name-dialog[open]")
             page.wait_for_function("!document.querySelector('#quick-merge-target').disabled")
             passerby_targets = page.locator("#quick-merge-target option").evaluate_all(
@@ -295,8 +295,8 @@ def main() -> int:
             check(bool(page.locator(".face-hover-guide path").get_attribute("d")), "人物标签与脸框之间显示引导线")
             page.screenshot(path=str(RUN / "face-hover-guide.png"), full_page=False)
 
-            named.click()
-            check(page.locator("#face-action-popover").is_visible(), "点击已命名标签会打开单张纠错卡")
+            named.dblclick()
+            check(page.locator("#face-action-popover").is_visible(), "双击已命名标签会打开单张纠错卡")
             first_action = page.locator("#face-action-popover > button").first
             check(first_action.get_attribute("id") == "face-action-photos" and first_action.inner_text() == "查看此人照片", "查看此人照片作为首个正向操作")
             check(page.locator("#face-action-edit-name").is_visible(), "加粗姓名旁显示轻量修改铅笔")
@@ -308,7 +308,7 @@ def main() -> int:
             renamed = req("/api/people/1")
             check(renamed["name"] == "郑婷新" and renamed["alias"] == "", "快捷修改只更新正式姓名，不改别称")
 
-            page.locator('.face-name[data-face-id="101"]').click()
+            page.locator('.face-name[data-face-id="101"]').dblclick()
             page.wait_for_selector("#face-action-popover:not([hidden])")
             page.screenshot(path=str(RUN / "face-action-popover.png"), full_page=False)
             page.click("#face-action-photos")
@@ -356,7 +356,7 @@ def main() -> int:
             page.locator('#photo-grid [data-photo="1"]').click()
             page.wait_for_selector("#detail-dialog[open]")
             page.wait_for_selector('#face-name-layer [data-face-id="101"]')
-            page.locator('.face-name[data-face-id="101"]').click()
+            page.locator('.face-name[data-face-id="101"]').dblclick()
             page.wait_for_selector("#face-action-popover:not([hidden])")
             page.click("#face-action-split")
             page.wait_for_function("document.querySelector('[data-face-id=\"101\"]').classList.contains('unnamed')")

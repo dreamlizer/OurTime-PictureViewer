@@ -28,6 +28,7 @@ a.created_at, a.excluded, a.exclude_reason, a.favorite, a.object_state, a.object
 
 B01_SCHEMA_MIGRATION = "b01_visibility_and_face_index_v1"
 M1_SCHEMA_MIGRATION = "m1_operation_safety_v1"
+FACE_LABEL_LAYOUT_MIGRATION = "face_label_layout_v1"
 
 
 def now():
@@ -193,6 +194,16 @@ def init_schema(conn):
             updated_at TEXT NOT NULL,
             PRIMARY KEY(operation_id,item_kind,item_id)
         );
+        CREATE TABLE IF NOT EXISTS face_label_overrides (
+            face_id INTEGER PRIMARY KEY REFERENCES faces(id) ON DELETE CASCADE,
+            asset_id INTEGER NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+            x_ratio REAL NOT NULL CHECK(x_ratio>=0 AND x_ratio<=1),
+            y_ratio REAL NOT NULL CHECK(y_ratio>=0 AND y_ratio<=1),
+            layout_version INTEGER NOT NULL DEFAULT 1,
+            updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS face_label_overrides_asset
+            ON face_label_overrides(asset_id);
     ''')
     conn.executescript('''
         CREATE TRIGGER IF NOT EXISTS face_index_faces_insert
@@ -236,6 +247,10 @@ def init_schema(conn):
     conn.execute(
         "INSERT OR IGNORE INTO schema_migrations(name,applied_at) VALUES (?,?)",
         (M1_SCHEMA_MIGRATION, now()),
+    )
+    conn.execute(
+        "INSERT OR IGNORE INTO schema_migrations(name,applied_at) VALUES (?,?)",
+        (FACE_LABEL_LAYOUT_MIGRATION, now()),
     )
     conn.execute('CREATE INDEX IF NOT EXISTS object_tags_label ON object_tags(label, score DESC)')
     existing_assets = {r[1] for r in conn.execute('PRAGMA table_info(assets)')}

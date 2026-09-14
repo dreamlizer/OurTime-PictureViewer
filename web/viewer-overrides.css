@@ -406,6 +406,10 @@
 }
 #detail-dialog .face-name{
   z-index:3;
+  cursor:grab;
+  touch-action:none;
+  user-select:none;
+  -webkit-user-select:none;
   padding:var(--face-padding-y) var(--face-padding-x);
   border-radius:var(--face-radius);
   background:var(--face-bg-rgba);
@@ -489,6 +493,22 @@
     box-shadow .14s ease;
   background-image:none;
 }
+#detail-dialog .face-name.is-dragging{
+  cursor:grabbing;
+  z-index:5;
+  transition:none;
+}
+#detail-dialog .face-label-reset-photo{
+  width:100%;
+  margin-top:8px;
+  padding:8px 10px;
+  border:1px solid #d9dfd8;
+  border-radius:9px;
+  background:#fff;
+  color:#587060;
+  font-size:11px;
+}
+#detail-dialog .face-label-reset-photo:hover:not(:disabled){background:#f1f5ef}
 
 /* Classic: keep the earliest label treatment as the default. */
 #detail-dialog[data-face-theme="classic"] .face-name:not(.unnamed){

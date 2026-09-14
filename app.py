@@ -2315,7 +2315,15 @@ def photo_detail(aid:int):
         if not row: raise HTTPException(404,'照片不存在')
         result=asset_dict(row);result['metadata']=json.loads(row['metadata'])
         result['files']=[dict(x) for x in c.execute('SELECT * FROM files WHERE asset_id=? ORDER BY exists_now DESC,id',(aid,))]
-        result['faces']=[dict(x) for x in c.execute('SELECT f.id,f.person_id,f.bbox,p.name,p.alias,p.confirmed,p.ignored FROM faces f JOIN people p ON p.id=f.person_id WHERE asset_id=?',(aid,))]
+        result['faces']=[dict(x) for x in c.execute(
+            '''SELECT f.id,f.person_id,f.bbox,p.name,p.alias,p.confirmed,p.ignored,
+                      o.x_ratio label_x_ratio,o.y_ratio label_y_ratio
+               FROM faces f
+               JOIN people p ON p.id=f.person_id
+               LEFT JOIN face_label_overrides o ON o.face_id=f.id
+               WHERE f.asset_id=?''',
+            (aid,),
+        )]
         result['objects']=[dict(x) for x in c.execute('SELECT label,score FROM object_tags WHERE asset_id=? ORDER BY score DESC',(aid,))]
         result['history']=[dict(x) for x in c.execute('SELECT * FROM edits WHERE target=? ORDER BY id DESC LIMIT 20',(f'asset:{aid}',))]
         result['in_library']=bool(c.execute('SELECT 1 FROM assets a WHERE id=? AND '+ACTIVE_ASSET,(aid,)).fetchone())
@@ -2323,6 +2331,114 @@ def photo_detail(aid:int):
 
 class FavoriteRequest(BaseModel):
     favorite:bool=True
+
+
+class FaceLabelPositionRequest(BaseModel):
+    x_ratio:float=Field(ge=0,le=1)
+    y_ratio:float=Field(ge=0,le=1)
+    operation_id:str|None=None
+
+
+@app.put('/api/photos/{aid}/faces/{fid}/label-position')
+def set_face_label_position(aid:int,fid:int,body:FaceLabelPositionRequest,request:Request):
+    if aid<=0 or fid<=0:
+        raise ApiProblem(422,'照片和人脸编号必须为正整数','invalid_request')
+    operation_id=operation_id_from(body,request)
+    with operation_lock(operation_id):
+        with db() as c:
+            payload={
+                'asset_id':aid,
+                'face_id':fid,
+                'x_ratio':float(body.x_ratio),
+                'y_ratio':float(body.y_ratio),
+            }
+            operation_id,existing=prepare_operation(
+                c,'face_label_position',operation_id,payload,
+            )
+            if existing:return existing
+            face=c.execute(
+                'SELECT id FROM faces WHERE id=? AND asset_id=?',(fid,aid)
+            ).fetchone()
+            if not face:
+                raise ApiProblem(
+                    404,'这张照片中没有该人脸','not_found',
+                    operation_id=operation_id,
+                )
+            before=c.execute(
+                '''SELECT x_ratio,y_ratio FROM face_label_overrides
+                   WHERE face_id=?''',(fid,)
+            ).fetchone()
+            stamp=now()
+            c.execute(
+                '''INSERT INTO face_label_overrides(
+                     face_id,asset_id,x_ratio,y_ratio,layout_version,updated_at
+                   ) VALUES (?,?,?,?,1,?)
+                   ON CONFLICT(face_id) DO UPDATE SET
+                     asset_id=excluded.asset_id,
+                     x_ratio=excluded.x_ratio,
+                     y_ratio=excluded.y_ratio,
+                     layout_version=excluded.layout_version,
+                     updated_at=excluded.updated_at''',
+                (fid,aid,body.x_ratio,body.y_ratio,stamp),
+            )
+            after={'x_ratio':float(body.x_ratio),'y_ratio':float(body.y_ratio)}
+            c.execute(
+                '''INSERT INTO edits(created_at,target,before_json,after_json)
+                   VALUES (?,?,?,?)''',
+                (
+                    stamp,
+                    f'face:{fid}:label-position',
+                    json.dumps(dict(before),ensure_ascii=False) if before else None,
+                    json.dumps(after,ensure_ascii=False),
+                ),
+            )
+            return finish_operation(
+                c,operation_id,
+                {'asset_id':aid,'face_id':fid,**after},
+                status='committed',state_committed=True,
+            )
+
+
+@app.post('/api/photos/{aid}/face-labels/reset')
+def reset_face_label_positions(aid:int,request:Request):
+    if aid<=0:
+        raise ApiProblem(422,'照片编号必须为正整数','invalid_request')
+    operation_id=operation_id_from(None,request)
+    with operation_lock(operation_id):
+        with db() as c:
+            operation_id,existing=prepare_operation(
+                c,'face_label_positions_reset',operation_id,{'asset_id':aid},
+            )
+            if existing:return existing
+            asset=c.execute('SELECT id FROM assets WHERE id=?',(aid,)).fetchone()
+            if not asset:
+                raise ApiProblem(
+                    404,'照片不存在','not_found',operation_id=operation_id,
+                )
+            before=[
+                dict(row) for row in c.execute(
+                    '''SELECT face_id,x_ratio,y_ratio
+                       FROM face_label_overrides
+                       WHERE asset_id=? ORDER BY face_id''',
+                    (aid,),
+                )
+            ]
+            c.execute('DELETE FROM face_label_overrides WHERE asset_id=?',(aid,))
+            if before:
+                c.execute(
+                    '''INSERT INTO edits(created_at,target,before_json,after_json)
+                       VALUES (?,?,?,?)''',
+                    (
+                        now(),
+                        f'asset:{aid}:face-label-positions',
+                        json.dumps(before,ensure_ascii=False),
+                        json.dumps([],ensure_ascii=False),
+                    ),
+                )
+            return finish_operation(
+                c,operation_id,{'asset_id':aid,'cleared':len(before)},
+                status='committed',state_committed=True,
+            )
 
 @app.put('/api/photos/{aid}/favorite')
 def set_photo_favorite(aid:int, body:FavoriteRequest):
