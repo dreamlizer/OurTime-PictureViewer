@@ -1593,7 +1593,7 @@ function layoutFaceNameButtons(layer, faces, alias){
   });
   items.sort((a,b)=>a.cy-b.cy||a.cx-b.cx);
   layer.innerHTML=items.map(it=>{
-    const hint=it.named?`${it.label}；拖动调整位置，双击管理这张脸`:(it.passerby?'路人；拖动调整位置，双击可重新命名':'拖动调整位置，双击命名人物');
+    const hint=it.named?`${it.label}；拖动调整位置，双击管理这张脸`:(it.passerby?'路人；拖动调整位置，单击或双击可重新命名':'拖动调整位置，单击或双击命名人物');
     return `<button type="button" class="face-name${it.named?'':' unnamed'}${it.passerby?' passerby':''}" data-face-id="${Number(it.face.id)||''}" data-face-person="${it.face.person_id}" title="${esc(hint)}" aria-label="${esc(hint)}">${esc(it.label)}</button>`;
   }).join('')+'<svg class="face-hover-guide" aria-hidden="true"><path></path><circle r="2.6"></circle></svg><span class="face-hover-box" aria-hidden="true"></span>';
   const buttons=[...layer.querySelectorAll('.face-name')];
@@ -1669,7 +1669,7 @@ function layoutFaceNameButtons(layer, faces, alias){
     chosen.btn=btn;
     placed.push(chosen);
     btn.classList.add(chosen.side);
-    if(!it.named)btn.setAttribute('title',it.passerby?'路人；拖动调整位置，双击可重新命名':'拖动调整位置，双击命名人物');
+    if(!it.named)btn.setAttribute('title',it.passerby?'路人；拖动调整位置，单击或双击可重新命名':'拖动调整位置，单击或双击命名人物');
   });
   placed.forEach((rect,index)=>{
     const maxRatio=placed.reduce((max,other,otherIndex)=>otherIndex===index?max:Math.max(max,rectOverlapRatio(rect,other)),0);
@@ -1956,6 +1956,30 @@ $('#zoom-fit').addEventListener('click',()=>{viewer.fit=true;updateZoom(true);})
 $('#zoom-actual').addEventListener('click',()=>zoomTo(1));
 $('#detail-img').addEventListener('load',()=>{updateSignaturePalette();updateZoom(true);renderFaceNames(state.detail);});
 const faceLayer=$('#face-name-layer');
+let faceLabelEditTimer=null;
+function clearFaceLabelEditTimer(){
+ clearTimeout(faceLabelEditTimer);
+ faceLabelEditTimer=null;
+}
+function openFaceLabelEditor(button){
+ const face=faceForLabel(button);
+ if(faceHasUsableName(face))openFaceActionPopover(button,face);
+ else if(typeof openQuickName==='function')openQuickName(Number(button.dataset.facePerson));
+}
+function scheduleUnidentifiedFaceLabelEditor(button){
+ clearFaceLabelEditTimer();
+ const photoId=Number(state.detail?.id),faceId=Number(button.dataset.faceId);
+ faceLabelEditTimer=setTimeout(()=>{
+   faceLabelEditTimer=null;
+   if(
+     performance.now()<suppressFaceLabelEditUntil
+     ||Number(state.detail?.id)!==photoId
+     ||!$('#detail-dialog')?.open
+   )return;
+   const current=faceLayer?.querySelector(`[data-face-id="${faceId}"]`);
+   if(current&&!faceHasUsableName(faceForLabel(current)))openFaceLabelEditor(current);
+ },220);
+}
 function finishFaceLabelDrag(event,cancelled=false){
  const current=faceLabelDrag;
  if(!current||event.pointerId!==current.pointerId)return;
@@ -2021,11 +2045,11 @@ faceLayer&&faceLayer.addEventListener('click',e=>{
  e.preventDefault();
  e.stopPropagation();
  outsidePhotoDown=false;
- if(e.detail===0&&performance.now()>=suppressFaceLabelEditUntil){
-   const face=faceForLabel(b);
-   if(faceHasUsableName(face))openFaceActionPopover(b,face);
-   else if(typeof openQuickName==='function')openQuickName(Number(b.dataset.facePerson));
- }else showFaceGuide(b);
+ if(performance.now()<suppressFaceLabelEditUntil)return;
+ const face=faceForLabel(b);
+ if(e.detail===0)openFaceLabelEditor(b);
+ else if(faceHasUsableName(face))showFaceGuide(b);
+ else scheduleUnidentifiedFaceLabelEditor(b);
 });
 faceLayer&&faceLayer.addEventListener('dblclick',e=>{
  const b=e.target.closest('[data-face-person]');
@@ -2033,10 +2057,9 @@ faceLayer&&faceLayer.addEventListener('dblclick',e=>{
  e.preventDefault();
  e.stopPropagation();
  outsidePhotoDown=false;
+ clearFaceLabelEditTimer();
  if(performance.now()<suppressFaceLabelEditUntil)return;
- const face=faceForLabel(b);
- if(faceHasUsableName(face))openFaceActionPopover(b,face);
- else if(typeof openQuickName==='function')openQuickName(Number(b.dataset.facePerson));
+ openFaceLabelEditor(b);
 });
 $('#toggle-face-names').addEventListener('click',()=>{viewer.faceNames=!viewer.faceNames;saveViewerPrefs();renderFaceNames(state.detail);});
 $('#toggle-face-alias').addEventListener('click',()=>{viewer.faceAlias=!viewer.faceAlias;saveViewerPrefs();renderFaceNames(state.detail);});
@@ -2054,7 +2077,7 @@ $('#viewer-info').addEventListener('click',toggleInfo);
 $('#close-info').addEventListener('click',toggleInfo);
 $('#viewer-play').addEventListener('click',()=>{if(viewer.playing){stopSlides();syncViewerTools();return;}const current=Number.isFinite(viewer.absolute)?viewer.absolute:(viewer.offset||0)+(viewer.target||0);if(current>=(viewer.total||viewer.ids.length)-1){viewerMessage('已经是最后一张，请先返回前面的照片。');return;}viewer.playing=true;syncViewerTools();scheduleSlide();});
 $('#slide-delay').addEventListener('change',()=>{saveViewerPrefs();if(viewer.timer)scheduleSlide();});
-$('#detail-dialog').addEventListener('close',()=>{viewer.exit={photoId:Number(state.detail?.id)||0,absolute:Number(viewer.absolute),context:viewer.context?{...viewer.context}:null,fallbackScroll:viewer.returnScroll,openedPhotoId:Number(viewer.openedPhotoId)||0,openedAbsolute:Number(viewer.openedAbsolute),openedContext:viewer.openedContext?{...viewer.openedContext}:null,waterfallGeneration:viewer.openedWaterfallGeneration};clearTimeout(viewer.closingTimer);viewer.closingTimer=null;$('#detail-dialog').classList.remove('viewer-closing');stopSlides();toggleFaceStylePopover(false);togglePhotoPeoplePopover(false);closeFaceActionPopover();viewer.lastPasserbyBatch=null;viewer.generation++;viewer.presentation++;viewer.queued=null;viewer.goal=null;viewer.sequencePromise=null;renderPhoto.ticket++;if(viewer.loaderCancel)viewer.loaderCancel();setViewerLoading(false);if(document.fullscreenElement)document.exitFullscreen().catch(()=>{});});
+$('#detail-dialog').addEventListener('close',()=>{clearFaceLabelEditTimer();viewer.exit={photoId:Number(state.detail?.id)||0,absolute:Number(viewer.absolute),context:viewer.context?{...viewer.context}:null,fallbackScroll:viewer.returnScroll,openedPhotoId:Number(viewer.openedPhotoId)||0,openedAbsolute:Number(viewer.openedAbsolute),openedContext:viewer.openedContext?{...viewer.openedContext}:null,waterfallGeneration:viewer.openedWaterfallGeneration};clearTimeout(viewer.closingTimer);viewer.closingTimer=null;$('#detail-dialog').classList.remove('viewer-closing');stopSlides();toggleFaceStylePopover(false);togglePhotoPeoplePopover(false);closeFaceActionPopover();viewer.lastPasserbyBatch=null;viewer.generation++;viewer.presentation++;viewer.queued=null;viewer.goal=null;viewer.sequencePromise=null;renderPhoto.ticket++;if(viewer.loaderCancel)viewer.loaderCancel();setViewerLoading(false);if(document.fullscreenElement)document.exitFullscreen().catch(()=>{});});
 $('#detail-dialog').addEventListener('cancel',e=>{e.preventDefault();closePhotoViewer();});
 document.addEventListener('visibilitychange',()=>{if(document.hidden)stopSlides();});
 document.addEventListener('keydown',action(async e=>{

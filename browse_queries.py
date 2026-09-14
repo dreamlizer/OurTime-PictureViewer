@@ -129,13 +129,13 @@ def people_base_where(ignored, needle=None, named=0, grouped=True):
     if named:
         conditions.append('p.confirmed=1')
     if needle:
-        like = '%' + needle + '%'
+        match = "PERSON_SEARCH_MATCH(coalesce(p.name,''),coalesce(p.alias,''),?)=1"
         if named:
-            conditions.append("(coalesce(p.name,'') LIKE ? OR coalesce(p.alias,'') LIKE ?)")
-            values.extend([like, like])
+            conditions.append(match)
+            values.append(needle)
         else:
-            conditions.append("(coalesce(p.name,'') LIKE ? OR coalesce(p.alias,'') LIKE ? OR CAST(p.id AS TEXT) LIKE ?)")
-            values.extend([like, like, like])
+            conditions.append("(" + match + " OR CAST(p.id AS TEXT) LIKE ?)")
+            values.extend([needle, '%' + needle + '%'])
     return conditions, values
 
 

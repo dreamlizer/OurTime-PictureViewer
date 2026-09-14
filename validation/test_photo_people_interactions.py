@@ -224,8 +224,15 @@ def main() -> int:
             page.wait_for_function("document.querySelector('#detail-img').naturalWidth>0")
             page.wait_for_selector('#face-name-layer [data-face-id="101"]')
 
+            page.locator('#face-name-layer [data-face-id="201"]').click()
+            page.wait_for_selector("#quick-name-dialog[open]")
+            check(page.locator("#quick-name-dialog").get_attribute("open") is not None, "单击未命名标签可进入人物编辑")
+            page.locator('#quick-name-dialog [data-close="quick-name-dialog"]').click()
+            page.wait_for_selector("#quick-name-dialog", state="hidden")
+
             page.locator('#face-name-layer [data-face-id="201"]').dblclick()
             page.wait_for_selector("#quick-name-dialog[open]")
+            check(page.locator("#quick-name-dialog").get_attribute("open") is not None, "双击未命名标签也只进入一次人物编辑")
             check(page.locator('#quick-name-dialog [data-close="quick-name-dialog"]').count() == 1, "快速命名只保留右上角关闭入口")
             check(page.locator("#quick-name-confirm").inner_text() == "确认姓名", "姓名输入区下面使用含义明确的确认姓名按钮")
             check(page.locator("#quick-merge-title").inner_text() == "合并到已有姓名" and page.locator("#quick-merge-panel").is_visible(), "命名与合并使用同级标题，合并区默认直接展开")
@@ -259,8 +266,15 @@ def main() -> int:
             page.locator('#quick-name-dialog [data-close="quick-name-dialog"]').click()
             page.wait_for_selector("#quick-name-dialog", state="hidden")
 
+            page.locator('#face-name-layer [data-face-id="401"]').click()
+            page.wait_for_selector("#quick-name-dialog[open]")
+            check(page.locator("#quick-name-dialog").get_attribute("open") is not None, "单击路人标签可重新命名")
+            page.locator('#quick-name-dialog [data-close="quick-name-dialog"]').click()
+            page.wait_for_selector("#quick-name-dialog", state="hidden")
+
             page.locator('#face-name-layer [data-face-id="401"]').dblclick()
             page.wait_for_selector("#quick-name-dialog[open]")
+            check(page.locator("#quick-name-dialog").get_attribute("open") is not None, "双击路人标签也只进入一次人物编辑")
             page.wait_for_function("!document.querySelector('#quick-merge-target').disabled")
             passerby_targets = page.locator("#quick-merge-target option").evaluate_all(
                 "options => options.map(option => option.value).filter(Boolean)"

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import unicodedata
 from functools import lru_cache
 from datetime import datetime
 from pathlib import Path
@@ -36,15 +37,49 @@ def now():
 
 
 @lru_cache(maxsize=8192)
-def person_pinyin_key(value):
-    text = str(value or '').strip()
+def person_search_forms(value):
+    text = unicodedata.normalize('NFKC', str(value or '')).strip()
     if not text:
-        return ''
+        return ('', '', '')
     surname = next((part for part in ('万俟', '尉迟', '长孙') if text.startswith(part)), text[:1])
     prefix = POLYPHONIC_SURNAMES.get(surname)
     remainder = text[len(surname):] if prefix else text
-    spelling = ''.join(lazy_pinyin(remainder, errors=lambda chars: list(chars)))
-    return ((prefix or '') + spelling + '\0' + text).casefold()
+    syllables = [
+        normalize_person_search(part)
+        for part in lazy_pinyin(remainder, errors=lambda chars: list(chars))
+    ]
+    syllables = [part for part in syllables if part]
+    full = normalize_person_search((prefix or '') + ''.join(syllables))
+    if prefix:
+        prefix_initials = {
+            '万俟': 'mq', '尉迟': 'yc', '长孙': 'zs',
+        }.get(surname, prefix[:1])
+    else:
+        prefix_initials = ''
+    initials = normalize_person_search(prefix_initials + ''.join(part[:1] for part in syllables))
+    return (normalize_person_search(text), full, initials)
+
+
+def normalize_person_search(value):
+    text = unicodedata.normalize('NFKC', str(value or '')).casefold()
+    text = text.replace('u:', 'v').replace('ü', 'v')
+    return ''.join(character for character in text if character.isalnum())
+
+
+@lru_cache(maxsize=8192)
+def person_pinyin_key(value):
+    text = str(value or '').strip()
+    return person_search_forms(text)[1] + '\0' + text.casefold() if text else ''
+
+
+def person_search_match(name, alias, query):
+    needle = normalize_person_search(query)
+    if not needle:
+        return 1
+    for value in (name, alias):
+        if any(needle in form for form in person_search_forms(value) if form):
+            return 1
+    return 0
 
 
 def register_collations(conn):
@@ -53,6 +88,7 @@ def register_collations(conn):
         b = person_pinyin_key(right)
         return (a > b) - (a < b)
     conn.create_collation('PERSON_PINYIN', compare)
+    conn.create_function('PERSON_SEARCH_MATCH', 3, person_search_match, deterministic=True)
 
 
 def init_schema(conn):
