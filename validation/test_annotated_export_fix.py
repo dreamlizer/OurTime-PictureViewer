@@ -63,17 +63,26 @@ class AnnotatedExportFixTests(unittest.TestCase):
                 draw.line((0, y, 3200, y), fill=(80, y % 255, 110), width=1)
             picture.save(source, quality=96)
             before = hashlib.sha256(source.read_bytes()).hexdigest()
+            requested_paths = []
 
             class Handler(http.server.SimpleHTTPRequestHandler):
                 def log_message(self, *_):
                     pass
 
                 def do_GET(self):
+                    requested_paths.append(self.path)
                     if self.path == "/api/original/1":
                         self.send_response(200)
                         self.send_header("Content-Type", "image/jpeg")
                         self.end_headers()
                         self.wfile.write(source.read_bytes())
+                        return
+                    if self.path == "/vendor/fonts/lxgw-wenkai-screen/LXGWWenKaiGBScreen.ttf":
+                        font = ROOT / "web" / self.path.lstrip("/")
+                        self.send_response(200)
+                        self.send_header("Content-Type", "font/ttf")
+                        self.end_headers()
+                        self.wfile.write(font.read_bytes())
                         return
                     self.send_error(404)
 
@@ -97,7 +106,7 @@ class AnnotatedExportFixTests(unittest.TestCase):
                   <figure id="photo-mat" style="position:relative;width:800px;height:610px;margin:0;background:#fff">
                     <img id="detail-img" style="display:block;width:800px;height:500px">
                     <div id="face-name-layer" style="position:absolute;inset:0 0 110px;display:block">
-                      <button class="face-name" style="position:absolute;left:120px;top:150px;padding:5px 7px;border:0;border-radius:4px;background:rgba(91,57,35,.7);color:#fff;font:15px/1.35 'Microsoft YaHei';writing-mode:vertical-rl">王小明</button>
+                      <button class="face-name" style="position:absolute;left:120px;top:150px;padding:5px 7px;border:0;border-radius:4px;background:rgba(91,57,35,.7);color:#fff;font:15px/1.35 'LXGW WenKai GB Screen';writing-mode:vertical-rl">王小明</button>
                     </div>
                     <figcaption id="photo-signature" style="display:flex;width:800px;height:110px;padding:18px 24px 9px;box-sizing:border-box;background:#fff;color:#242424">
                       <div class="signature-v3" style="display:grid;width:100%;grid-template-columns:1fr 1fr;align-items:end">
@@ -130,6 +139,10 @@ class AnnotatedExportFixTests(unittest.TestCase):
 
             self.assertTrue(jpeg.startswith(b"\xff\xd8\xff"))
             self.assertTrue(png.startswith(b"\x89PNG\r\n\x1a\n"))
+            self.assertIn(
+                "/vendor/fonts/lxgw-wenkai-screen/LXGWWenKaiGBScreen.ttf",
+                requested_paths,
+            )
             with Image.open(io.BytesIO(jpeg)) as result:
                 self.assertEqual(result.width, 3200)
                 self.assertGreater(result.height, 2000)

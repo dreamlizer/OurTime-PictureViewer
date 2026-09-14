@@ -137,6 +137,9 @@ def render_annotated_image(
                 device_scale_factor=1,
             )
             try:
+                # Give the frozen document the same localhost origin as the
+                # viewer so bundled webfonts are not blocked as cross-origin.
+                page.goto(f"{base_url}api/health", wait_until="load", timeout=20_000)
                 page.set_content(html, wait_until="load", timeout=20_000)
                 page.wait_for_function(
                     """() => {
@@ -148,6 +151,15 @@ def render_annotated_image(
             except PlaywrightTimeoutError as exc:
                 raise RuntimeError("原图未能读取或渲染，未生成导出文件") from exc
             page.wait_for_function("document.fonts && document.fonts.status === 'loaded'", timeout=20_000)
+            missing_fonts = page.evaluate(
+                """() => [...new Set(
+                  [...document.querySelectorAll('.face-name:not(.unnamed)')]
+                    .map(node => getComputedStyle(node).fontFamily.match(/^\\s*(?:"[^"]+"|'[^']+'|[^,]+)/)?.[0]?.trim())
+                    .filter(Boolean)
+                )].filter(family => !document.fonts.check(`16px ${family}`, '人物'))"""
+            )
+            if missing_fonts:
+                raise RuntimeError("人名标签字体未能加载，未生成不一致的导出文件")
             box = page.locator("#photo-mat").bounding_box()
             if not box or box["width"] <= 0 or box["height"] <= 0:
                 raise RuntimeError("冻结版式无法完成渲染")
