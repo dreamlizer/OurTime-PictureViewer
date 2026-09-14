@@ -18,6 +18,7 @@ import uuid
 import re
 import zipfile
 import subprocess
+from urllib.parse import quote
 from contextlib import ExitStack, asynccontextmanager, contextmanager
 from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 from collections import deque
@@ -3062,7 +3063,8 @@ def export_annotated_photo(aid:int, payload:AnnotatedExportRequest, request:Requ
         except RuntimeError as exc:
             raise HTTPException(503,str(exc))
         filename=f'{path.stem}-拾光标签-{datetime.now():%Y%m%d-%H%M%S}.png'
-        return Response(png,media_type='image/png',headers={'Content-Disposition':f"attachment; filename*=UTF-8''{filename}"})
+        safe_filename=quote(filename, safe='')
+        return Response(png,media_type='image/png',headers={'Content-Disposition':f"attachment; filename*=UTF-8''{safe_filename}"})
     finally:
         EXPORT_RENDER_LOCK.release()
 

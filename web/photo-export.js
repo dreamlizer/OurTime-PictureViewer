@@ -2,6 +2,7 @@
 (()=>{
   const $=window.$||((selector)=>document.querySelector(selector));
   const exportButton=()=>document.querySelector('#export-annotated-photo');
+  const EXPORT_STYLE_VARS=['--face-font-size','--face-font-family','--face-text-color','--face-bg-color','--face-bg-opacity','--face-bg-rgba','--face-radius','--face-padding-x','--face-padding-y','--face-shadow','--face-label-s-image','--face-label-m-image','--face-label-l-image','--viewer-signature-h','--viewer-image-inset','--signature-tone'];
   const ready=()=>{const dialog=$('#detail-dialog'),image=$('#detail-img'),detail=window.__ourTimeApp?.state?.detail;return Boolean(dialog?.open&&!dialog.classList.contains('is-loading')&&detail?.id&&image?.complete&&image.naturalWidth);};
   function freeze(){
     const dialog=$('#detail-dialog'),mat=$('#photo-mat'),image=$('#detail-img');
@@ -12,7 +13,8 @@
     clone.querySelector('#detail-img')?.removeAttribute('src');
     const ir=image.getBoundingClientRect(),mr=mat.getBoundingClientRect(),attrs={};
     [...dialog.attributes].forEach(attr=>{if(attr.name.startsWith('data-'))attrs[attr.name]=attr.value;});
-    return {id:Number(window.__ourTimeApp.state.detail.id),snapshot:{mat_html:clone.outerHTML,dialog_attrs:attrs,dialog_style:dialog.style.cssText,geometry:{image_width:ir.width,image_height:ir.height,mat_width:mr.width}}};
+    const style=EXPORT_STYLE_VARS.map(name=>{const value=dialog.style.getPropertyValue(name).trim();return value?`${name}:${value}`:'';}).filter(Boolean).join(';');
+    return {id:Number(window.__ourTimeApp.state.detail.id),snapshot:{mat_html:clone.outerHTML,dialog_attrs:attrs,dialog_style:style,geometry:{image_width:ir.width,image_height:ir.height,mat_width:mr.width}}};
   }
   async function run(){
     const button=exportButton();let frozen;try{frozen=freeze();}catch(error){window.viewerMessage?.(error.message);return;}
