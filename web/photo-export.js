@@ -7,6 +7,9 @@
     const dialog=$('#detail-dialog'),mat=$('#photo-mat'),image=$('#detail-img');
     if(!ready())throw new Error('照片仍在准备中，请稍候再导出');
     const clone=mat.cloneNode(true);clone.querySelectorAll('.viewer-photo-close,.photo-favorite,.photo-place-map,.face-hover-guide,.face-hover-box').forEach(node=>node.remove());
+    // The renderer replaces this with its own asset-id-bound original endpoint.
+    // Never send the browser-expanded preview URL into the untrusted snapshot.
+    clone.querySelector('#detail-img')?.removeAttribute('src');
     const ir=image.getBoundingClientRect(),mr=mat.getBoundingClientRect(),attrs={};
     [...dialog.attributes].forEach(attr=>{if(attr.name.startsWith('data-'))attrs[attr.name]=attr.value;});
     return {id:Number(window.__ourTimeApp.state.detail.id),snapshot:{mat_html:clone.outerHTML,dialog_attrs:attrs,dialog_style:dialog.style.cssText,geometry:{image_width:ir.width,image_height:ir.height,mat_width:mr.width}}};
