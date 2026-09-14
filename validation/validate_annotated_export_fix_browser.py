@@ -277,6 +277,12 @@ def main() -> int:
                         with page.expect_download(timeout=45_000) as download_info:
                             page.locator("#export-annotated-photo").click()
                         download = download_info.value
+                        expected_name = f"2026-09-{10 + aid:02}-142{aid}-sony.jpg"
+                        check(
+                            download.suggested_filename == expected_name,
+                            f"{slug} 文件名使用拍摄分钟和设备品牌",
+                            checks,
+                        )
                         export_path = REPORT_DIR / f"{slug}-export.jpg"
                         download.save_as(export_path)
                         with Image.open(export_path) as exported:
@@ -299,6 +305,12 @@ def main() -> int:
                     with page.expect_download(timeout=45_000) as png_download_info:
                         page.locator("#export-annotated-photo").click()
                     png_path = REPORT_DIR / "multi-vertical-export.png"
+                    check(
+                        png_download_info.value.suggested_filename
+                        == "2026-09-11-1421-sony.png",
+                        "PNG 文件名使用拍摄分钟和设备品牌",
+                        checks,
+                    )
                     png_download_info.value.save_as(png_path)
                     with Image.open(png_path) as png_image:
                         check(png_image.format == "PNG", "PNG 可选导出保留", checks)

@@ -49,6 +49,13 @@
       "url('$1')"
     );
   }
+  function responseFilename(response,fallback){
+    const disposition=response.headers.get('Content-Disposition')||'';
+    const encoded=disposition.match(/filename\*\s*=\s*UTF-8''([^;]+)/i)?.[1];
+    if(!encoded)return fallback;
+    try{return decodeURIComponent(encoded.replace(/^["']|["']$/g,''));}
+    catch(error){return fallback;}
+  }
   function copyComputedStyle(source,target,pseudo=null){
     const computed=getComputedStyle(source,pseudo);
     FROZEN_STYLE_PROPS.forEach(name=>{
@@ -150,7 +157,7 @@
       const label=actual==='png'?'PNG':'JPEG';
       const blob=await response.blob(),url=URL.createObjectURL(blob),link=document.createElement('a');
       link.href=url;
-      link.download=`拾光标签照片.${extension}`;
+      link.download=responseFilename(response,`拾光标签照片.${extension}`);
       document.body.appendChild(link);
       link.click();
       link.remove();

@@ -3171,10 +3171,17 @@ def export_annotated_photo(aid:int, payload:AnnotatedExportRequest, request:Requ
     try:
         path=original_path(aid)
         try:
-            from photo_export import render_annotated_image
+            from photo_export import build_annotated_export_filename, render_annotated_image
             output_format=str(payload.format or 'jpeg').strip().lower()
             if output_format == 'jpg':
                 output_format='jpeg'
+            with db() as c:
+                asset=c.execute(
+                    'SELECT captured_at,date_source,created_at,camera,metadata FROM assets WHERE id=?',
+                    (aid,),
+                ).fetchone()
+            if not asset:
+                raise HTTPException(404,'照片不存在')
             server_port=int((request.scope.get('server') or ('127.0.0.1',8765))[1])
             content=render_annotated_image(original=path,snapshot=payload.snapshot,
                 base_url=f'http://127.0.0.1:{server_port}/',web_root=BASE/'web',aid=aid,
@@ -3187,7 +3194,7 @@ def export_annotated_photo(aid:int, payload:AnnotatedExportRequest, request:Requ
             raise HTTPException(503,str(exc))
         extension='jpg' if output_format == 'jpeg' else 'png'
         media_type='image/jpeg' if output_format == 'jpeg' else 'image/png'
-        filename=f'{path.stem}-拾光标签-{datetime.now():%Y%m%d-%H%M%S}.{extension}'
+        filename=build_annotated_export_filename(dict(asset),path,output_format)
         safe_filename=quote(filename, safe='')
         return Response(content,media_type=media_type,headers={
             'Content-Disposition':f"attachment; filename*=UTF-8''{safe_filename}",

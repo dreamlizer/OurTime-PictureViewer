@@ -8,6 +8,7 @@ import socketserver
 import tempfile
 import threading
 import unittest
+from datetime import datetime
 from pathlib import Path
 
 from PIL import Image, ImageDraw
@@ -17,10 +18,54 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from photo_export import _snapshot_html, render_annotated_image
+from photo_export import (
+    _snapshot_html,
+    build_annotated_export_filename,
+    render_annotated_image,
+)
 
 
 class AnnotatedExportFixTests(unittest.TestCase):
+    def test_export_filename_uses_capture_minute_and_camera_brand(self):
+        with tempfile.TemporaryDirectory() as folder:
+            source = Path(folder) / "source.jpg"
+            source.write_bytes(b"fixture")
+            asset = {
+                "captured_at": "2019-09-03T19:21:47",
+                "date_source": "EXIF 原始拍摄时间",
+                "created_at": "2026-09-14T16:30:00",
+                "camera": "HUAWEI P30 Pro",
+                "metadata": "{}",
+            }
+            self.assertEqual(
+                build_annotated_export_filename(asset, source, "jpeg"),
+                "2019-09-03-1921-huawei.jpg",
+            )
+            asset["camera"] = ""
+            self.assertEqual(
+                build_annotated_export_filename(asset, source, "png"),
+                "2019-09-03-1921.png",
+            )
+
+    def test_export_filename_falls_back_to_file_creation_time(self):
+        with tempfile.TemporaryDirectory() as folder:
+            source = Path(folder) / "source.jpg"
+            source.write_bytes(b"fixture")
+            expected = datetime.fromtimestamp(source.stat().st_ctime).strftime(
+                "%Y-%m-%d-%H%M"
+            )
+            asset = {
+                "captured_at": "2020-01-02T03:04:05",
+                "date_source": "文件修改时间参考",
+                "created_at": "2026-09-14T16:30:00",
+                "camera": "",
+                "metadata": {"ExifTool": {"EXIF:Make": "Apple"}},
+            }
+            self.assertEqual(
+                build_annotated_export_filename(asset, source, "jpeg"),
+                f"{expected}-apple.jpg",
+            )
+
     def test_browser_serialized_allowed_label_background_is_accepted(self):
         snapshot = {
             "snapshot_version": 2,

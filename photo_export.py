@@ -4,7 +4,9 @@ It intentionally has no database access and only receives the already selected
 asset id plus a restricted, computed-style DOM snapshot from the open viewer.
 """
 import io
+import json
 import re
+from datetime import datetime
 from html import unescape
 from pathlib import Path
 
@@ -23,6 +25,104 @@ _BAD = re.compile(
 _STYLE_NAME = re.compile(r"^--(?:face-(?:font-size|font-family|text-color|bg-color|bg-opacity|bg-rgba|radius|padding-x|padding-y|shadow|label-[sml]-image)|viewer-signature-h|viewer-image-inset|signature-tone)$")
 _LABEL_URL = re.compile(r"^/api/face-label-bg/[1-9]\.png$", re.I)
 _URL_VALUE = re.compile(r"url\(\s*(['\"]?)(.*?)\1\s*\)", re.I)
+_CAMERA_BRANDS = (
+    ("eastman kodak", "kodak"),
+    ("fujifilm", "fujifilm"),
+    ("panasonic", "panasonic"),
+    ("hasselblad", "hasselblad"),
+    ("motorola", "motorola"),
+    ("microsoft", "microsoft"),
+    ("oneplus", "oneplus"),
+    ("olympus", "olympus"),
+    ("huawei", "huawei"),
+    ("honor", "honor"),
+    ("samsung", "samsung"),
+    ("xiaomi", "xiaomi"),
+    ("redmi", "xiaomi"),
+    ("iphone", "apple"),
+    ("apple", "apple"),
+    ("pixel", "google"),
+    ("google", "google"),
+    ("nikon", "nikon"),
+    ("canon", "canon"),
+    ("sony", "sony"),
+    ("lumix", "panasonic"),
+    ("pentax", "pentax"),
+    ("leica", "leica"),
+    ("ricoh", "ricoh"),
+    ("meizu", "meizu"),
+    ("oppo", "oppo"),
+    ("vivo", "vivo"),
+    ("nokia", "nokia"),
+    ("gopro", "gopro"),
+    ("kodak", "kodak"),
+    ("casio", "casio"),
+    ("sigma", "sigma"),
+    ("dji", "dji"),
+)
+
+
+def _filename_datetime(value):
+    text = str(value or "").strip()
+    match = re.match(
+        r"^(\d{4})[:-](\d{2})[:-](\d{2})[T ](\d{2}):(\d{2})",
+        text,
+    )
+    if not match:
+        return None
+    try:
+        return datetime(*map(int, match.groups()))
+    except ValueError:
+        return None
+
+
+def _camera_make(metadata):
+    if isinstance(metadata, str):
+        try:
+            metadata = json.loads(metadata)
+        except (TypeError, ValueError):
+            metadata = {}
+    if not isinstance(metadata, dict):
+        return ""
+    exiftool = metadata.get("ExifTool")
+    if isinstance(exiftool, dict):
+        for key, value in exiftool.items():
+            if key.split(":")[-1].casefold() == "make" and value:
+                return str(value).strip()
+    ifd0 = metadata.get("IFD0")
+    if isinstance(ifd0, dict) and ifd0.get("Make"):
+        return str(ifd0["Make"]).strip()
+    return ""
+
+
+def _camera_brand(metadata, camera):
+    make = _camera_make(metadata)
+    combined = f"{make} {camera or ''}".casefold()
+    for needle, brand in _CAMERA_BRANDS:
+        if needle in combined:
+            return brand
+    if make:
+        match = re.search(r"[a-z0-9\u4e00-\u9fff]+", make.casefold())
+        if match:
+            return match.group(0)
+    return ""
+
+
+def build_annotated_export_filename(asset, original, output_format):
+    captured = None
+    if str(asset.get("date_source") or "") != "文件修改时间参考":
+        captured = _filename_datetime(asset.get("captured_at"))
+    if captured is None:
+        try:
+            captured = datetime.fromtimestamp(Path(original).stat().st_ctime)
+        except OSError:
+            captured = _filename_datetime(asset.get("created_at"))
+    if captured is None:
+        captured = _filename_datetime(asset.get("created_at")) or datetime.now()
+    brand = _camera_brand(asset.get("metadata"), asset.get("camera"))
+    extension = "jpg" if output_format == "jpeg" else "png"
+    stem = captured.strftime("%Y-%m-%d-%H%M")
+    return f"{stem}{'-' + brand if brand else ''}.{extension}"
 
 
 def _allowed_label_url(value):
