@@ -1743,6 +1743,9 @@ async function movePhoto(delta,automatic=false){
  const current=Number.isFinite(viewer.goal)?viewer.goal:(Number.isFinite(viewer.absolute)?viewer.absolute:(viewer.offset||0)+(viewer.target||0));
  const goal=Math.max(0,Math.min(Math.max(total-1,0),current+delta));
  viewer.goal=goal;
+ // An intent is current from the key/click, not only after the next decoder
+ // starts.  This invalidates a slow intermediate candidate before it can commit.
+ if(viewer.busy) viewer.presentation++;
  if(goal===current && delta!==0){viewerMessage(goal===0?'已经是当前范围的第一张。':'已经是当前范围的最后一张。');stopSlides();return;}
  if(goal===current){stopSlides();return;}
  viewer.transitionDirection=Math.sign(delta);

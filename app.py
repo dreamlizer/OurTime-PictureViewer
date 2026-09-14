@@ -3041,6 +3041,31 @@ def large_preview(aid:int):
 def original(aid:int):
     return FileResponse(original_path(aid))
 
+class AnnotatedExportRequest(BaseModel):
+    snapshot: dict
+
+EXPORT_RENDER_LOCK = threading.BoundedSemaphore(1)
+
+@app.post('/api/photos/{aid}/export-annotated')
+def export_annotated_photo(aid:int, payload:AnnotatedExportRequest, request:Request):
+    """Read-only export: no asset, face, draft or source-file writes."""
+    if not EXPORT_RENDER_LOCK.acquire(blocking=False):
+        raise HTTPException(409,'已有照片正在导出，请稍候')
+    try:
+        path=original_path(aid)
+        try:
+            from photo_export import render_annotated_png
+            png=render_annotated_png(original=path,snapshot=payload.snapshot,
+                base_url=str(request.base_url),web_root=BASE/'web',aid=aid)
+        except ValueError as exc:
+            raise HTTPException(422,str(exc))
+        except RuntimeError as exc:
+            raise HTTPException(503,str(exc))
+        filename=f'{path.stem}-拾光标签-{datetime.now():%Y%m%d-%H%M%S}.png'
+        return Response(png,media_type='image/png',headers={'Content-Disposition':f"attachment; filename*=UTF-8''{filename}"})
+    finally:
+        EXPORT_RENDER_LOCK.release()
+
 @app.post('/api/reveal/{aid}')
 def reveal(aid:int):
     path=original_path(aid)
