@@ -1,9 +1,12 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
+using System.Drawing;
 using System.IO;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Windows.Forms;
 
@@ -31,6 +34,11 @@ internal static class Program
                 MessageBox.Show("没有找到 App 程序目录或内置 Python。请使用完整解压后的拾光相册文件夹。", "拾光相册");
                 return 1;
             }
+            if (LooksLikeTempUnpack(root))
+            {
+                var ask = MessageBox.Show("当前像是在压缩包的临时目录里运行。请先解压到普通文件夹再打开，否则关闭后文件可能消失。\n\n仍要继续吗？", "拾光相册", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+                if (ask != DialogResult.Yes) return 1;
+            }
             Directory.CreateDirectory(dataDir);
             Directory.CreateDirectory(Path.Combine(dataDir, "thumbs"));
             Directory.CreateDirectory(Path.Combine(dataDir, "faces"));
@@ -42,7 +50,7 @@ internal static class Program
             }
             if (IsOurServer(url, dataKey))
             {
-                Process.Start(url);
+                OpenBrowser(url + (IsEmptyLibrary(url) ? "#scan" : ""));
                 return 0;
             }
             if (PortBusy())
@@ -67,6 +75,7 @@ internal static class Program
             psi.EnvironmentVariables["PYTHONPATH"] = appDir;
             psi.EnvironmentVariables["PYTHONUTF8"] = "1";
             psi.EnvironmentVariables["NO_ALBUMENTATIONS_UPDATE"] = "1";
+            psi.EnvironmentVariables["PHOTO_UI_IDLE_EXIT_SECONDS"] = "8";
             string log = Path.Combine(dataDir, "server.log");
             string err = Path.Combine(dataDir, "server-error.log");
             psi.RedirectStandardOutput = true;
@@ -85,7 +94,16 @@ internal static class Program
                 if (IsOurServer(url, dataKey))
                 {
                     File.WriteAllText(Path.Combine(dataDir, "server.pid"), proc.Id.ToString(), Encoding.ASCII);
-                    Process.Start(url);
+                    bool empty = IsEmptyLibrary(url);
+                    if (empty)
+                    {
+                        using (var form = new FirstRunForm())
+                        {
+                            if (form.ShowDialog() == DialogResult.OK && form.Roots.Count > 0)
+                                StartScan(url, form.Roots, FaceModelReady(url));
+                        }
+                    }
+                    OpenBrowser(url + (empty ? "#scan" : ""));
                     return 0;
                 }
                 Thread.Sleep(500);
@@ -204,5 +222,137 @@ internal static class Program
         req.Timeout = 4000;
         req.ContentLength = 0;
         using (req.GetResponse()) { }
+    }
+
+    private static bool LooksLikeTempUnpack(string root)
+    {
+        string t = root.ToLowerInvariant();
+        return t.IndexOf("\\appdata\\local\\temp\\") >= 0
+            || t.IndexOf("\\temp\\rar$") >= 0
+            || t.IndexOf("\\temp\\7z") >= 0
+            || t.IndexOf(".zip\\") >= 0
+            || t.IndexOf(".rar\\") >= 0;
+    }
+
+    private static void OpenBrowser(string url)
+    {
+        try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); }
+        catch { MessageBox.Show("浏览器没有自动打开。请手动访问：\n" + url, "拾光相册"); }
+    }
+
+    private static string HttpGet(string url)
+    {
+        var req = (HttpWebRequest)WebRequest.Create(url);
+        req.Timeout = 3000;
+        using (var resp = (HttpWebResponse)req.GetResponse())
+        using (var reader = new StreamReader(resp.GetResponseStream(), Encoding.UTF8))
+            return reader.ReadToEnd();
+    }
+
+    private static bool IsEmptyLibrary(string url)
+    {
+        try
+        {
+            var m = Regex.Match(HttpGet(url + "api/status"), "\"assets\"\\s*:\\s*(\\d+)");
+            return m.Success && m.Groups[1].Value == "0";
+        }
+        catch { return false; }
+    }
+
+    private static bool FaceModelReady(string url)
+    {
+        try { return HttpGet(url + "api/status").IndexOf("\"face_model\":true") >= 0; }
+        catch { return true; }
+    }
+
+    private static void StartScan(string url, List<string> roots, bool withFaces)
+    {
+        var sb = new StringBuilder("{\"roots\":[");
+        for (int i = 0; i < roots.Count; i++)
+        {
+            if (i > 0) sb.Append(",");
+            sb.Append("\"").Append(roots[i].Replace("\\", "\\\\").Replace("\"", "\\\"")).Append("\"");
+        }
+        sb.Append("],\"with_faces\":").Append(withFaces ? "true" : "false");
+        sb.Append(",\"include_system\":false,\"workers\":1}");
+        var req = (HttpWebRequest)WebRequest.Create(url + "api/scan");
+        req.Method = "POST";
+        req.ContentType = "application/json; charset=utf-8";
+        req.Timeout = 8000;
+        byte[] payload = Encoding.UTF8.GetBytes(sb.ToString());
+        req.ContentLength = payload.Length;
+        using (var stream = req.GetRequestStream()) stream.Write(payload, 0, payload.Length);
+        using (req.GetResponse()) { }
+    }
+}
+
+internal sealed class FirstRunForm : Form
+{
+    private readonly ListBox list = new ListBox();
+    public readonly List<string> Roots = new List<string>();
+
+    public FirstRunForm()
+    {
+        Text = "拾光相册";
+        Width = 560;
+        Height = 380;
+        StartPosition = FormStartPosition.CenterScreen;
+        AllowDrop = true;
+        Font = new Font("Microsoft YaHei UI", 10);
+        var hint = new Label();
+        hint.Dock = DockStyle.Top;
+        hint.Height = 88;
+        hint.Padding = new Padding(16, 12, 16, 8);
+        hint.Text = "第一次使用：把照片文件夹拖到这里，或点“选择文件夹”。原图不会移动或修改。选好后点“添加并打开”。";
+        list.Dock = DockStyle.Fill;
+        list.IntegralHeight = false;
+        var bar = new FlowLayoutPanel();
+        bar.Dock = DockStyle.Bottom;
+        bar.Height = 48;
+        bar.Padding = new Padding(8);
+        var choose = new Button { Text = "选择文件夹", AutoSize = true };
+        var skip = new Button { Text = "先打开界面", AutoSize = true };
+        var ok = new Button { Text = "添加并打开", AutoSize = true };
+        choose.Click += delegate { PickFolder(); };
+        skip.Click += delegate { DialogResult = DialogResult.Cancel; Close(); };
+        ok.Click += delegate { DialogResult = DialogResult.OK; Close(); };
+        bar.Controls.Add(choose);
+        bar.Controls.Add(skip);
+        bar.Controls.Add(ok);
+        Controls.Add(list);
+        Controls.Add(bar);
+        Controls.Add(hint);
+        DragEnter += delegate(object sender, DragEventArgs e)
+        {
+            if (e.Data.GetDataPresent(DataFormats.FileDrop)) e.Effect = DragDropEffects.Copy;
+        };
+        DragDrop += delegate(object sender, DragEventArgs e)
+        {
+            var paths = e.Data.GetData(DataFormats.FileDrop) as string[];
+            if (paths == null) return;
+            foreach (string path in paths) AddPath(path);
+        };
+    }
+
+    private void PickFolder()
+    {
+        using (var dialog = new FolderBrowserDialog())
+        {
+            dialog.Description = "选择一个照片文件夹";
+            if (dialog.ShowDialog(this) == DialogResult.OK) AddPath(dialog.SelectedPath);
+        }
+    }
+
+    private void AddPath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return;
+        string full = Path.GetFullPath(path);
+        if (File.Exists(full)) full = Path.GetDirectoryName(full);
+        if (!Directory.Exists(full)) return;
+        if (!Roots.Exists(item => string.Equals(item, full, StringComparison.OrdinalIgnoreCase)))
+        {
+            Roots.Add(full);
+            list.Items.Add(full);
+        }
     }
 }

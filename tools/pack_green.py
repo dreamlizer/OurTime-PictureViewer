@@ -223,6 +223,7 @@ def compile_launcher(app_root: Path, ico: Path) -> None:
     cmd = [
         str(CSC), "/nologo", "/optimize+", "/target:winexe",
         "/r:System.Windows.Forms.dll", "/r:System.dll",
+        "/r:System.Drawing.dll",
         "/win32icon:" + str(ico),
         "/out:" + str(out_start),
         str(cs),
@@ -249,11 +250,11 @@ def write_config(app_dir: Path) -> None:
 
 def write_pack_readme(root: Path) -> None:
     (root / "使用说明.txt").write_text(
-        "拾光相册 绿色版\n\n"
-        "双击 拾光.exe 打开。第一次会在 Data 里建立空资料库。\n"
-        "停止请双击 停止拾光.exe。\n\n"
-        "换电脑时带走整个文件夹即可。原照片仍在原来的位置，需要一并复制。\n"
-        "不要只拷贝 Data，也不要把 Data 发到网上。\n",
+        "拾光相册 绿色版" + chr(10) + chr(10)
+        + "请先解压到普通文件夹，再双击 拾光.exe。不要在压缩包预览里直接打开。" + chr(10)
+        + "启动没有黑框。第一次没有照片时，会弹出窗口：把文件夹拖进去或点选。" + chr(10)
+        + "关掉网页后约 8 秒后台会退出；正在扫描时会等扫描告一段落。也可双击 停止拾光.exe。" + chr(10)
+        + "原照片不会移动。资料在 Data 文件夹。" + chr(10),
         encoding="utf-8",
     )
 

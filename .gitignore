@@ -6,6 +6,7 @@ __pycache__/
 config.local.json
 config.json
 dist/
+tools/packaging/*.exe
 validation/work/
 validation/reports/
 validation/*backup*/

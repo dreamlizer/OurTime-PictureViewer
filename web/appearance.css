@@ -401,6 +401,8 @@ body.is-photo-place-view #places-map { height: clamp(430px, 72vh, 820px); }
 /* Add photos stays a compact, left-aligned workbench at every desktop width. */
 #scan-view { width: min(720px, 100%); }
 .add-photos-card { width: 100%; margin: 0 0 16px; padding: 22px 24px; }
+.add-photos-card.is-drop { outline: 2px dashed var(--green); background: #f3f8f4; }
+.scan-drop-hint { margin: 10px 0 0; color: #66736c; font-size: 13px; line-height: 1.5; }
 .add-photos-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 9px 12px; }
 .folder-picker-card { display: inline-flex; align-items: center; gap: 7px; width: auto; min-height: 38px; margin: 0; padding: 7px 12px; border: 1px solid #c9d7cd; border-radius: 7px; background: #f7faf7; color: var(--green); text-align: left; cursor: pointer; font-size: 13px; }
 .folder-picker-card:hover { border-color: #8eaa97; background: #eef5f0; }

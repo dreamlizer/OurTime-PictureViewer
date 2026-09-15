@@ -106,6 +106,10 @@ APP_PORT = int(os.environ.get('PHOTO_LIBRARY_PORT', '8765'))
 RUNTIME_VERSION = 'not-started'
 SCAN_THREAD = None
 UVICORN_SERVER = None
+UI_IDLE_EXIT_SECONDS = int(os.environ.get('PHOTO_UI_IDLE_EXIT_SECONDS') or '0')
+UI_LAST_PING = time.monotonic()
+UI_SEEN = False
+UI_IDLE_WATCH_STARTED = False
 try:
     from pillow_heif import register_heif_opener
     register_heif_opener()
@@ -226,6 +230,36 @@ def capture_runtime_version():
     return runtime_identity()
 
 
+def scan_is_active():
+    try:
+        with db() as c:
+            row=c.execute('SELECT status FROM jobs ORDER BY rowid DESC LIMIT 1').fetchone()
+        return bool(row and row['status'] in {'running','pausing'})
+    except Exception:
+        return False
+
+
+def start_ui_idle_watch():
+    global UI_IDLE_WATCH_STARTED
+    if UI_IDLE_EXIT_SECONDS<=0 or UI_IDLE_WATCH_STARTED:
+        return
+    UI_IDLE_WATCH_STARTED=True
+    def watch():
+        while True:
+            time.sleep(1)
+            if not UI_SEEN:
+                continue
+            if time.monotonic()-UI_LAST_PING<UI_IDLE_EXIT_SECONDS:
+                continue
+            if scan_is_active():
+                continue
+            if not UVICORN_SERVER:
+                continue
+            UVICORN_SERVER.should_exit=True
+            return
+    threading.Thread(target=watch,daemon=True,name='ui-idle-exit').start()
+
+
 def initialize_application():
     """Explicit startup boundary. Importing this module remains read-only."""
     global APP_OWNER,APP_INITIALIZED,RUNTIME_VERSION
@@ -247,6 +281,7 @@ def initialize_application():
             raise
         APP_OWNER=owner
         APP_INITIALIZED=True
+        start_ui_idle_watch()
 
 
 def shutdown_application(timeout=15.0):
@@ -1681,6 +1716,14 @@ def health():
     }
 
 
+@app.post('/api/ui-ping')
+def ui_ping():
+    global UI_LAST_PING,UI_SEEN
+    UI_LAST_PING=time.monotonic()
+    UI_SEEN=True
+    return {'ok':True,'idle_exit_seconds':UI_IDLE_EXIT_SECONDS}
+
+
 @app.post('/api/shutdown')
 def request_shutdown():
     if SCAN_THREAD and SCAN_THREAD.is_alive():
@@ -1774,6 +1817,7 @@ def status():
                 'product_name':APP_NAME,
                 'version':APP_VERSION,
                 'pid':os.getpid(),
+                'idle_exit_seconds':UI_IDLE_EXIT_SECONDS,
             }}
     with STATUS_CACHE_LOCK:
         STATUS_CACHE['at']=time.monotonic()

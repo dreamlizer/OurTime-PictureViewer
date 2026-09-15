@@ -284,4 +284,4 @@ new ResizeObserver(()=>streamSchedule()).observe($('#photo-grid'));
 $('#stream-retry').addEventListener('click',()=>{waterfall.error=false;$('#stream-retry').hidden=true;streamSchedule();if(!waterfall.heights.length)streamPage(0);});
 $('#stream-top').addEventListener('click',()=>scrollTo({top:0,behavior:'smooth'}));
 $('#detail-dialog').addEventListener('close',()=>{if(state.favoriteViewDirty){state.favoriteViewDirty=false;void loadPhotos();return;}void restoreViewerPhotoPosition(viewer.exit);});
-action(async()=>{const status=await refreshStatus();setText('#favorites-count',fmt(status?.stats?.favorite_photos));loadPeopleOptions();await setView(state.view||'timeline');})();
+action(async()=>{const status=await refreshStatus();setText('#favorites-count',fmt(status?.stats?.favorite_photos));loadPeopleOptions();const empty=!(status&&status.stats&&status.stats.assets);const hash=(location.hash||'').replace('#','');const start=hash==='scan'||empty?'scan':(state.view||'timeline');await setView(start);})();
