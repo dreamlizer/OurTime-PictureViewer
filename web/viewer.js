@@ -104,6 +104,9 @@ const FACE_UNNAMED_MARKERS=new Set(['plus','pulse','ring']);
 const FACE_LABEL_POSITIONS=new Set(['auto','left','right','top','bottom']);
 const FACE_LABEL_OVERLAP_LIMIT=.12;
 const FACE_LABEL_FACE_OVERLAP_LIMIT=.25;
+const FACE_LABEL_BASE_HEIGHT=56;
+const FACE_LABEL_FACE_RATIO=.4;
+const FACE_LABEL_MAX_SCALE=1.5;
 const LEGACY_CLASSIC_FACE_STYLE={
   theme:'classic',
   fontSize:13,
@@ -689,6 +692,11 @@ function applyFaceLabelProfile(element,name){
   const profile=faceLabelProfile(name);
   element.dataset.faceLabelSize=profile.size;
   element.classList.toggle('long-name',profile.long);
+}
+function faceLabelScaleForHeight(faceH){
+  const height=Number(faceH);
+  if(!(height>0))return 1;
+  return Math.min(FACE_LABEL_MAX_SCALE, Math.max(1, FACE_LABEL_FACE_RATIO*height/FACE_LABEL_BASE_HEIGHT));
 }
 function faceLabelsVertical(){
   return Boolean(FACE_LABEL_IMAGES[viewer.faceStyle?.theme])||viewer.faceVertical!==false;
@@ -1606,7 +1614,12 @@ function layoutFaceNameButtons(layer, faces, alias){
   const geometries=buttons.map((btn,i)=>{
     const it=items[i];
     it.btn=btn;
-    if(it.named)applyFaceLabelProfile(btn,it.label);
+    if(it.named){
+      applyFaceLabelProfile(btn,it.label);
+      const scale=faceLabelScaleForHeight(it.fh);
+      btn.style.setProperty('--face-scale',scale.toFixed(3));
+      btn.dataset.faceScale=scale.toFixed(3);
+    }
     const w=Math.max(18, btn.offsetWidth);
     const h=Math.max(18, btn.offsetHeight);
     const fid=Number(it.face.id);

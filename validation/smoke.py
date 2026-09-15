@@ -157,6 +157,21 @@ def main():
         "labelOverlapRatio",
     )):
         fail("待命名标记或标签重叠比例防碰撞机制缺失")
+    if not all(value in viewer for value in (
+        "FACE_LABEL_BASE_HEIGHT=56",
+        "FACE_LABEL_FACE_RATIO=.4",
+        "FACE_LABEL_MAX_SCALE=1.5",
+        "function faceLabelScaleForHeight(faceH){",
+        "btn.style.setProperty('--face-scale',scale.toFixed(3));",
+    )):
+        fail("人名标签缺少随脸高度缩放的下限/上限合同")
+    if not all(value in viewer_overrides for value in (
+        "--face-scale:1;",
+        "width:calc(38px * var(--face-scale, 1));",
+        "height:calc(56px * var(--face-scale, 1));",
+        "font-size:calc(var(--face-font-size) * var(--face-scale, 1));",
+    )):
+        fail("人名底牌与字号没有锁定到同一 --face-scale")
     if (
         'id="quick-ignore-person"' not in html
         or "/api/people/'+id+'/ignore" not in app

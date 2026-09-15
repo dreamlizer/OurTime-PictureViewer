@@ -486,6 +486,7 @@
 
 #detail-dialog .face-name:not(.unnamed){
   position:absolute;
+  --face-scale:1;
   border:1px solid transparent;
   transition:
     background-color .14s ease,
@@ -493,6 +494,9 @@
     color .14s ease,
     box-shadow .14s ease;
   background-image:none;
+  font-size:calc(var(--face-font-size) * var(--face-scale));
+  padding:calc(var(--face-padding-y) * var(--face-scale)) calc(var(--face-padding-x) * var(--face-scale));
+  border-radius:calc(var(--face-radius) * var(--face-scale));
 }
 #detail-dialog .face-name.is-dragging{
   cursor:grabbing;
@@ -527,7 +531,7 @@
   display:grid;
   place-items:center;
   isolation:isolate;
-  padding:6px 9px 6px 7px;
+  padding:calc(6px * var(--face-scale, 1)) calc(9px * var(--face-scale, 1)) calc(6px * var(--face-scale, 1)) calc(7px * var(--face-scale, 1));
   border:0;
   border-radius:0;
   background-color:transparent;
@@ -563,7 +567,7 @@
 #detail-dialog[data-face-theme="ivory"] .face-name:not(.unnamed)::after{
   content:"";
   position:absolute;
-  inset:3px 4px;
+  inset:calc(3px * var(--face-scale, 1)) calc(4px * var(--face-scale, 1));
   z-index:-1;
   pointer-events:none;
   background:
@@ -576,28 +580,28 @@
 }
 #detail-dialog[data-face-theme="ivory"] .face-name[data-face-label-size="s"]{
   --face-label-image:var(--face-label-s-image);
-  width:38px;
-  height:56px;
-  font-size:var(--face-font-size);
+  width:calc(38px * var(--face-scale, 1));
+  height:calc(56px * var(--face-scale, 1));
+  font-size:calc(var(--face-font-size) * var(--face-scale, 1));
   letter-spacing:.3em;
 }
 #detail-dialog[data-face-theme="ivory"] .face-name[data-face-label-size="m"]{
   --face-label-image:var(--face-label-m-image);
-  width:38px;
-  height:72px;
-  font-size:max(12px,calc(var(--face-font-size) - 1px));
+  width:calc(38px * var(--face-scale, 1));
+  height:calc(72px * var(--face-scale, 1));
+  font-size:calc(max(12px, var(--face-font-size) - 1px) * var(--face-scale, 1));
   letter-spacing:.14em;
 }
 #detail-dialog[data-face-theme="ivory"] .face-name[data-face-label-size="l"]{
   --face-label-image:var(--face-label-l-image);
-  width:38px;
-  height:86px;
-  padding-inline:7px;
-  font-size:max(12px,calc(var(--face-font-size) - 2px));
+  width:calc(38px * var(--face-scale, 1));
+  height:calc(86px * var(--face-scale, 1));
+  padding-inline:calc(7px * var(--face-scale, 1));
+  font-size:calc(max(12px, var(--face-font-size) - 2px) * var(--face-scale, 1));
   letter-spacing:.08em;
 }
 #detail-dialog[data-face-theme="ivory"] .face-name[data-face-label-size="l"].long-name{
-  font-size:max(12px,calc(var(--face-font-size) - 3px));
+  font-size:calc(max(12px, var(--face-font-size) - 3px) * var(--face-scale, 1));
   letter-spacing:.03em;
 }
 
@@ -606,7 +610,7 @@
   display:grid;
   place-items:center;
   isolation:isolate;
-  padding:6px 9px 6px 7px;
+  padding:calc(6px * var(--face-scale, 1)) calc(9px * var(--face-scale, 1)) calc(6px * var(--face-scale, 1)) calc(7px * var(--face-scale, 1));
   border:0;
   border-radius:0;
   background-color:transparent;
@@ -639,28 +643,28 @@
 }
 #detail-dialog[data-face-theme="tea"] .face-name[data-face-label-size="s"]{
   --face-label-image:var(--face-label-s-image);
-  width:38px;
-  height:56px;
-  font-size:var(--face-font-size);
+  width:calc(38px * var(--face-scale, 1));
+  height:calc(56px * var(--face-scale, 1));
+  font-size:calc(var(--face-font-size) * var(--face-scale, 1));
   letter-spacing:.3em;
 }
 #detail-dialog[data-face-theme="tea"] .face-name[data-face-label-size="m"]{
   --face-label-image:var(--face-label-m-image);
-  width:38px;
-  height:72px;
-  font-size:max(12px,calc(var(--face-font-size) - 1px));
+  width:calc(38px * var(--face-scale, 1));
+  height:calc(72px * var(--face-scale, 1));
+  font-size:calc(max(12px, var(--face-font-size) - 1px) * var(--face-scale, 1));
   letter-spacing:.14em;
 }
 #detail-dialog[data-face-theme="tea"] .face-name[data-face-label-size="l"]{
   --face-label-image:var(--face-label-l-image);
-  width:38px;
-  height:86px;
-  padding-inline:7px;
-  font-size:max(12px,calc(var(--face-font-size) - 2px));
+  width:calc(38px * var(--face-scale, 1));
+  height:calc(86px * var(--face-scale, 1));
+  padding-inline:calc(7px * var(--face-scale, 1));
+  font-size:calc(max(12px, var(--face-font-size) - 2px) * var(--face-scale, 1));
   letter-spacing:.08em;
 }
 #detail-dialog[data-face-theme="tea"] .face-name[data-face-label-size="l"].long-name{
-  font-size:max(12px,calc(var(--face-font-size) - 3px));
+  font-size:calc(max(12px, var(--face-font-size) - 3px) * var(--face-scale, 1));
   letter-spacing:.03em;
 }
 
