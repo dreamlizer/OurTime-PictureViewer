@@ -1,6 +1,6 @@
 const $=s=>document.querySelector(s);
 const $$=s=>[...document.querySelectorAll(s)];
-const state={view:'timeline',q:'',person:'',place:'',dateFrom:'',dateTo:'',offset:0,total:0,items:[],people:[],passersby:[],selected:new Set(),peopleSelected:new Set(),peopleMerging:false,peoplePendingOnly:false,peopleSort:'photos',personLabels:{},selecting:false,detail:null,personId:null,status:null,folder:null,directory:'',sort:'date_desc',maxId:0,folderTarget:'scan',scanRoots:[],scanSubmitting:false,scanStartedThisVisit:false,scanShowCompletedResult:false,scanStatusAt:0,viewGeneration:0,viewAbort:null,folderNav:{generation:0,abort:null,parent:'',cache:{}},placeGeneration:0,placeAbort:null,placeReturn:null,placeMapFilter:null,photoMap:null,groupsGeneration:0,timelineGeneration:0,personOpenToken:0,exclusion:null,thumbRevision:0,peopleStream:{people:{items:[],offset:0,baseOffset:0,total:0,more:true,loading:false,q:'',generation:0},passersby:{items:[],offset:0,baseOffset:0,total:0,more:true,loading:false,q:'',generation:0}}};
+const state={view:'timeline',q:'',person:'',place:'',dateFrom:'',dateTo:'',offset:0,total:0,items:[],people:[],passersby:[],selected:new Set(),peopleSelected:new Set(),peopleMerging:false,peoplePendingOnly:false,peopleSort:'photos',personLabels:{},selecting:false,detail:null,personId:null,status:null,folder:null,directory:'',sort:'date_desc',maxId:0,folderTarget:'scan',scanRoots:[],scanSubmitting:false,scanStartedThisVisit:false,scanShowCompletedResult:false,scanStatusAt:0,viewGeneration:0,viewAbort:null,folderNav:{generation:0,abort:null,parent:'',cache:{}},placeGeneration:0,placeAbort:null,placeReturn:null,placeMapFilter:null,placeMapRequest:{generation:0,abort:null,key:null,promise:null},placeMarkers:new Map(),placeRenderedZoom:null,placeRenderedKey:null,placeRetiring:new Set(),placeTransitionTimer:null,photoMap:null,groupsGeneration:0,timelineGeneration:0,personOpenToken:0,exclusion:null,thumbRevision:0,peopleStream:{people:{items:[],offset:0,baseOffset:0,total:0,more:true,loading:false,q:'',generation:0},passersby:{items:[],offset:0,baseOffset:0,total:0,more:true,loading:false,q:'',generation:0}}};
 const operationRuntime=window.OurTimeOperationRuntime;
 const entitySessions=operationRuntime.createEntitySessions();
 const queueEntityWrite=operationRuntime.createWriteQueue();
@@ -21,7 +21,13 @@ function setDisabled(sel,on){const el=$(sel); if(el) el.disabled=on;}
 function setClass(sel,value){const el=$(sel); if(el) el.className=value;}
 function setValue(sel,value){const el=$(sel); if(el) el.value=value;}
 function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
-function prettyPlace(value){return String(value||'').replace(/附近/g,'');}
+function prettyPlace(value){
+  return String(value||'')
+    .replace(/^\s*(?:中国大陆|中国)\s*(?:·\s*)?/,'')
+    .replace(/附近/g,'')
+    .replace(/\s*·\s*/g,' · ')
+    .trim();
+}
 function dateSource(v){return String(v||'').replace(/^EXIF /,'');}
 function readableError(v){const t=String(v||'');if(/truncated|broken data stream/.test(t))return '图片数据不完整或已损坏';if(/cannot identify image/.test(t))return '无法识别图片格式，文件可能损坏';if(/PermissionError|Permission denied/.test(t))return '没有权限读取这个文件';if(/not found|No such file|不存在/.test(t))return '未找到原文件，请检查磁盘或重新扫描';if(/timeout|超时/i.test(t))return '读取超时，可以稍后重试';return '读取未完成，请查看原始诊断';}
 function basename(p){return (p||'').split(/[\\/]/).pop();}
@@ -180,7 +186,7 @@ async function openPlaceDetail(place,anchor=null,mapFilter=null){
     const bounds={map_west:Number(mapFilter.map_west),map_south:Number(mapFilter.map_south),map_east:Number(mapFilter.map_east),map_north:Number(mapFilter.map_north)};
     const supplied=['map_west','map_south','map_east','map_north'].map(key=>mapFilter[key]!==undefined&&mapFilter[key]!==null);
     if(supplied.some(Boolean)){
-      if(!supplied.every(Boolean)||!Object.values(bounds).every(Number.isFinite)||bounds.map_west>=bounds.map_east||bounds.map_south>=bounds.map_north)throw new Error('地图视野边界无效');
+      if(!supplied.every(Boolean)||!Object.values(bounds).every(Number.isFinite)||bounds.map_west===bounds.map_east||bounds.map_west < -180||bounds.map_west > 180||bounds.map_east < -180||bounds.map_east > 180||bounds.map_south < -90||bounds.map_north > 90||bounds.map_south>=bounds.map_north)throw new Error('地图视野边界无效');
       Object.assign(base,bounds);
     }
     state.placeMapFilter=base;
@@ -761,7 +767,18 @@ function wgs84ToGcj02(latitude,longitude){const lat=Number(latitude),lng=Number(
 function gcj02ToWgs84(latitude,longitude){let lat=Number(latitude),lng=Number(longitude);if(!Number.isFinite(lat)||!Number.isFinite(lng)||outsideChina(lat,lng))return [lat,lng];const targetLat=lat,targetLng=lng;for(let step=0;step<4;step++){const [convertedLat,convertedLng]=wgs84ToGcj02(lat,lng);lat-=convertedLat-targetLat;lng-=convertedLng-targetLng;}return [lat,lng];}
 function placeMapPoint(latitude,longitude,basemap=state.placeBasemap){return basemap==='gaode'?wgs84ToGcj02(latitude,longitude):[Number(latitude),Number(longitude)];}
 function placeGpsPoint(latitude,longitude,basemap=state.placeBasemap){return basemap==='gaode'?gcj02ToWgs84(latitude,longitude):[Number(latitude),Number(longitude)];}
-function placeGpsBounds(bounds){const [south,west]=placeGpsPoint(bounds.getSouth(),bounds.getWest()),[north,east]=placeGpsPoint(bounds.getNorth(),bounds.getEast());return {west,south,east,north};}
+function placeGpsBounds(bounds){
+  let [south,west]=placeGpsPoint(bounds.getSouth(),bounds.getWest()),[north,east]=placeGpsPoint(bounds.getNorth(),bounds.getEast());
+  south=Math.max(-90,Math.min(90,south));north=Math.max(-90,Math.min(90,north));
+  const span=east-west;
+  if(span>=360)return {west:-180,south,east:180,north};
+  if(span>0){
+    west=((west+180)%360+360)%360-180;
+    east=west+span;
+    if(east>180)east-=360;
+  }
+  return {west,south,east,north};
+}
 function setPlaceBasemap(name){
   const selected=PLACE_BASEMAPS[name]?name:'gaode',spec=PLACE_BASEMAPS[selected];
   if(!state.placeMap)return;
@@ -807,10 +824,11 @@ function ensurePlaceMap(){
   state.placeMap=map;
   const select=$('#places-basemap'); if(select)select.value=PLACE_BASEMAPS[preferred]?preferred:'gaode';
   setPlaceBasemap(select&&select.value||'gaode');
-  const cluster=L.markerClusterGroup({showCoverageOnHover:false,maxClusterRadius:48,disableClusteringAtZoom:16});
+  const cluster=L.layerGroup();
   map.addLayer(cluster);
   state.placeCluster=cluster; state.placeMapTimer=null;
-  map.on('moveend zoomend',()=>{updatePlaceZoomInput();clearTimeout(state.placeMapTimer);state.placeMapTimer=setTimeout(()=>{if(state.view==='places')loadPlaceMap();},180);}); updatePlaceZoomInput();
+  map.on('zoomend',updatePlaceZoomInput);
+  map.on('moveend',()=>{clearTimeout(state.placeMapTimer);state.placeMapTimer=setTimeout(()=>{if(state.view==='places')loadPlaceMap().catch(error=>{if(error&&error.name!=='AbortError')showNotice(error.message||'地图定位点读取失败',true);});},180);}); updatePlaceZoomInput();
   window.OurTimeMapAreaEditor?.bind(map);
   return map;
 }
@@ -826,25 +844,115 @@ function syncPlaceModeChrome(photo=null){
   if(!single&&editor)editor.hidden=true;
   if(list){list.hidden=true;if(single)list.replaceChildren();}
 }
+function placeClusterIcon(item){
+  const count=Math.max(1,Number(item.count)||1);
+  const size=count===1?24:count<100?36:count<1000?42:count<10000?48:56;
+  const label=count===1?'':fmt(count);
+  const kind=count===1?' is-single':count<100?' is-small':count<1000?' is-medium':' is-large';
+  const palette=count<100
+    ?{border:'#c4dccc',background:'#dfeee3',color:'#214c37'}
+    :count<1000
+      ?{border:'#79a68b',background:'#3e7757',color:'#fff'}
+      :{border:'#507a63',background:'#244d36',color:'#fff'};
+  const markerStyle=count===1
+    ?'display:block;box-sizing:border-box;width:14px;height:14px;margin:5px;border:3px solid #eef6f0;border-radius:50%;background:#356b4c;box-shadow:0 2px 8px #26332f55,0 0 0 2px #356b4c99'
+    :`display:grid;box-sizing:border-box;width:${size}px;height:${size}px;place-items:center;border:5px solid ${palette.border};border-radius:50%;background:${palette.background};color:${palette.color};box-shadow:0 2px 8px #26332f32,0 0 0 1px #ffffff88;font:600 ${count>=10000?11:12}px/1 "Microsoft YaHei UI","Segoe UI",sans-serif`;
+  return L.divIcon({
+    className:'place-cluster-marker-shell'+kind,
+    html:`<span class="place-cluster-marker" style="${markerStyle}">${label}</span>`,
+    iconSize:[size,size],
+    iconAnchor:[size/2,size/2],
+  });
+}
+function placeClusterPopup(item,b){
+  const title=item.place||(Number(item.count)>1?'附近照片':'未命名地点');
+  return '<button type="button" class="place-popup" data-place="'+esc(title)+'" data-anchor-id="'+(Number(item.anchor_id)||0)+'" data-latitude="'+Number(item.latitude)+'" data-longitude="'+Number(item.longitude)+'" data-map-cell="'+Number(item.cell)+'" data-map-lat-bucket="'+Number(item.lat_bucket)+'" data-map-lng-bucket="'+Number(item.lng_bucket)+'" data-map-west="'+Number(b.west)+'" data-map-south="'+Number(b.south)+'" data-map-east="'+Number(b.east)+'" data-map-north="'+Number(b.north)+'"><span class="place-popup-kicker">'+(Number(item.count)>1?'聚合区域':'拍摄地点')+'</span><strong>'+esc(title)+'</strong><em>'+fmt(item.count)+' 张照片</em><span class="place-popup-go">查看这些照片</span></button>';
+}
+function finishPlaceClusterTransition(){
+  clearTimeout(state.placeTransitionTimer);state.placeTransitionTimer=null;
+  for(const marker of state.placeRetiring){if(state.placeCluster&&state.placeCluster.hasLayer(marker))state.placeCluster.removeLayer(marker);}
+  state.placeRetiring.clear();
+  $('#places-map')?.classList.remove('is-cluster-transition');
+}
+function clearPlaceClusters({abort=true}={}){
+  finishPlaceClusterTransition();
+  if(abort&&state.placeMapRequest.abort)state.placeMapRequest.abort.abort();
+  if(abort){state.placeMapRequest.generation+=1;state.placeMapRequest.abort=null;state.placeMapRequest.key=null;state.placeMapRequest.promise=null;}
+  if(state.placeCluster)state.placeCluster.clearLayers();
+  state.placeMarkers.clear();state.placeRenderedZoom=null;state.placeRenderedKey=null;
+}
+function renderPlaceClusters(items,b,clusterZoom){
+  finishPlaceClusterTransition();
+  const previous=state.placeMarkers,next=new Map(),zoomBefore=state.placeRenderedZoom;
+  const zoomDirection=zoomBefore==null?0:Number(clusterZoom)-Number(zoomBefore);
+  const oldChildrenByParent=new Map();
+  for(const marker of previous.values()){
+    const parent=marker.__placeCluster&&marker.__placeCluster.parent_id;
+    if(parent&&!oldChildrenByParent.has(parent))oldChildrenByParent.set(parent,marker);
+  }
+  for(const item of items||[]){
+    const id=String(item.cluster_id||`${clusterZoom}:${item.lat_bucket}:${item.lng_bucket}`);
+    const target=placeMapPoint(item.latitude,item.longitude);
+    let marker=previous.get(id),origin=null;
+    if(!marker&&zoomDirection>0&&item.parent_id)origin=previous.get(String(item.parent_id))||null;
+    if(!marker&&zoomDirection<0)origin=oldChildrenByParent.get(id)||null;
+    if(marker){
+      marker.setIcon(placeClusterIcon(item));
+      marker.setPopupContent(placeClusterPopup(item,b));
+    }else{
+      marker=L.marker(origin?origin.getLatLng():target,{icon:placeClusterIcon(item),opacity:origin ? .95 : 1});
+      marker.bindPopup(placeClusterPopup(item,b),{className:'place-popup-wrap',closeButton:true,maxWidth:280});
+      state.placeCluster.addLayer(marker);
+    }
+    marker.__placeCluster={...item,cluster_id:id,target};
+    next.set(id,marker);
+  }
+  for(const [id,marker] of previous){
+    if(next.has(id))continue;
+    state.placeRetiring.add(marker);
+  }
+  state.placeMarkers=next;state.placeRenderedZoom=Number(clusterZoom);
+  if(!previous.size){for(const marker of next.values())marker.setLatLng(marker.__placeCluster.target);return;}
+  const container=$('#places-map');container?.classList.add('is-cluster-transition');
+  requestAnimationFrame(()=>requestAnimationFrame(()=>{
+    for(const marker of next.values()){marker.setLatLng(marker.__placeCluster.target);marker.setOpacity(1);}
+    for(const marker of state.placeRetiring){
+      const data=marker.__placeCluster||{};
+      const parent=next.get(String(data.parent_id||''));
+      if(zoomDirection<0&&parent)marker.setLatLng(parent.__placeCluster.target);
+      marker.setOpacity(0);
+    }
+  }));
+  state.placeTransitionTimer=setTimeout(finishPlaceClusterTransition,280);
+}
 async function loadPlaceMap(){
   const map=ensurePlaceMap();
   if(window.OurTimeMapAreaEditor?.isActive())return;
   map.invalidateSize();
   const b=placeGpsBounds(map.getBounds());
-  const params=new URLSearchParams({west:b.west,south:b.south,east:b.east,north:b.north,zoom:String(Math.round(map.getZoom()))});
-  const data=await api('/api/places?'+params);
-  if(window.OurTimeMapAreaEditor?.isActive())return;
-  $('#places-total').textContent=data.truncated
-    ?'地点较多，显示 '+fmt((data.clusters||[]).length)+' / '+fmt(data.total_clusters||0)+' 个聚合点'
-    :(data.clusters&&data.clusters.length?fmt(data.clusters.reduce(function(n,x){return n+(x.count||0);},0))+' 张在当前视野':'当前视野还没有坐标点');
-  state.placeCluster.clearLayers();
-  for(const item of data.clusters||[]){
-    if(item.latitude==null||item.longitude==null)continue;
-    const marker=L.marker(placeMapPoint(item.latitude,item.longitude));
-    marker.bindPopup('<button type="button" class="place-popup" data-place="'+esc(item.place||'')+'" data-anchor-id="'+(Number(item.anchor_id)||0)+'" data-latitude="'+Number(item.latitude)+'" data-longitude="'+Number(item.longitude)+'" data-map-cell="'+Number(item.cell)+'" data-map-lat-bucket="'+Number(item.lat_bucket)+'" data-map-lng-bucket="'+Number(item.lng_bucket)+'" data-map-west="'+Number(b.west)+'" data-map-south="'+Number(b.south)+'" data-map-east="'+Number(b.east)+'" data-map-north="'+Number(b.north)+'"><span class="place-popup-kicker">拍摄地点</span><strong>'+esc(item.place||'未命名地点')+'</strong><em>'+fmt(item.count)+' 张照片</em><span class="place-popup-go">查看这些照片</span></button>', {className:'place-popup-wrap', closeButton:true, maxWidth:280});
-    state.placeCluster.addLayer(marker);
+  const params=new URLSearchParams({west:b.west,south:b.south,east:b.east,north:b.north,zoom:String(map.getZoom())});
+  const key=params.toString(),request=state.placeMapRequest;
+  if(request.key===key&&request.promise)return request.promise;
+  if(request.abort){
+    request.abort.abort();request.generation+=1;
+    request.abort=null;request.key=null;request.promise=null;
   }
-  const status=$('#places-stream-status'); if(status)status.textContent=data.truncated?'当前视野聚合点过多，仅显示前 '+fmt((data.clusters||[]).length)+' 个；请放大地图查看完整范围':data.clusters&&data.clusters.length?'点击圆点查看该处照片':'这一层视野里还没有坐标点，可缩小地图或回到北京';
+  if(state.placeRenderedKey===key)return;
+  const controller=new AbortController(),ticket=++request.generation;
+  request.abort=controller;request.key=key;
+  const task=(async()=>{
+    const data=await api('/api/places?'+params,{signal:controller.signal});
+    if(ticket!==request.generation||state.view!=='places'||window.OurTimeMapAreaEditor?.isActive())return;
+    $('#places-total').textContent=data.truncated
+      ?'地点较多，显示 '+fmt((data.clusters||[]).length)+' / '+fmt(data.total_clusters||0)+' 个聚合点'
+      :(data.clusters&&data.clusters.length?fmt(data.clusters.reduce(function(n,x){return n+(x.count||0);},0))+' 张在当前视野':'当前视野还没有坐标点');
+    renderPlaceClusters((data.clusters||[]).filter(item=>item.latitude!=null&&item.longitude!=null),b,data.cluster_zoom);
+    state.placeRenderedKey=key;
+    const status=$('#places-stream-status'); if(status)status.textContent=data.truncated?'当前视野聚合点过多，仅显示前 '+fmt((data.clusters||[]).length)+' 个；请放大地图查看完整范围':data.clusters&&data.clusters.length?'点击圆点查看该处照片':'这一层视野里还没有坐标点，可缩小地图或回到北京';
+  })();
+  request.promise=task;
+  try{return await task;}
+  finally{if(ticket===request.generation){request.abort=null;request.key=null;request.promise=null;}}
 }
 function photoPlaceMarker(photo){
   const label=prettyPlace(photo.effective_place)||'这张照片的拍摄位置';
@@ -870,7 +978,7 @@ function renderPhotoPlaceSamples(data,firstId=0){
 }
 function renderPhotoPlaceRange(data,{fit=true}={}){
   const saved=state.photoMap,map=ensurePlaceMap();if(!saved||!map)return;
-  clearPhotoPlaceRangeLayers();state.placeCluster.clearLayers();
+  clearPhotoPlaceRangeLayers();clearPlaceClusters();
   const center=placeMapPoint(data.anchor.latitude,data.anchor.longitude);
   const circle=L.circle(center,{radius:Number(data.radius_m),className:'photo-place-range-circle',color:'#396c50',weight:1.4,opacity:.8,fillColor:'#6d9a7f',fillOpacity:.12,interactive:false}).addTo(map);
   saved.rangeLayers.push(circle);
@@ -949,7 +1057,7 @@ async function loadPhotoPlace(viewToken=null){
   const map=ensurePlaceMap();if(!map)return;
   await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
   if(viewToken&&!isCurrentView(viewToken))return;
-  map.invalidateSize();map.closePopup();clearPhotoPlaceRangeLayers();state.placeCluster.clearLayers();
+  map.invalidateSize();map.closePopup();clearPhotoPlaceRangeLayers();clearPlaceClusters();
   map.setView(placeMapPoint(photo.latitude,photo.longitude),placeZoomFromFactor(PHOTO_PLACE_FACTOR),{animate:false});
   state.placeCluster.addLayer(photoPlaceMarker(photo));
   updatePlaceZoomInput();

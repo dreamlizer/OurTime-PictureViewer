@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Net;
+using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -12,7 +13,8 @@ using System.Windows.Forms;
 
 internal static class Program
 {
-    private const int Port = 8765;
+    private const int DefaultPort = 8765;
+    private static bool NoDialog;
 
     [STAThread]
     private static int Main(string[] args)
@@ -24,17 +26,23 @@ internal static class Program
             string root = Path.GetDirectoryName(exe);
             bool stop = Array.Exists(args, a => a == "--stop") ||
                         Path.GetFileNameWithoutExtension(exe).IndexOf("停止") >= 0;
+            bool noBrowser = Array.Exists(args, a => a == "--no-browser") ||
+                             Environment.GetEnvironmentVariable("PHOTO_NO_BROWSER") == "1";
+            NoDialog = Environment.GetEnvironmentVariable("PHOTO_NO_DIALOG") == "1";
+            int port = ResolvePort();
             string appDir = Path.Combine(root, "App");
-            string dataDir = Path.Combine(root, "Data");
+            string dataDir = Environment.GetEnvironmentVariable("PHOTO_LIBRARY_DATA");
+            if (String.IsNullOrWhiteSpace(dataDir)) dataDir = Path.Combine(root, "Data");
+            dataDir = Path.GetFullPath(dataDir);
             string pythonw = Path.Combine(appDir, "python", "pythonw.exe");
             string python = Path.Combine(appDir, "python", "python.exe");
             string appPy = Path.Combine(appDir, "app.py");
             if (!File.Exists(appPy) || (!File.Exists(pythonw) && !File.Exists(python)))
             {
-                MessageBox.Show("没有找到 App 程序目录或内置 Python。请使用完整解压后的拾光相册文件夹。", "拾光相册");
+                ShowMessage("没有找到 App 程序目录或内置 Python。请使用完整解压后的拾光相册文件夹。", "拾光相册");
                 return 1;
             }
-            if (LooksLikeTempUnpack(root))
+            if (LooksLikeTempUnpack(root) && !NoDialog)
             {
                 var ask = MessageBox.Show("当前像是在压缩包的临时目录里运行。请先解压到普通文件夹再打开，否则关闭后文件可能消失。\n\n仍要继续吗？", "拾光相册", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
                 if (ask != DialogResult.Yes) return 1;
@@ -42,30 +50,30 @@ internal static class Program
             Directory.CreateDirectory(dataDir);
             Directory.CreateDirectory(Path.Combine(dataDir, "thumbs"));
             Directory.CreateDirectory(Path.Combine(dataDir, "faces"));
-            string url = "http://127.0.0.1:" + Port + "/";
+            string url = "http://127.0.0.1:" + port + "/";
             string dataKey = DataKey(dataDir);
             if (stop)
             {
                 return StopServer(url, dataKey, appPy);
             }
-            if (IsOurServer(url, dataKey))
+            if (PortBusy(port))
             {
-                OpenBrowser(url + (IsEmptyLibrary(url) ? "#scan" : ""));
-                return 0;
-            }
-            if (PortBusy())
-            {
-                MessageBox.Show("端口 " + Port + " 已被其他程序占用，拾光没有改用别的资料库。", "拾光相册");
+                if (IsOurServer(url, dataKey))
+                {
+                    if (!noBrowser) OpenBrowser(url + (IsEmptyLibrary(url) ? "#scan" : ""));
+                    return 0;
+                }
+                ShowMessage("端口 " + port + " 已被其他程序实际占用。请关闭占用程序，或设置 PHOTO_LIBRARY_PORT 后再启动。", "拾光相册");
                 return 1;
             }
             var psi = new ProcessStartInfo();
             psi.FileName = File.Exists(pythonw) ? pythonw : python;
-            psi.Arguments = "\"" + appPy + "\" --port " + Port;
+            psi.Arguments = "\"" + appPy + "\" --port " + port;
             psi.WorkingDirectory = appDir;
             psi.UseShellExecute = false;
             psi.CreateNoWindow = true;
             psi.EnvironmentVariables["PHOTO_LIBRARY_DATA"] = dataDir;
-            psi.EnvironmentVariables["PHOTO_LIBRARY_PORT"] = Port.ToString();
+            psi.EnvironmentVariables["PHOTO_LIBRARY_PORT"] = port.ToString();
             psi.EnvironmentVariables["PHOTO_MODEL_ROOT"] = Path.Combine(appDir, "resources", "models");
             psi.EnvironmentVariables["PHOTO_GEO_ROOT"] = Path.Combine(appDir, "resources", "geo");
             psi.EnvironmentVariables["PHOTO_FACE_LABEL_DIR"] = Path.Combine(appDir, "web", "assets", "face-labels");
@@ -75,7 +83,7 @@ internal static class Program
             psi.EnvironmentVariables["PYTHONPATH"] = appDir;
             psi.EnvironmentVariables["PYTHONUTF8"] = "1";
             psi.EnvironmentVariables["NO_ALBUMENTATIONS_UPDATE"] = "1";
-            psi.EnvironmentVariables["PHOTO_UI_IDLE_EXIT_SECONDS"] = "8";
+            psi.EnvironmentVariables["PHOTO_UI_IDLE_EXIT_SECONDS"] = noBrowser ? "0" : "8";
             string log = Path.Combine(dataDir, "server.log");
             string err = Path.Combine(dataDir, "server-error.log");
             psi.RedirectStandardOutput = true;
@@ -83,7 +91,7 @@ internal static class Program
             var proc = Process.Start(psi);
             if (proc == null)
             {
-                MessageBox.Show("无法启动拾光后台。", "拾光相册");
+                ShowMessage("无法启动拾光后台。", "拾光相册");
                 return 1;
             }
             Drain(proc.StandardOutput, log);
@@ -95,7 +103,7 @@ internal static class Program
                 {
                     File.WriteAllText(Path.Combine(dataDir, "server.pid"), proc.Id.ToString(), Encoding.ASCII);
                     bool empty = IsEmptyLibrary(url);
-                    if (empty)
+                    if (empty && !noBrowser)
                     {
                         using (var form = new FirstRunForm())
                         {
@@ -103,19 +111,24 @@ internal static class Program
                                 StartScan(url, form.Roots, FaceModelReady(url));
                         }
                     }
-                    OpenBrowser(url + (empty ? "#scan" : ""));
+                    if (!noBrowser) OpenBrowser(url + (empty ? "#scan" : ""));
                     return 0;
                 }
                 Thread.Sleep(500);
             }
-            MessageBox.Show("启动失败，请查看 Data\\server-error.log", "拾光相册");
+            ShowMessage("启动失败，请查看 Data\\server-error.log", "拾光相册");
             return 1;
         }
         catch (Exception ex)
         {
-            MessageBox.Show(ex.Message, "拾光启动失败");
+            ShowMessage(ex.Message, "拾光启动失败");
             return 1;
         }
+    }
+
+    private static void ShowMessage(string text, string caption)
+    {
+        if (!NoDialog) MessageBox.Show(text, caption);
     }
 
     private static void Drain(StreamReader reader, string path)
@@ -169,27 +182,36 @@ internal static class Program
         catch { return false; }
     }
 
-    private static bool PortBusy()
+    private static int ResolvePort()
     {
+        int port;
+        string raw = Environment.GetEnvironmentVariable("PHOTO_LIBRARY_PORT");
+        if (!String.IsNullOrWhiteSpace(raw) && Int32.TryParse(raw, out port) &&
+            port >= 1 && port <= 65535)
+            return port;
+        return DefaultPort;
+    }
+
+    private static bool PortBusy(int port)
+    {
+        TcpClient client = new TcpClient();
         try
         {
-            var req = (HttpWebRequest)WebRequest.Create("http://127.0.0.1:" + Port + "/api/health");
-            req.Timeout = 800;
-            using (var resp = req.GetResponse()) { return true; }
-        }
-        catch (WebException ex)
-        {
-            if (ex.Response != null) return true;
-            return false;
+            IAsyncResult result = client.BeginConnect(IPAddress.Loopback, port, null, null);
+            bool connected = result.AsyncWaitHandle.WaitOne(800);
+            if (!connected) return false;
+            client.EndConnect(result);
+            return client.Connected;
         }
         catch { return false; }
+        finally { client.Close(); }
     }
 
     private static int StopServer(string url, string dataKey, string appPy)
     {
         if (!IsOurServer(url, dataKey))
         {
-            MessageBox.Show("没有正在运行的拾光，或当前端口不是这份资料库。", "拾光相册");
+            ShowMessage("没有正在运行的拾光，或当前端口不是这份资料库。", "拾光相册");
             return 1;
         }
         try
@@ -205,12 +227,12 @@ internal static class Program
                 if (!IsOurServer(url, dataKey)) return 0;
                 Thread.Sleep(250);
             }
-            MessageBox.Show("后台没有在安全点停住，未强制结束。", "拾光相册");
+            ShowMessage("后台没有在安全点停住，未强制结束。", "拾光相册");
             return 1;
         }
         catch (Exception ex)
         {
-            MessageBox.Show("停止失败：" + ex.Message, "拾光相册");
+            ShowMessage("停止失败：" + ex.Message, "拾光相册");
             return 1;
         }
     }
@@ -237,7 +259,7 @@ internal static class Program
     private static void OpenBrowser(string url)
     {
         try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); }
-        catch { MessageBox.Show("浏览器没有自动打开。请手动访问：\n" + url, "拾光相册"); }
+        catch { ShowMessage("浏览器没有自动打开。请手动访问：\n" + url, "拾光相册"); }
     }
 
     private static string HttpGet(string url)

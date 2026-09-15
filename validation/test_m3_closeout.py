@@ -105,6 +105,34 @@ class M3CloseoutTests(unittest.TestCase):
             self.client.get("/api/photos", params={"map_cell": marker["cell"], "map_lat_bucket": marker["lat_bucket"], "map_lng_bucket": marker["lng_bucket"], "map_west": 20}).status_code,
         )
 
+    def test_world_wrapped_viewport_keeps_map_marker_clickable(self):
+        with self.module.db() as connection:
+            insert_asset(
+                connection,
+                1,
+                WORK / "europe.jpg",
+                latitude=41.24,
+                longitude=9.19,
+            )
+        bounds = {"west": -240, "south": -20, "east": 240, "north": 80, "zoom": 2}
+        marker_response = self.client.get("/api/places", params=bounds)
+        self.assertEqual(200, marker_response.status_code, marker_response.text)
+        marker = marker_response.json()["clusters"][0]
+        clicked = self.client.get(
+            "/api/photos",
+            params={
+                "map_cell": marker["cell"],
+                "map_lat_bucket": marker["lat_bucket"],
+                "map_lng_bucket": marker["lng_bucket"],
+                "map_west": bounds["west"],
+                "map_south": bounds["south"],
+                "map_east": bounds["east"],
+                "map_north": bounds["north"],
+            },
+        )
+        self.assertEqual(200, clicked.status_code, clicked.text)
+        self.assertEqual(1, clicked.json()["total"])
+
     def test_root_scoped_missing_reconciliation_and_short_write(self):
         root = Path(self.temp.name) / "root"
         sibling = Path(self.temp.name) / "root-similar"

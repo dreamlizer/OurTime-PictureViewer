@@ -191,6 +191,7 @@
   align-items:center;
   gap:6px;
 }
+#detail-dialog.is-loading .photo-export-control{display:none}
 #detail-dialog #export-annotated-photo{
   display:grid;
   place-items:center;

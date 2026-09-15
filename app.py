@@ -33,14 +33,20 @@ from fastapi.staticfiles import StaticFiles
 from PIL import Image, ImageOps, ExifTags, IptcImagePlugin
 from pydantic import BaseModel, Field
 from metadata_reader import read_metadata, close_readers
-from geo_labels import PlaceIndex
+from geo_labels import PlaceIndex, administrative_prefix, common_admin_scope
 from object_labels import classify_image, classify_images, model_ready, runtime_name as object_runtime, BATCH_SIZE
 from library_db import (
     ACTIVE_ASSET, ASSET_LIST_COLUMNS, init_schema, load_place_rules,
     migrate_place_overrides, place_rules_version, recover_interrupted_jobs,
     register_collations, upsert_place_rule,
 )
-from browse_queries import directory_predicate as directory_clause, fetch_people, fetch_photos, nearby_photo_spec
+from browse_queries import (
+    directory_predicate as directory_clause,
+    fetch_people,
+    fetch_photos,
+    map_viewport_predicate,
+    nearby_photo_spec,
+)
 from map_area_service import (
     map_area_preview_payload,
     map_area_selection_fingerprint,
@@ -325,7 +331,12 @@ async def local_only(request: Request, call_next):
     origin = request.headers.get('origin')
     if origin and origin not in {f'http://{request.headers.get("host")}', f'https://{request.headers.get("host")}'}:
         return JSONResponse({'detail':'不允许跨站请求'}, status_code=403)
-    return await call_next(request)
+    response=await call_next(request)
+    path=request.url.path
+    if path=='/' or path.endswith(('.html','.js','.css')):
+        response.headers['Cache-Control']='no-cache, no-store, must-revalidate'
+        response.headers['Pragma']='no-cache'
+    return response
 
 class ApiProblem(HTTPException):
     def __init__(self,status_code,detail,error_code,**extra):
@@ -2645,7 +2656,29 @@ def preview_map_area(body:MapAreaPreviewRequest):
     with db() as c:
         c.execute('BEGIN')
         rows=select_map_area_rows(c,area,ACTIVE_ASSET)
-        return map_area_preview_payload(area,rows)
+        payload=map_area_preview_payload(area,rows)
+        labels=[]
+        unresolved={}
+        for row in rows:
+            automatic=(row['place'] or '').strip()
+            if administrative_prefix(automatic):
+                labels.append(automatic)
+                continue
+            if row['latitude'] is None or row['longitude'] is None:
+                continue
+            key=(
+                round(float(row['latitude'])*20),
+                round(float(row['longitude'])*20),
+            )
+            unresolved.setdefault(
+                key,(float(row['latitude']),float(row['longitude']))
+            )
+        for latitude,longitude in unresolved.values():
+            label,_=PLACES.nearest(latitude,longitude,False)
+            if label:
+                labels.append(label)
+        payload['suggested_place']=common_admin_scope(labels)
+        return payload
 
 
 @app.post('/api/places/area/apply')
@@ -2727,6 +2760,19 @@ def apply_map_area(body:MapAreaApplyRequest,request:Request):
             return finish_operation(c,operation_id,result)
 
 
+MAP_CLUSTER_MIN_ZOOM=1
+MAP_CLUSTER_MAX_ZOOM=18
+
+
+def map_cluster_spec(zoom):
+    level=max(MAP_CLUSTER_MIN_ZOOM,min(int(math.floor(float(zoom))),MAP_CLUSTER_MAX_ZOOM))
+    return level,90.0/(2**level)
+
+
+def map_cluster_id(level,lat_bucket,lng_bucket):
+    return f'{int(level)}:{int(lat_bucket)}:{int(lng_bucket)}'
+
+
 @app.get('/api/places')
 def places(q:str='', offset:int=0, limit:int=80, west:float|None=None, south:float|None=None, east:float|None=None, north:float|None=None, zoom:float=11):
     values=[]
@@ -2738,17 +2784,21 @@ def places(q:str='', offset:int=0, limit:int=80, west:float|None=None, south:flo
     grouped='SELECT coalesce(nullif(a.manual_place,\'\'), a.place) place, count(*) n, avg(a.latitude) latitude, avg(a.longitude) longitude FROM assets a WHERE '+ACTIVE_ASSET+' GROUP BY place '
     with db() as c:
         if None not in (west,south,east,north):
-            cell=max(0.02, min(8.0, 360/(2**max(1,min(float(zoom),18)))))
+            cluster_zoom,cell=map_cluster_spec(zoom)
+            try:
+                viewport_clause,viewport_values=map_viewport_predicate(west,south,east,north)
+            except ValueError as exc:
+                raise HTTPException(400,str(exc)) from exc
             grouped_map='''SELECT CAST(floor(a.latitude/?) AS INTEGER) lat_bucket,
                                   CAST(floor(a.longitude/?) AS INTEGER) lng_bucket,
                                   avg(a.latitude) lat,avg(a.longitude) lon,
                                   count(*) n,min(a.id) anchor_id,
-                                  max(coalesce(nullif(a.manual_place,''),a.place)) place
+                                  max(coalesce(nullif(a.manual_place,''),a.place)) place,
+                                  count(DISTINCT coalesce(nullif(a.manual_place,''),a.place,'')) place_count
                            FROM assets a WHERE '''+ACTIVE_ASSET+'''
-                             AND a.latitude BETWEEN ? AND ?
-                             AND a.longitude BETWEEN ? AND ?
+                             AND '''+viewport_clause+'''
                            GROUP BY lat_bucket,lng_bucket'''
-            map_values=(cell,cell,south,north,west,east)
+            map_values=(cell,cell,*viewport_values)
             total_clusters=c.execute(
                 'SELECT count(*) FROM ('+grouped_map+') grouped',map_values
             ).fetchone()[0]
@@ -2757,11 +2807,23 @@ def places(q:str='', offset:int=0, limit:int=80, west:float|None=None, south:flo
                 map_values,
             ).fetchall()
             return {
-                'mode':'map','zoom':zoom,
+                'mode':'map','zoom':zoom,'cluster_zoom':cluster_zoom,
                 'clusters':[{
                     'latitude':r['lat'],'longitude':r['lon'],'count':r['n'],
-                    'place':r['place'],'anchor_id':r['anchor_id'],'cell':cell,
+                    'place':r['place'] if r['place_count']==1 else '',
+                    'anchor_id':r['anchor_id'],'cell':cell,
                     'lat_bucket':r['lat_bucket'],'lng_bucket':r['lng_bucket'],
+                    'cluster_id':map_cluster_id(
+                        cluster_zoom,r['lat_bucket'],r['lng_bucket']
+                    ),
+                    'parent_id':(
+                        map_cluster_id(
+                            cluster_zoom-1,
+                            int(r['lat_bucket'])//2,
+                            int(r['lng_bucket'])//2,
+                        )
+                        if cluster_zoom>MAP_CLUSTER_MIN_ZOOM else None
+                    ),
                 } for r in rows],
                 'total_clusters':total_clusters,
                 'truncated':total_clusters>len(rows),

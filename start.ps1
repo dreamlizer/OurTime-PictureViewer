@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'ourtime-config.ps1')
 $projectRoot = $PSScriptRoot
 $dataRoot = [IO.Path]::GetFullPath($env:PHOTO_LIBRARY_DATA)
@@ -37,10 +37,15 @@ function Test-OurTimeOwnedPort {
     return $false
 }
 
+function Open-OurTimePage {
+    $stamp = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+    Start-Process "$serverUrl/?start=$stamp"
+}
+
 try {
     if (Test-OurTimePage) {
         if (-not (Test-OurTimeOwnedPort)) { throw "端口 $port 已被其他程序占用，拾光没有改用别的资料库。" }
-        if ($env:PHOTO_NO_BROWSER -ne '1') { Start-Process $serverUrl }
+        if ($env:PHOTO_NO_BROWSER -ne '1') { Open-OurTimePage }
         exit 0
     }
 } catch {
@@ -67,7 +72,7 @@ for ($attempt = 0; $attempt -lt 45; $attempt++) {
     if (Test-OurTimePage) {
         $health = Invoke-RestMethod -Uri "$serverUrl/api/health" -TimeoutSec 2
         ([int]$health.pid) | Set-Content -LiteralPath (Join-Path $dataRoot 'server.pid') -Encoding ASCII
-        if ($env:PHOTO_NO_BROWSER -ne '1') { Start-Process $serverUrl }
+        if ($env:PHOTO_NO_BROWSER -ne '1') { Open-OurTimePage }
         exit 0
     }
     if ($process.HasExited) { break }

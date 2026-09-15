@@ -58,11 +58,11 @@ def seed(data):
     try:
         init_schema(connection)
         points = [
-            (1, 39.9000, 116.4000, (97, 129, 111)),
-            (2, 39.9010, 116.4010, (154, 118, 82)),
-            (3, 39.9200, 116.4200, (91, 108, 139)),
+            (1, 39.9000, 116.4000, "北京市 · 朝阳区 · 双井街道", (97, 129, 111)),
+            (2, 39.9010, 116.4010, "北京市 · 朝阳区 · 劲松街道", (154, 118, 82)),
+            (3, 39.9200, 116.4200, "北京市 · 东城区 · 朝内街道", (91, 108, 139)),
         ]
-        for asset_id, latitude, longitude, color in points:
+        for asset_id, latitude, longitude, place, color in points:
             digest = f"{asset_id:064x}"
             original = originals / f"{asset_id}.jpg"
             Image.new("RGB", (320, 220), color).save(original, quality=88)
@@ -73,8 +73,8 @@ def seed(data):
                      latitude,longitude,place,manual_place,notes,face_state,
                      created_at,excluded,exclude_reason,derivative_policy
                    ) VALUES (?,?,320,220,'JPEG','{}','2026-01-02T03:04:05',
-                             ?,?,'合成原始地点',NULL,'',0,datetime('now'),0,'','preserve')""",
-                (asset_id, digest, latitude, longitude),
+                             ?,?,?,NULL,'',0,datetime('now'),0,'','preserve')""",
+                (asset_id, digest, latitude, longitude, place),
             )
             connection.execute(
                 """INSERT INTO files(
@@ -151,7 +151,7 @@ def main():
                 center_before = page.evaluate(
                     "() => ({lat:state.placeMap.getCenter().lat,lng:state.placeMap.getCenter().lng})"
                 )
-                page.locator("#map-area-start").click()
+                page.locator("#map-area-start").click(force=True)
                 check(
                     page.evaluate(
                         "() => OurTimeMapAreaEditor.isActive() && !state.placeMap.dragging.enabled()"
@@ -178,6 +178,14 @@ def main():
                     results,
                 )
                 check(
+                    page.locator("#map-area-name").input_value()
+                    == "北京市 · 朝阳区"
+                    and "共同属于 北京市 · 朝阳区"
+                    in page.locator("#map-area-preview-note").inner_text(),
+                    "同一区内框选会自动填写共同的市区层级",
+                    results,
+                )
+                check(
                     page.locator("#map-area-start").evaluate(
                         """button => button.dataset.phase==='selected'
                           && button.textContent.includes('框选已完成')
@@ -198,7 +206,7 @@ def main():
                 page.screenshot(
                     path=REPORT_DIR / "rectangle-preview.png", full_page=True
                 )
-                page.locator("#map-area-name").fill("北京 · 合成园区")
+                page.locator("#map-area-name").fill("北京市 · 朝阳区 · 合成园区")
                 page.locator("#map-area-save").click()
                 page.wait_for_function(
                     "() => document.getElementById('toast').textContent.includes('修改 2 张')"
@@ -228,8 +236,8 @@ def main():
                     ).fetchone()[0]
                 check(
                     saved == [
-                        (1, "北京 · 合成园区"),
-                        (2, "北京 · 合成园区"),
+                        (1, "北京市 · 朝阳区 · 合成园区"),
+                        (2, "北京市 · 朝阳区 · 合成园区"),
                         (3, None),
                     ]
                     and edit_count == 2,
@@ -315,7 +323,7 @@ def main():
                     "慢预览A晚到时不会覆盖较新的预览B",
                     results,
                 )
-                page.locator("#map-area-name").fill("北京 · 冲突目标")
+                page.locator("#map-area-name").fill("北京市 · 朝阳区 · 冲突目标")
                 with sqlite3.connect(data / "library.sqlite3") as connection:
                     connection.execute(
                         "UPDATE assets SET manual_place='并发地点' WHERE id=1"
@@ -337,7 +345,7 @@ def main():
                 check(
                     places == [
                         ("并发地点",),
-                        ("北京 · 合成园区",),
+                        ("北京市 · 朝阳区 · 合成园区",),
                         (None,),
                     ],
                     "冲突没有偷写新的地点",

@@ -102,9 +102,13 @@ class M2BackendTests(unittest.TestCase):
         self.assertTrue(all(item["state_committed"] for item in results))
 
     def test_map_floor_grid_count_click_parity_and_truncation(self):
-        cell = 0.02
+        _cluster_zoom, cell = self.module.map_cluster_spec(15)
         points = [(39.90001 + i * 0.0000001, 116.40001 + i * 0.0000001) for i in range(501)]
-        points += [(0.01999, 0.01999), (0.02001, 0.02001), (-0.0001, -0.0001)]
+        points += [
+            (cell - 0.000001, cell - 0.000001),
+            (cell + 0.000001, cell + 0.000001),
+            (-0.0001, -0.0001),
+        ]
         with self.module.db() as connection:
             for asset_id, (latitude, longitude) in enumerate(points, 1):
                 insert_asset(connection, asset_id, f"{asset_id:064x}", latitude, longitude)
@@ -157,6 +161,34 @@ class M2BackendTests(unittest.TestCase):
         self.assertEqual(400, len(payload["clusters"]))
         self.assertEqual(420, payload["total_clusters"])
         self.assertTrue(payload["truncated"])
+
+    def test_map_clusters_expose_a_stable_parent_child_hierarchy(self):
+        with self.module.db() as connection:
+            insert_asset(connection, 1, f"{1:064x}", 0.005, 0.005)
+            insert_asset(connection, 2, f"{2:064x}", 0.030, 0.005)
+
+        parent_payload = self.client.get(
+            "/api/places?west=0&south=0&east=0.05&north=0.05&zoom=11"
+        ).json()
+        child_payload = self.client.get(
+            "/api/places?west=0&south=0&east=0.05&north=0.05&zoom=12"
+        ).json()
+
+        self.assertEqual(11, parent_payload["cluster_zoom"])
+        self.assertEqual(12, child_payload["cluster_zoom"])
+        self.assertEqual(1, len(parent_payload["clusters"]))
+        self.assertEqual(2, len(child_payload["clusters"]))
+        parent = parent_payload["clusters"][0]
+        self.assertEqual(2, parent["count"])
+        self.assertTrue(parent["cluster_id"])
+        self.assertEqual(
+            {parent["cluster_id"]},
+            {child["parent_id"] for child in child_payload["clusters"]},
+        )
+        self.assertEqual(
+            parent["count"],
+            sum(child["count"] for child in child_payload["clusters"]),
+        )
 
 
 if __name__ == "__main__":

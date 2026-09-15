@@ -1,4 +1,4 @@
-$script:OurTimeRoot = $PSScriptRoot
+﻿$script:OurTimeRoot = $PSScriptRoot
 
 function Get-OurTimeSettings {
     $settings = @{}

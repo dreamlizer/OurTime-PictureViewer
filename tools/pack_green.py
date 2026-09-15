@@ -6,14 +6,15 @@ import shutil
 import stat
 import subprocess
 import sys
+import sysconfig
+import json
+from datetime import datetime, timezone
+from hashlib import sha256
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-PY_HOME = Path(r"C:\Users\A\AppData\Local\Programs\Python\Python312")
-VENV_SITE = Path(r"C:\Users\A\PycharmProjects\ImageBrowser\.venv\Lib\site-packages")
-MODEL_SRC = Path(r"G:\CodexModels\insightface\models\buffalo_l")
-GEO_SRC = Path(r"G:\CodexModels\geo")
-CHROMIUM_SRC = Path(os.environ.get("LOCALAPPDATA", "")) / "ms-playwright" / "chromium-1200"
+PY_HOME = Path(sys.base_prefix)
+VENV_SITE = Path(sysconfig.get_paths()["purelib"])
 CSC = Path(r"C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe")
 
 ROOT_DISTS = [
@@ -29,6 +30,7 @@ APP_PY = [
     "app.py", "ourtime_config.py", "browse_queries.py", "geo_labels.py",
     "library_db.py", "map_area_service.py", "metadata_reader.py",
     "object_labels.py", "photo_export.py", "requirements.txt", "Logo.png",
+    "AppIcon.png",
 ]
 GEO_FILES = [
     "geonames/cities500.zip",
@@ -40,6 +42,57 @@ GEO_FILES = [
     "scenic/scenic_areas_metadata.csv",
 ]
 LIB_SKIP = {"site-packages", "test", "tests", "idlelib", "turtledemo", "tkinter", "ensurepip"}
+
+
+def load_local_settings() -> dict:
+    merged: dict = {}
+    for name in ("config.json", "config.local.json"):
+        path = ROOT / name
+        if not path.is_file():
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8-sig"))
+        except (OSError, ValueError, TypeError):
+            continue
+        if isinstance(payload, dict):
+            merged.update(payload)
+    return merged
+
+
+SETTINGS = load_local_settings()
+
+
+def configured_path(env_name: str, setting_name: str, default: Path) -> Path:
+    raw = os.environ.get(env_name) or SETTINGS.get(setting_name) or default
+    path = Path(str(raw))
+    if not path.is_absolute():
+        path = ROOT / path
+    return path.resolve()
+
+
+MODEL_ROOT = configured_path(
+    "OURTIME_PACKAGE_MODEL_ROOT", "model_root", ROOT / "resources" / "models"
+)
+MODEL_SRC = MODEL_ROOT / "models" / "buffalo_l"
+GEO_SRC = configured_path(
+    "OURTIME_PACKAGE_GEO_ROOT", "geo_root", ROOT / "resources" / "geo"
+)
+
+
+def chromium_source() -> Path:
+    configured = os.environ.get("OURTIME_PACKAGE_CHROMIUM") or SETTINGS.get("chromium_path")
+    if configured:
+        chrome = configured_path(
+            "OURTIME_PACKAGE_CHROMIUM", "chromium_path", Path(str(configured))
+        )
+        if chrome.is_file():
+            return chrome.parent.parent
+        if chrome.is_dir():
+            return chrome
+    return Path(os.environ.get("LOCALAPPDATA", "")) / "ms-playwright" / "chromium-1200"
+
+
+CHROMIUM_SRC = chromium_source()
 
 
 def log(msg: str) -> None:
@@ -155,7 +208,7 @@ def copy_runtime(dest_app: Path) -> None:
     dest = dest_app / "runtime"
     dest.mkdir(parents=True, exist_ok=True)
     for name in src.iterdir():
-        if name.name in {"face-gpu", "onnxruntime", "PIL", "defusedxml"}:
+        if name.name in {"face-gpu", "PIL", "defusedxml"}:
             continue
         if name.suffix.lower() in {".dll", ".pyd"} or name.name.startswith("pillow_heif") or name.name == "pillow_heif":
             if name.is_dir():
@@ -198,7 +251,7 @@ def fill_packed_imports(python_exe: Path, dest_site: Path) -> None:
 def make_icon(dest: Path) -> Path:
     from PIL import Image
 
-    src = ROOT / "Logo.png"
+    src = ROOT / "AppIcon.png"
     ico = dest / "logo.ico"
     img = Image.open(src).convert("RGBA")
     sizes = [(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)]
@@ -254,13 +307,68 @@ def write_pack_readme(root: Path) -> None:
         + "请先解压到普通文件夹，再双击 拾光.exe。不要在压缩包预览里直接打开。" + chr(10)
         + "启动没有黑框。第一次没有照片时，会弹出窗口：把文件夹拖进去或点选。" + chr(10)
         + "关掉网页后约 8 秒后台会退出；正在扫描时会等扫描告一段落。也可双击 停止拾光.exe。" + chr(10)
-        + "原照片不会移动。资料在 Data 文件夹。" + chr(10),
+        + "原照片不会移动。资料在 Data 文件夹。" + chr(10)
+        + "人物识别、离线地名和带标签导出已随包提供；地图底图仍需联网。" + chr(10),
+        encoding="utf-8",
+    )
+
+
+def file_sha256(path: Path) -> str:
+    digest = sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def write_manifest(root: Path) -> None:
+    try:
+        revision = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True
+        ).strip()
+        dirty = bool(
+            subprocess.check_output(
+                ["git", "status", "--porcelain"], cwd=ROOT, text=True
+            ).strip()
+        )
+    except Exception:
+        revision = "unknown"
+        dirty = True
+    relative_files = [
+        "拾光.exe",
+        "停止拾光.exe",
+        "App/app.py",
+        "App/web/app.js",
+        "App/AppIcon.png",
+        "App/resources/models/models/buffalo_l/det_10g.onnx",
+        "App/resources/models/models/buffalo_l/w600k_r50.onnx",
+        "App/resources/geo/geonames/cities500.zip",
+        "App/browsers/chromium-1200/chrome-win64/chrome.exe",
+    ]
+    manifest = {
+        "format_version": 1,
+        "product": "拾光相册",
+        "built_at_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "source_revision": revision,
+        "source_dirty": dirty,
+        "files": {
+            rel: file_sha256(root / Path(rel))
+            for rel in relative_files
+            if (root / Path(rel)).is_file()
+        },
+    }
+    (root / "PACKAGE-MANIFEST.json").write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
 
 
 def main() -> int:
-    dest_root = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else ROOT / "dist" / "拾光相册"
+    dest_root = (
+        Path(sys.argv[1]).resolve()
+        if len(sys.argv) > 1
+        else ROOT / "dist" / "拾光相册-绿色版"
+    )
     if dest_root.exists():
         log("Removing previous pack: " + str(dest_root))
         shutil.rmtree(dest_root)
@@ -277,6 +385,11 @@ def main() -> int:
         raise SystemExit("未找到可用的 site-packages：" + str(VENV_SITE))
     if not MODEL_SRC.is_dir():
         raise SystemExit("未找到 buffalo_l 模型：" + str(MODEL_SRC))
+    missing_geo = [rel for rel in GEO_FILES if not (GEO_SRC / rel).is_file()]
+    if missing_geo:
+        raise SystemExit("缺少打包所需地名数据：" + ", ".join(missing_geo))
+    if not CHROMIUM_SRC.is_dir():
+        raise SystemExit("未找到打包所需 Chromium：" + str(CHROMIUM_SRC))
 
     copy_python(app_dir / "python")
     dest_site = app_dir / "python" / "Lib" / "site-packages"
@@ -299,13 +412,6 @@ def main() -> int:
     copy_runtime(app_dir)
     if (ROOT / "tools" / "exiftool").is_dir():
         copy_tree(ROOT / "tools" / "exiftool", app_dir / "tools" / "exiftool")
-    labels = ROOT / "data" / "人名标签"
-    if labels.is_dir():
-        dest_labels = app_dir / "web" / "assets" / "face-labels"
-        dest_labels.mkdir(parents=True, exist_ok=True)
-        for png in labels.glob("*.png"):
-            copy_file(png, dest_labels / png.name)
-
     log("Copying InsightFace buffalo_l...")
     copy_tree(MODEL_SRC, app_dir / "resources" / "models" / "models" / "buffalo_l")
     log("Copying geo data...")
@@ -314,13 +420,10 @@ def main() -> int:
         if src.is_file():
             copy_file(src, app_dir / "resources" / "geo" / rel)
         else:
-            log("  missing geo " + rel)
+            raise RuntimeError("缺少地名数据：" + str(src))
 
-    if CHROMIUM_SRC.is_dir():
-        log("Copying Chromium for annotated export...")
-        copy_tree(CHROMIUM_SRC, app_dir / "browsers" / "chromium-1200")
-    else:
-        log("Chromium-1200 not found; export-with-labels will be unavailable.")
+    log("Copying Chromium for annotated export...")
+    copy_tree(CHROMIUM_SRC, app_dir / "browsers" / "chromium-1200")
 
     write_config(app_dir)
     for doc in ("README.md", "THIRD_PARTY_NOTICES.md", "docs/SETUP.md", "docs/PRIVACY-AND-DATA.md"):
@@ -331,12 +434,18 @@ def main() -> int:
     ico = make_icon(app_dir)
     log("Compiling launcher...")
     compile_launcher(dest_root, ico)
+    write_manifest(dest_root)
 
     zip_path = dest_root.with_suffix(".zip")
     if zip_path.exists():
         zip_path.unlink()
     log("Creating zip...")
-    subprocess.check_call(["tar", "-acf", str(zip_path), "-C", str(dest_root.parent), dest_root.name])
+    shutil.make_archive(
+        str(zip_path.with_suffix("")),
+        "zip",
+        root_dir=dest_root.parent,
+        base_dir=dest_root.name,
+    )
     size = sum(p.stat().st_size for p in dest_root.rglob("*") if p.is_file())
     log("DONE folder=" + str(dest_root))
     log("DONE zip=" + str(zip_path))

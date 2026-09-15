@@ -42,6 +42,46 @@ def directory_predicate(path):
     return "(path=? COLLATE NOCASE OR path LIKE ? ESCAPE '\\')", [str(path), pattern]
 
 
+def map_viewport_predicate(west, south, east, north):
+    """Return one SQL predicate for a Leaflet viewport, including wrapped worlds."""
+    try:
+        west, south, east, north = (
+            float(value) for value in (west, south, east, north)
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError('地图视野边界无效') from exc
+    if (
+        not all(math.isfinite(value) for value in (west, south, east, north))
+        or not -90 <= south < north <= 90
+    ):
+        raise ValueError('地图视野边界无效')
+
+    if -180 <= west <= 180 and -180 <= east <= 180 and west > east:
+        longitude_span = (east - west) % 360
+    else:
+        longitude_span = east - west
+    if longitude_span <= 0:
+        raise ValueError('地图视野边界无效')
+
+    latitude_clause = 'a.latitude BETWEEN ? AND ?'
+    values = [south, north]
+    if longitude_span >= 360:
+        return latitude_clause, values
+
+    canonical_west = (west + 180) % 360 - 180
+    unwrapped_east = canonical_west + longitude_span
+    if unwrapped_east <= 180:
+        return (
+            latitude_clause + ' AND a.longitude BETWEEN ? AND ?',
+            values + [canonical_west, unwrapped_east],
+        )
+    canonical_east = unwrapped_east - 360
+    return (
+        latitude_clause + ' AND (a.longitude>=? OR a.longitude<=?)',
+        values + [canonical_west, canonical_east],
+    )
+
+
 def parse_id_list(raw, limit=100, label='编号'):
     if not raw:
         return []
@@ -426,7 +466,7 @@ def fetch_photos(conn, *, q='', filter='all', person='', offset=0, limit=60, dir
             lng_bucket=float(map_lng_bucket)
         except (TypeError, ValueError) as exc:
             raise ValueError('地图定位点无效') from exc
-        if not all(math.isfinite(value) for value in (cell,lat_bucket,lng_bucket)) or not .02<=cell<=8:
+        if not all(math.isfinite(value) for value in (cell,lat_bucket,lng_bucket)) or not .00025<=cell<=45:
             raise ValueError('地图定位点无效')
         spec['where'] += (
             ' AND CAST(floor(a.latitude/?) AS INTEGER)=?'
@@ -434,20 +474,9 @@ def fetch_photos(conn, *, q='', filter='all', person='', offset=0, limit=60, dir
         )
         spec['values'].extend([cell,lat_bucket,cell,lng_bucket])
         if all(bounds_supplied):
-            try:
-                west,south,east,north=(float(value) for value in bounds_raw)
-            except (TypeError,ValueError) as exc:
-                raise ValueError('地图视野边界无效') from exc
-            if (
-                not all(math.isfinite(value) for value in (west,south,east,north))
-                or not -180<=west<east<=180 or not -90<=south<north<=90
-            ):
-                raise ValueError('地图视野边界无效')
-            spec['where'] += (
-                ' AND a.latitude BETWEEN ? AND ?'
-                ' AND a.longitude BETWEEN ? AND ?'
-            )
-            spec['values'].extend([south,north,west,east])
+            viewport_clause, viewport_values = map_viewport_predicate(*bounds_raw)
+            spec['where'] += ' AND ' + viewport_clause
+            spec['values'].extend(viewport_values)
     if nearby:
         nearby_clause, nearby_values, _anchor = nearby_photo_spec(conn, nearby, radius_m)
         spec['where'] += ' AND ' + nearby_clause

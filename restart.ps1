@@ -59,7 +59,8 @@ try {
         throw 'The restarted service did not confirm ownership.'
     }
     Write-Output "[OK] OurTime is running at $serverUrl"
-    Start-Process $serverUrl
+    $stamp = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+    Start-Process "$serverUrl/?restart=$stamp"
 } catch {
     $exitCode = 1
     Write-Error $_

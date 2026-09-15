@@ -84,7 +84,7 @@ def main():
         conn.commit()
         assert [item['id'] for item in cluster['items']] == [3, 2, 1], cluster
         try:
-            fetch_photos(conn, map_cell=.01, map_lat_bucket=1, map_lng_bucket=1)
+            fetch_photos(conn, map_cell=.0001, map_lat_bucket=1, map_lng_bucket=1)
         except ValueError as exc:
             assert '地图定位点无效' in str(exc)
         else:

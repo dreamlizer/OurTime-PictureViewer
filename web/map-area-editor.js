@@ -120,7 +120,10 @@
     element('map-area-many-wrap').hidden = true;
     element('map-area-retry').hidden = true;
     element('map-area-save').disabled = true;
-    if (!keepName) element('map-area-name').value = '';
+    if (!keepName) {
+      element('map-area-name').value = '';
+      element('map-area-name').dataset.suggestedValue = '';
+    }
   }
 
   function setBusy(busy) {
@@ -326,9 +329,19 @@
       ? `框内找到 ${fmt(count)} 张照片`
       : '框内未找到有定位的照片';
     renderSamples(data.samples);
+    const nameInput = element('map-area-name');
+    const previousSuggestion = nameInput.dataset.suggestedValue || '';
+    const suggestion = String(data.suggested_place || '').trim();
+    if (!nameInput.value.trim() || nameInput.value.trim() === previousSuggestion) {
+      nameInput.value = suggestion;
+    }
+    nameInput.dataset.suggestedValue = suggestion;
     const manual = Number(data.manual_place_count) || 0;
+    const scopeNote = suggestion
+      ? `根据选中照片判断，这一范围共同属于 ${suggestion}。`
+      : count ? '选中照片跨越多个省市，未自动填写地点名称。' : '';
     element('map-area-preview-note').textContent = count
-      ? `${count > 9 ? '仅展示部分预览，保存影响全部照片。' : ''}其中 ${fmt(manual)} 张已有人工地点，本次确认会替换这些地点。`
+      ? `${scopeNote}${count > 9 ? '仅展示部分预览，保存影响全部照片。' : ''}其中 ${fmt(manual)} 张已有人工地点，本次确认会替换这些地点。`
       : '可以重新框选其他范围。';
     const many = Boolean(data.requires_large_confirmation);
     element('map-area-many-wrap').hidden = !many;

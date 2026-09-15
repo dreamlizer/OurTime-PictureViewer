@@ -302,13 +302,43 @@ body:has(#objects-view:not([hidden])) #library-view { display: none; }
 .leaflet-container { font-family: var(--sans); }
 .leaflet-bar { border-radius: 7px; box-shadow: 0 2px 8px #26332f20; }
 .leaflet-bar a { color: var(--green); }
-.marker-cluster-small { background: #c4dcccbb; }
-.marker-cluster-small div { background: #dfeee3; color: #214c37; }
-.marker-cluster-medium { background: #79a68b99; }
-.marker-cluster-medium div { background: #3e7757; color: #fff; }
-.marker-cluster-large { background: #507a6399; }
-.marker-cluster-large div { background: #244d36; color: #fff; }
-.marker-cluster div { font: 600 12px/30px var(--sans); box-shadow: 0 0 0 1px #ffffff88; }
+.place-cluster-marker-shell {
+  border: 0;
+  background: transparent;
+}
+.places-map.is-cluster-transition .place-cluster-marker-shell {
+  transition: transform 260ms cubic-bezier(.22,.7,.25,1), opacity 180ms ease;
+}
+.place-cluster-marker {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  border: 5px solid #c4dcccbb;
+  border-radius: 50%;
+  background: #dfeee3;
+  color: #214c37;
+  box-shadow: 0 2px 8px #26332f32, 0 0 0 1px #ffffff88;
+  font: 600 12px/1 var(--sans);
+}
+.place-cluster-marker-shell.is-medium .place-cluster-marker {
+  border-color: #79a68b99;
+  background: #3e7757;
+  color: #fff;
+}
+.place-cluster-marker-shell.is-large .place-cluster-marker {
+  border-color: #507a6399;
+  background: #244d36;
+  color: #fff;
+}
+.place-cluster-marker-shell.is-single .place-cluster-marker {
+  width: 14px;
+  height: 14px;
+  margin: 5px;
+  border: 3px solid #eef6f0;
+  background: #356b4c;
+  box-shadow: 0 2px 8px #26332f55, 0 0 0 2px #356b4c99;
+}
 .photo-place-marker-shell { border: 0; background: transparent; }
 .photo-place-marker {
   display: flex;

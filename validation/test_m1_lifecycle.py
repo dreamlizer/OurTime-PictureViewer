@@ -339,6 +339,14 @@ print(json.dumps({'legacy':legacy,'stopped':stopped,'held':held,'final':final}))
             current = wait_health(port)
             self.assertEqual(str(data.resolve()), current["data_dir"])
             self.assertTrue((data / "server.pid").is_file())
+            request = urllib.request.Request(
+                f"http://127.0.0.1:{port}/app.js", method="HEAD"
+            )
+            with urllib.request.urlopen(request, timeout=5) as response:
+                self.assertEqual(
+                    "no-cache, no-store, must-revalidate",
+                    response.headers.get("Cache-Control"),
+                )
             stopped = subprocess.run(
                 ["powershell", "-NoProfile", "-File", str(ROOT / "stop.ps1")],
                 cwd=ROOT,
