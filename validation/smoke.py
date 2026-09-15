@@ -158,10 +158,10 @@ def main():
     )):
         fail("待命名标记或标签重叠比例防碰撞机制缺失")
     if not all(value in viewer for value in (
-        "FACE_LABEL_BASE_HEIGHT=56",
-        "FACE_LABEL_FACE_RATIO=.4",
-        "FACE_LABEL_MAX_SCALE=1.5",
-        "function faceLabelScaleForHeight(faceH){",
+       "FACE_LABEL_BASE_HEIGHT=56",
+       "FACE_LABEL_FACE_RATIO=.4",
+        "FACE_LABEL_MAX_SCALE=1.6",
+       "function faceLabelScaleForHeight(faceH){",
         "btn.style.setProperty('--face-scale',scale.toFixed(3));",
     )):
         fail("人名标签缺少随脸高度缩放的下限/上限合同")

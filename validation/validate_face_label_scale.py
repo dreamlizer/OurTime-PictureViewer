@@ -136,8 +136,8 @@ def main():
         evidence["synthetic"] = synthetic
         check(synthetic["formula"]["small"] == 1, "小于 140px 的脸保持当前标签尺寸", checks)
         check(abs(synthetic["formula"]["start"] - 1) < 1e-6, "140px 的脸正好开始放大", checks)
-        check(abs(synthetic["formula"]["cap"] - 1.5) < 1e-6, "210px 及以上封顶 1.5 倍", checks)
-        check(synthetic["formula"]["huge"] == 1.5, "特写不会超过 1.5 倍", checks)
+        check(abs(synthetic["formula"]["cap"] - 1.6) < 1e-6, "224px 及以上封顶 1.6 倍", checks)
+        check(synthetic["formula"]["huge"] == 1.6, "特写不会超过 1.6 倍", checks)
         check(
             abs(synthetic["small"]["scale"] - 1) < 0.02
             and abs(synthetic["small"]["width"] - 38) <= 1
@@ -146,21 +146,21 @@ def main():
             checks,
         )
         check(
-            abs(synthetic["large"]["scale"] - 1.5) < 0.02
-            and abs(synthetic["large"]["width"] - 57) <= 1
-            and abs(synthetic["large"]["height"] - 84) <= 1,
-            "大脸标签放大到 1.5 倍且宽高一起变",
+            abs(synthetic["large"]["scale"] - 1.6) < 0.02
+            and abs(synthetic["large"]["width"] - 60.8) <= 1
+            and abs(synthetic["large"]["height"] - 89.6) <= 1,
+            "大脸标签放大到 1.6 倍且宽高一起变",
             checks,
         )
         small_font = synthetic["small"]["fontSize"]
         large_font = synthetic["large"]["fontSize"]
         check(
-            small_font > 0 and abs(large_font / small_font - 1.5) < 0.08,
+            small_font > 0 and abs(large_font / small_font - 1.6) < 0.08,
             "字号与底牌使用同一倍率",
             checks,
         )
         check(
-            abs(synthetic["large"]["paddingLeft"] / max(synthetic["small"]["paddingLeft"], 0.01) - 1.5) < 0.12,
+            abs(synthetic["large"]["paddingLeft"] / max(synthetic["small"]["paddingLeft"], 0.01) - 1.6) < 0.12,
             "底牌内边距与字号同步放大",
             checks,
         )
@@ -175,11 +175,11 @@ def main():
         check(len(real) >= 2, "真实合影至少有两个已命名标签", checks)
         check(all(abs(item["scale"] - item["expected"]) < 0.02 for item in real), "真实合影的缩放系数按脸高计算", checks)
         check(all(item["scale"] >= 0.999 for item in real), "真实合影没有小于当前尺寸的标签", checks)
-        check(all(item["scale"] <= 1.501 for item in real), "真实合影没有超过 1.5 倍的标签", checks)
+        check(all(item["scale"] <= 1.601 for item in real), "真实合影没有超过 1.6 倍的标签", checks)
         if real[0]["faceH"] < 140:
             check(abs(real[0]["scale"] - 1) < 0.02, "真实合影里的小脸保持当前尺寸", checks)
-        if real[-1]["faceH"] >= 210:
-            check(abs(real[-1]["scale"] - 1.5) < 0.02, "真实合影里的大脸封顶 1.5 倍", checks)
+        if real[-1]["faceH"] >= 224:
+            check(abs(real[-1]["scale"] - 1.6) < 0.02, "真实合影里的大脸封顶 1.6 倍", checks)
         elif real[-1]["faceH"] > real[0]["faceH"] + 20 and real[-1]["scale"] + 1e-6 >= real[0]["scale"]:
             check(True, "真实合影里较大的脸标签不小于较小的脸", checks)
 
