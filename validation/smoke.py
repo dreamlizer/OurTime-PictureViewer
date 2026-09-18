@@ -273,6 +273,7 @@ def main():
         "setPointerCapture",
         "pointercancel",
         "requires_large_confirmation",
+        "将保留原名",
     )) or not all(value in backend for value in (
         "@app.post('/api/places/area/preview')",
         "@app.post('/api/places/area/apply')",
@@ -280,6 +281,8 @@ def main():
         "'selection_changed'",
         "'large_selection_confirmation_required'",
         "'BEGIN IMMEDIATE'",
+        "skipped_manual",
+        "upsert_place_area_rule",
     )) or ".map-area-selection" not in map_area_css:
         fail("地图矩形框选缺少公共入口、完整预览、指纹提交或绘制状态")
     ok("地点总览与单张位置页共用矩形框选、完整选集预览和安全提交")

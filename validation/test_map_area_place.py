@@ -90,6 +90,8 @@ class MapAreaPlaceTests(unittest.TestCase):
                 "files", "assets",
             ):
                 connection.execute(f"DELETE FROM {table}")
+            connection.execute("DELETE FROM place_area_rules")
+            connection.execute("DELETE FROM place_rules")
 
     @staticmethod
     def bounds() -> dict[str, float]:
@@ -349,6 +351,68 @@ class MapAreaPlaceTests(unittest.TestCase):
             )
             self.assertEqual("ok", connection.execute("PRAGMA integrity_check").fetchone()[0])
             self.assertEqual([], list(connection.execute("PRAGMA foreign_key_check")))
+
+    def test_keeps_finer_manual_place_and_remembers_rectangle(self) -> None:
+        with self.module.db() as connection:
+            insert_asset(connection, 1, 39.90, 116.40, manual_place=None)
+            insert_asset(connection, 2, 39.901, 116.401, manual_place="园区 · 3号楼")
+        preview = self.preview().json()
+        response = self.apply(preview, place="北京 · 测试园区")
+        self.assertEqual(200, response.status_code, response.text)
+        payload = response.json()
+        self.assertEqual(2, payload["matched"])
+        self.assertEqual(1, payload["updated"])
+        self.assertEqual(1, payload["skipped_manual"])
+        self.assertTrue(payload["remembered"])
+        with self.module.db() as connection:
+            rows = {
+                row["id"]: row["manual_place"]
+                for row in connection.execute("SELECT id, manual_place FROM assets")
+            }
+            self.assertEqual("北京 · 测试园区", rows[1])
+            self.assertEqual("园区 · 3号楼", rows[2])
+            self.assertEqual(1, connection.execute("SELECT count(*) FROM place_area_rules").fetchone()[0])
+        again = self.preview().json()
+        second = self.apply(again, place="北京 · 测试园区")
+        self.assertEqual(200, second.status_code, second.text)
+        self.assertEqual(0, second.json()["updated"])
+        self.assertEqual(1, second.json()["skipped_manual"])
+
+    def test_future_gps_inside_rectangle_uses_remembered_name(self) -> None:
+        with self.module.db() as connection:
+            insert_asset(connection, 1, 39.90, 116.40)
+        preview = self.preview().json()
+        applied = self.apply(preview, place="北京 · 测试园区")
+        self.assertEqual(200, applied.status_code, applied.text)
+        inside = self.module.nearest_place(39.9005, 116.4005)
+        outside = self.module.nearest_place(40.2, 116.8)
+        self.assertEqual("北京 · 测试园区", inside[0])
+        self.assertIn("框选", inside[1] or "")
+        self.assertIsNone(outside[0])
+
+    def test_smaller_rectangle_wins_over_larger_one(self) -> None:
+        with self.module.db() as connection:
+            insert_asset(connection, 1, 39.90, 116.40)
+        large = self.preview(bounds=self.bounds()).json()
+        self.assertEqual(200, self.apply(large, place="大范围园区").status_code)
+        small_bounds = {"west": 116.399, "south": 39.899, "east": 116.401, "north": 39.901}
+        small = self.preview(bounds=small_bounds).json()
+        self.assertEqual(200, self.apply(small, place="小楼").status_code)
+        label, source = self.module.nearest_place(39.90, 116.40)
+        self.assertEqual("小楼", label)
+        self.assertIn("框选", source or "")
+
+    def test_manual_place_keeps_winning_after_auto_hit(self) -> None:
+        with self.module.db() as connection:
+            insert_asset(connection, 1, 39.90, 116.40)
+        self.apply(self.preview().json(), place="北京 · 测试园区")
+        auto_name, _ = self.module.nearest_place(39.9002, 116.4002)
+        self.assertEqual("北京 · 测试园区", auto_name)
+        with self.module.db() as connection:
+            insert_asset(connection, 9, 39.9002, 116.4002, place=auto_name, manual_place="园区 · 东门")
+        detail = self.client.get("/api/photos/9").json()
+        self.assertEqual("园区 · 东门", detail["effective_place"])
+        self.assertEqual("园区 · 东门", detail["manual_place"])
 
 
 if __name__ == "__main__":

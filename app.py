@@ -37,8 +37,9 @@ from geo_labels import PlaceIndex, administrative_prefix, common_admin_scope
 from object_labels import classify_image, classify_images, model_ready, runtime_name as object_runtime, BATCH_SIZE
 from library_db import (
     ACTIVE_ASSET, ASSET_LIST_COLUMNS, init_schema, load_place_rules,
-    migrate_place_overrides, place_rules_version, recover_interrupted_jobs,
-    register_collations, upsert_place_rule,
+    load_place_area_rules, migrate_place_overrides, place_rules_version,
+    recover_interrupted_jobs, register_collations, upsert_place_area_rule,
+    upsert_place_rule,
 )
 from browse_queries import (
     directory_predicate as directory_clause,
@@ -151,9 +152,15 @@ def current_place_rules():
     with db() as c:
         return load_place_rules(c), place_rules_version(c)
 
+def current_place_area_rules():
+    with db() as c:
+        return load_place_area_rules(c), place_rules_version(c)
+
 def attach_place_rules():
     PLACES.overrides_loader = current_place_rules
+    PLACES.area_rules_loader = current_place_area_rules
     PLACES.overrides = None
+    PLACES.area_rules = None
     PLACES.override_version = None
     PLACES.nearest.cache_clear()
 
@@ -2721,11 +2728,16 @@ def apply_map_area(body:MapAreaApplyRequest,request:Request):
                     matched=len(rows),
                 )
             updated=0
+            skipped=0
             stamp=now()
             audit_bounds=dict(area['bounds'])
             for row in rows:
                 before=row['manual_place']
-                if (before or '')==place:
+                before_name=(before or '').strip()
+                if before_name==place:
+                    continue
+                if before_name:
+                    skipped+=1
                     continue
                 c.execute(
                     'UPDATE assets SET manual_place=? WHERE id=?',
@@ -2747,17 +2759,25 @@ def apply_map_area(body:MapAreaApplyRequest,request:Request):
                     ),
                 )
                 updated+=1
+            unchanged=len(rows)-updated-skipped
+            upsert_place_area_rule(
+                c, place, area['coordinate_space'], area['bounds'], '用户框选：'+place
+            )
             result={
                 'matched':len(rows),
                 'updated':updated,
-                'unchanged':len(rows)-updated,
+                'unchanged':unchanged,
+                'skipped_manual':skipped,
+                'remembered':True,
                 'name':place,
                 'message':(
-                    f'选中 {len(rows)} 张，修改 {updated} 张，'
-                    f'{len(rows)-updated} 张原本已是该地点；原图 GPS 未改变'
+                    f'选中 {len(rows)} 张：修改 {updated} 张，保留 {skipped} 张已单独改过的地点；'
+                    f'{unchanged} 张原名已是该地点。此范围已记住，以后新照片会自动使用该地点。原图 GPS 未改变'
                 ),
             }
-            return finish_operation(c,operation_id,result)
+            receipt=finish_operation(c,operation_id,result)
+    attach_place_rules()
+    return receipt
 
 
 MAP_CLUSTER_MIN_ZOOM=1
@@ -3493,6 +3513,7 @@ def backup():
     try: source.backup(target)
     finally: target.close();source.close()
     return {'path':str(path),'message':'数据库备份包含人物特征和全部标注；原照片仍在原位置，缩略图可重建'}
+
 
 app.mount('/',StaticFiles(directory=Path(os.environ.get('PHOTO_WEB_ROOT',str(BASE/'web'))),html=True),name='web')
 

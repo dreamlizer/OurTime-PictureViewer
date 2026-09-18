@@ -341,7 +341,7 @@
       ? `根据选中照片判断，这一范围共同属于 ${suggestion}。`
       : count ? '选中照片跨越多个省市，未自动填写地点名称。' : '';
     element('map-area-preview-note').textContent = count
-      ? `${scopeNote}${count > 9 ? '仅展示部分预览，保存影响全部照片。' : ''}其中 ${fmt(manual)} 张已有人工地点，本次确认会替换这些地点。`
+      ? `${scopeNote}${count > 9 ? '仅展示部分预览，保存影响全部照片。' : ''}其中 ${fmt(manual)} 张已有人工地点，若与本次名称不同将保留原名，不会替换。保存后，以后落入此范围的新照片会自动使用该地点。`
       : '可以重新框选其他范围。';
     const many = Boolean(data.requires_large_confirmation);
     element('map-area-many-wrap').hidden = !many;

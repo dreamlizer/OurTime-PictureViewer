@@ -8,6 +8,7 @@ import json
 from collections import defaultdict
 from functools import lru_cache
 from pathlib import Path
+from map_area_service import bounds_area_km2, match_place_area_rule
 csv.field_size_limit(10 * 1024 * 1024)
 
 DOMESTIC = {
@@ -163,6 +164,9 @@ class PlaceIndex:
         self.overrides = None
         self.overrides_loader = None
         self.override_version = None
+
+        self.area_rules = None
+        self.area_rules_loader = None
 
     def load_overrides(self):
         if self.overrides_loader:
@@ -556,24 +560,50 @@ class PlaceIndex:
                 self.set_overrides(items, version)
         elif include_overrides and self.overrides is None:
             self.load_overrides()
-        matched_override = None
-        for item in (self.overrides or ()) if include_overrides else ():
-            try:
-                plat, plon = float(item['latitude']), float(item['longitude'])
-                radius = float(item.get('radius_km') or 0.25)
-            except (KeyError, TypeError, ValueError):
-                continue
-            d = self._distance(lat, lon, plat, plon)
-            if d <= radius and item.get('name'):
-                matched_override = (item, d)
-                break
+        if include_overrides and self.area_rules_loader:
+            area_items, area_version = self.area_rules_loader()
+            if area_version != self.override_version or self.area_rules is None:
+                self.area_rules = area_items or []
+        elif include_overrides and self.area_rules is None:
+            self.area_rules = []
+        matched_rule = None
+        if include_overrides:
+            area_item, area_size = match_place_area_rule(self.area_rules, lat, lon)
+            if area_item and area_size is not None:
+                matched_rule = {
+                    'name': area_item['name'],
+                    'source': area_item.get('source') or '用户框选区域',
+                    'area_km2': area_size,
+                    'kind': 'area',
+                }
+            for item in self.overrides or ():
+                try:
+                    plat, plon = float(item['latitude']), float(item['longitude'])
+                    radius = float(item.get('radius_km') or 0.25)
+                except (KeyError, TypeError, ValueError):
+                    continue
+                name = str(item.get('name') or '').strip()
+                if not name:
+                    continue
+                distance = self._distance(lat, lon, plat, plon)
+                if distance > radius:
+                    continue
+                size = math.pi * radius * radius
+                if matched_rule is None or size < matched_rule['area_km2'] - 1e-9 or (
+                    abs(size - matched_rule['area_km2']) <= 1e-9 and matched_rule['kind'] != 'area'
+                ):
+                    matched_rule = {
+                        'name': name,
+                        'source': item.get('source') or f'用户确认常用地点，约 {distance*1000:.0f} 米',
+                        'area_km2': size,
+                        'kind': 'circle',
+                    }
 
         def selected(label, source):
             label = self._with_district(label, district)
-            if matched_override:
-                item, distance = matched_override
-                label = self.normalize_manual(label, item['name'])
-                source = item.get('source') or f'用户确认常用地点，约 {distance*1000:.0f} 米'
+            if matched_rule:
+                label = self.normalize_manual(label, matched_rule['name'])
+                source = matched_rule['source']
             return label, source
 
         candidates = []
@@ -584,11 +614,10 @@ class PlaceIndex:
         if not candidates:
             if district:
                 return selected(district, '离线行政区划边界；不是小区或街道精确地址')
-            if matched_override:
-                item, distance = matched_override
+            if matched_rule:
                 return (
-                    ' · '.join(_place_parts(item['name'])),
-                    item.get('source') or f'用户确认常用地点，约 {distance*1000:.0f} 米',
+                    ' · '.join(_place_parts(matched_rule['name'])),
+                    matched_rule['source'],
                 )
             return None, None
         def distance(p):
@@ -606,11 +635,10 @@ class PlaceIndex:
             return selected(district, '离线行政区划边界；不是小区或街道精确地址')
         d, p = min(scored, key=lambda x: x[0])
         if d > 80:
-            if matched_override:
-                item, distance = matched_override
+            if matched_rule:
                 return (
-                    ' · '.join(_place_parts(item['name'])),
-                    item.get('source') or f'用户确认常用地点，约 {distance*1000:.0f} 米',
+                    ' · '.join(_place_parts(matched_rule['name'])),
+                    matched_rule['source'],
                 )
             return None, None
         return selected(p[2], f'离线地名库最近聚居地，约 {d:.1f} 公里；不是精确地址')

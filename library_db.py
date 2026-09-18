@@ -136,6 +136,19 @@ def init_schema(conn):
           source TEXT,
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS place_area_rules (
+          id INTEGER PRIMARY KEY,
+          name TEXT NOT NULL,
+          coordinate_space TEXT NOT NULL CHECK(coordinate_space IN ('wgs84','gcj02')),
+          west REAL NOT NULL,
+          south REAL NOT NULL,
+          east REAL NOT NULL,
+          north REAL NOT NULL,
+          source TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL);
+        CREATE UNIQUE INDEX IF NOT EXISTS place_area_rules_bounds
+          ON place_area_rules(coordinate_space, west, south, east, north);
         CREATE TABLE IF NOT EXISTS place_rule_imports (
           path TEXT PRIMARY KEY,
           sha256 TEXT NOT NULL,
@@ -421,7 +434,10 @@ def load_place_rules(conn):
 
 def place_rules_version(conn):
     row = conn.execute("SELECT count(*) n, coalesce(max(updated_at),'') t FROM place_rules").fetchone()
-    return f"{row['n']}:{row['t']}"
+    areas = conn.execute(
+        "SELECT count(*) n, coalesce(max(updated_at),'') t FROM place_area_rules"
+    ).fetchone()
+    return f"{row['n']}:{row['t']}:{areas['n']}:{areas['t']}"
 
 
 def upsert_place_rule(conn, name, latitude, longitude, radius_km, source):
@@ -439,4 +455,45 @@ def upsert_place_rule(conn, name, latitude, longitude, radius_km, source):
              latitude=excluded.latitude, longitude=excluded.longitude, radius_km=excluded.radius_km,
              source=excluded.source, updated_at=excluded.updated_at""",
         (name, lat, lon, radius, source, created, stamp),
+    )
+
+
+def load_place_area_rules(conn):
+    rows = conn.execute(
+        """SELECT id, name, coordinate_space, west, south, east, north, source,
+                  created_at, updated_at
+           FROM place_area_rules ORDER BY id"""
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def upsert_place_area_rule(conn, name, coordinate_space, bounds, source):
+    label = str(name or "").strip()
+    space = str(coordinate_space or "").strip().lower()
+    if not label or space not in {"wgs84", "gcj02"} or not isinstance(bounds, dict):
+        raise ValueError("框选地点规则无效")
+    values = []
+    for key in ("west", "south", "east", "north"):
+        try:
+            value = float(bounds[key])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError("框选地点规则无效") from exc
+        if not (value == value) or abs(value) == float("inf"):
+            raise ValueError("框选地点规则无效")
+        values.append(value)
+    west, south, east, north = values
+    stamp = now()
+    existing = conn.execute(
+        """SELECT created_at FROM place_area_rules
+           WHERE coordinate_space=? AND west=? AND south=? AND east=? AND north=?""",
+        (space, west, south, east, north),
+    ).fetchone()
+    created = existing["created_at"] if existing else stamp
+    conn.execute(
+        """INSERT INTO place_area_rules(
+             name, coordinate_space, west, south, east, north, source, created_at, updated_at
+           ) VALUES (?,?,?,?,?,?,?,?,?)
+           ON CONFLICT(coordinate_space, west, south, east, north) DO UPDATE SET
+             name=excluded.name, source=excluded.source, updated_at=excluded.updated_at""",
+        (label, space, west, south, east, north, source, created, stamp),
     )

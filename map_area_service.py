@@ -93,6 +93,62 @@ def _inside(bounds, latitude, longitude):
     )
 
 
+def display_map_point(area, latitude, longitude):
+    latitude = float(latitude)
+    longitude = float(longitude)
+    if area["coordinate_space"] == "gcj02":
+        return map_area_wgs84_to_gcj02(latitude, longitude)
+    return latitude, longitude
+
+
+def gps_in_map_area(area, latitude, longitude):
+    point_lat, point_lng = display_map_point(area, latitude, longitude)
+    return _inside(area["bounds"], point_lat, point_lng)
+
+
+def bounds_area_km2(bounds):
+    south = float(bounds["south"])
+    north = float(bounds["north"])
+    west = float(bounds["west"])
+    east = float(bounds["east"])
+    mid_lat = (south + north) / 2
+    lat_km = abs(north - south) * 111.32
+    lng_km = abs(east - west) * 111.32 * math.cos(math.radians(mid_lat))
+    return max(lat_km * lng_km, 1e-12)
+
+
+def area_rule_as_map_area(rule):
+    return {
+        "coordinate_space": rule["coordinate_space"],
+        "bounds": {
+            "west": float(rule["west"]),
+            "south": float(rule["south"]),
+            "east": float(rule["east"]),
+            "north": float(rule["north"]),
+        },
+    }
+
+
+def match_place_area_rule(rules, latitude, longitude):
+    best = None
+    best_area = None
+    for item in rules or ():
+        name = str(item.get("name") or "").strip()
+        if not name:
+            continue
+        try:
+            area = area_rule_as_map_area(item)
+            if not gps_in_map_area(area, latitude, longitude):
+                continue
+            size = bounds_area_km2(area["bounds"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if best is None or size < best_area:
+            best = item
+            best_area = size
+    return best, best_area
+
+
 def select_map_area_rows(connection, area, active_asset_sql):
     columns = """
         a.id,a.sha256,a.latitude,a.longitude,a.manual_place,a.place,
