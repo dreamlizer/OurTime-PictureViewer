@@ -354,7 +354,7 @@
         + '<form data-ot="group-form" class="ot-home-range-form"><div class="ot-home-range-fields">'
         + '<label><span>从</span><span class="ot-home-number-field"><input data-ot="group-min" type="number" min="1" max="9999" step="1" inputmode="numeric" placeholder="不限" aria-label="最少人数"><b>人</b></span></label>'
         + '<i aria-hidden="true">—</i><label><span>到</span><span class="ot-home-number-field"><input data-ot="group-max" type="number" min="1" max="9999" step="1" inputmode="numeric" placeholder="不限" aria-label="最多人数"><b>人</b></span></label></div>'
-        + '<p class="ot-home-help">包含起止人数。只填左侧表示该人数以上，只填右侧表示该人数以下。</p><p data-ot="group-error" class="ot-home-range-error" hidden></p>'
+        + '<p data-ot="group-error" class="ot-home-range-error" hidden></p>'
         + '<div class="ot-home-range-actions"><button data-ot="group-clear" class="ot-home-button ot-home-quiet" type="button">清除</button><button class="ot-home-button ot-home-primary" type="submit">应用</button></div></form>');
       const form = popover.querySelector('[data-ot="group-form"]'), minInput = popover.querySelector('[data-ot="group-min"]'), maxInput = popover.querySelector('[data-ot="group-max"]');
       minInput.value = range.min || ''; maxInput.value = range.max || '';

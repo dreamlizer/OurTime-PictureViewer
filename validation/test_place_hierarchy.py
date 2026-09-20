@@ -63,6 +63,39 @@ def write_cities(root: Path) -> None:
 
 
 class PlaceHierarchyTests(unittest.TestCase):
+    def test_known_province_does_not_fall_back_to_foreign_namesake(self):
+        with tempfile.TemporaryDirectory() as work:
+            root = Path(work)
+            write_admin_rows(root)
+            index = PlaceIndex(root)
+            index.load()
+            self.assertEqual((), index._admin_path(['朝内'], 39.9, 116.4, '北京市'))
+            self.assertEqual(('河北省', '邯郸市', '大名县', '朝内街道'),
+                             index._admin_path(['朝内'], province_hint='河北省'))
+
+    def test_boundary_rejects_conflicting_automatic_detail(self):
+        self.assertEqual('北京市 · 朝阳区', PlaceIndex._with_district(
+            '河北省 · 滦平县 · 小营镇', '北京市 · 朝阳区'))
+        self.assertEqual('北京市 · 朝阳区 · 小营', PlaceIndex._with_district(
+            '北京市 · 小营', '北京市 · 朝阳区'))
+        self.assertEqual('北京市 · 朝阳区', PlaceIndex._with_district(
+            '北京市 · 通州区 · 同名镇', '北京市 · 朝阳区'))
+
+    def test_local_source_is_not_always_osm(self):
+        with tempfile.TemporaryDirectory() as work:
+            root=Path(work)
+            write_admin_rows(root)
+            folder=root/'beijing'
+            folder.mkdir()
+            (folder/'geonames_beijing_admin1_22.txt').write_text(
+                '1\tChaonei\tChaonei\t朝内\t39.9\t116.4\tP\tPPL\tCN\t\t22', encoding='utf-8')
+            index=PlaceIndex(root)
+            index.load()
+            index._district_at=lambda lat,lon:'北京市 · 朝阳区'
+            label,source=index.nearest(39.9,116.4,False)
+            self.assertEqual('北京市 · 朝阳区 · 朝内',label)
+            self.assertTrue(source.startswith('GeoNames'))
+
     def test_new_scans_receive_full_domestic_hierarchy(self) -> None:
         with tempfile.TemporaryDirectory() as work:
             root = Path(work)

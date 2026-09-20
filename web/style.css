@@ -118,6 +118,7 @@ body{overflow-anchor:none}
 .face-name{position:absolute;left:0;top:0;transform:none;padding:6px 5px;border-radius:3px;background:rgba(20,24,18,.38);color:#f6f1e6;font:13px/1.2 var(--serif);letter-spacing:.22em;writing-mode:vertical-rl;text-orientation:mixed;max-height:42%;overflow:hidden;white-space:nowrap;text-shadow:0 1px 10px #000a}
 .face-name.left,.face-name.right,.face-name.top,.face-name.bottom{transform:none}
 .face-name-layer.horizontal .face-name{writing-mode:horizontal-tb;letter-spacing:.06em;max-height:none;max-width:42%;padding:4px 8px}
+.face-name-layer .face-name.is-horizontal{writing-mode:horizontal-tb;letter-spacing:.06em;max-height:none;max-width:42%;padding:4px 8px}
 .face-name-layer[hidden]{display:none!important}
 
 

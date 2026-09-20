@@ -97,12 +97,34 @@ def main():
     backend = read(ROOT / "app.py")
     browse_queries = read(ROOT / "browse_queries.py")
     waterfall = read(WEB / "waterfall.js")
-    sources = {"app.js": app, "map-area-editor.js": map_area, "viewer.js": viewer, "viewer-overrides.css": viewer_overrides, "waterfall.js": waterfall, "index.html": html}
+    recent_operations = read(WEB / "recent-operations.js")
+    continuity = read(WEB / "browse-continuity.js")
+    sources = {"app.js": app, "map-area-editor.js": map_area, "viewer.js": viewer, "viewer-overrides.css": viewer_overrides, "waterfall.js": waterfall, "index.html": html, "recent-operations.js": recent_operations, "browse-continuity.js": continuity}
+    if not all(value in html for value in ('src="/recent-operations.js"','src="/browse-continuity.js"')) or not all(value in recent_operations for value in ('async function editPhotoNearby(', '/nearby-place', 'async function editPhotoMetadata(')) or 'register_recent_operations(app,globals())' not in backend:
+        fail('最近操作或浏览恢复缺少前后端接入点')
 
     order = re.findall(r'src="/(app\.js|map-area-editor\.js|viewer\.js|waterfall\.js)"', html)
     if order != ["app.js", "map-area-editor.js", "viewer.js", "waterfall.js"]:
         fail("index.html 脚本顺序应为 app.js -> map-area-editor.js -> viewer.js -> waterfall.js，实际 %s" % order)
     ok("index.html 先加载 app.js / map-area-editor.js，再加载 viewer.js / waterfall.js")
+
+    home_js = read(WEB / "home-discovery.js")
+    if not all(value in html for value in ('data-view="home"', 'src="/home-discovery.js"', 'id="home-view"')):
+        fail("首页入口、脚本或面板缺失")
+    if "const state={view:'home'" not in app or "/api/home/recommendations" not in backend:
+        fail("默认首页或推荐接口未接上")
+    if "recommendation_snapshot" not in waterfall or "recommendation_snapshot" not in viewer:
+        fail("推荐快照未进入瀑布或大图浏览上下文")
+    if "loadHomeDiscovery" not in home_js or "data-home-hide" not in home_js:
+        fail("首页发现脚本不完整")
+    home_py = read(ROOT / "home_recommendations.py")
+    if "CREATE TABLE IF NOT EXISTS home_catalog" not in home_py or "def rebuild_home_catalog" not in home_py:
+        fail("首页推荐目录未落到 home_recommendations.py")
+    if "/api/home/catalog/rebuild" not in backend or "start_home_catalog_rebuild" not in backend:
+        fail("扫描完成后的推荐目录更新入口未接上")
+    if 'id="home-refresh-catalog"' not in html or "refreshCatalog" not in home_js:
+        fail("首页缺少更新推荐入口")
+    ok("首页发现入口、默认视图和推荐快照已接上")
 
     for name in REQUIRED:
         defined = first_def(app, name)
@@ -150,8 +172,9 @@ def main():
         '<option value="plus">默认加号</option>',
         '<option value="pulse">呼吸绿点</option>',
         '<option value="ring">静态绿环</option>',
-        "FACE_LABEL_OVERLAP_LIMIT=.12",
-        "FACE_LABEL_FACE_OVERLAP_LIMIT=.25",
+        "FACE_LABEL_OVERLAP_LIMIT=.05",
+        "FACE_LABEL_FACE_OVERLAP_LIMIT=.35",
+        "faceLabelEyeRegion",
         "rectOverlapRatio",
         "maxFaceRatio",
         "labelOverlapRatio",
@@ -195,8 +218,10 @@ def main():
     ):
         fail("照片快捷命名布局退化，或合并候选没有限定为已命名人物")
     if not all(value in viewer for value in (
-        '<option value="top">优先上方</option>',
-        '<option value="bottom">优先下方</option>',
+        '<option value="top">偏上</option>',
+        '<option value="bottom">偏下</option>',
+        '<option value="auto">智能排布（默认）</option>',
+        '<option value="manual" disabled>自定义排版</option>',
         'data-face-id=',
         'face-hover-guide',
         'face-action-popover',
@@ -205,6 +230,9 @@ def main():
         "viewerCaptureEntityWrite('photo'",
         "queueEntityWrite('person',personId,()=>rememberPersonName(",
         'photo-people-popover',
+        'photo-people-hud',
+        'setFaceKindHighlight',
+        'data-face-kind',
         '/passersby`,',
     )) or "@app.post('/api/photos/{aid}/passersby')" not in backend:
         fail("照片人物缺少上下标签位置、悬停指向、单张纠错或批量路人能力")
@@ -247,7 +275,7 @@ def main():
         "showPhotoPlaceMap",
         "radiusM:PHOTO_PLACE_RADIUS_DEFAULT",
         "/nearby?radius_m=",
-        "/nearby-place",
+        "editPhotoNearby(Number(saved.id)",
         "function wgs84ToGcj02",
         "function gcj02ToWgs84",
         "function placeGpsBounds",
@@ -394,9 +422,21 @@ def main():
         or "viewer-loading" not in viewer
     ):
         fail("大图切换缺少加载提示")
-    if "if(loading){\n  clearViewerImage();" in viewer:
-        fail("大图切换时不应先清空旧图造成闪屏")
-    ok("大图切换时平滑过渡，不先清空造成闪屏")
+    if "textContent='加载中'" not in viewer or "加载中…" in viewer:
+        fail("大图加载文案必须只有加载中三个字")
+    if (
+        "top:14px" not in viewer_overrides
+        or "z-index:80" not in viewer_overrides
+        or "#detail-dialog.is-loading .viewer-photo-close" in viewer_overrides
+    ):
+        fail("big-viewer-loading-should-be-corner")
+    if "seedViewerFromThumb" not in viewer:
+        fail("missing-thumb-seed")
+    if ",220)" not in viewer:
+        fail("missing-loading-delay")
+    if "if(loading){" + chr(10) + "  clearViewerImage();" in viewer:
+        fail("should-not-clear-old-image")
+    ok("viewer-loading-corner")
 
     if (
         'placeholder="搜索已记录地点"' not in html

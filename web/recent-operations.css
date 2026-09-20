@@ -1,0 +1,6 @@
+#operations-dialog{width:min(680px,calc(100vw - 24px));max-height:85dvh;overflow:auto;color:var(--ink);background:var(--paper)}
+#operations-dialog .operations-message{font-size:13px;color:var(--green);white-space:pre-wrap}
+.operation-row{display:flex;align-items:center;gap:16px;padding:16px 0;border-bottom:1px solid var(--line)}
+.operation-row>div{flex:1;min-width:0}.operation-row b{overflow-wrap:anywhere}.operation-row p{font-size:13px;color:var(--muted);margin:5px 0}.operation-row small{color:var(--muted)}
+.operation-row>button{flex:none}.operations-reload{margin-top:16px}
+@media(max-width:480px){#operations-dialog{padding:22px 16px}.operation-row{gap:8px}}

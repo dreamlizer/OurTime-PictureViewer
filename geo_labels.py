@@ -262,8 +262,14 @@ class PlaceIndex:
                 if entry['path']
                 and _compact(_short_admin_name(entry['path'][0])) == province_key
             ]
-            if narrowed:
-                candidates = narrowed
+            # A known province is a constraint, not a preference. Missing local
+            # names must not silently resolve to a namesake in another province.
+            candidates = narrowed
+        if lat is not None and lon is not None:
+            district = _place_parts(self._district_at(lat, lon))
+            if district:
+                candidates = [entry for entry in candidates
+                              if list(entry['path'][:len(district)]) == district]
         if not candidates:
             return ()
 
@@ -394,8 +400,14 @@ class PlaceIndex:
         label_admin = administrative_prefix(label)
         if label_admin[:len(district_parts)] == district_parts:
             return ' · '.join(label_parts)
-        if not label_admin or label_admin[0] != district_parts[0]:
+        if not label_admin:
             return label
+        if label_admin[0] != district_parts[0] or (
+            len(label_admin) >= len(district_parts)
+            and label_admin[:len(district_parts)] != district_parts
+        ):
+            # Do not transplant an unrelated town's name onto a known district.
+            return district
         tail = label_parts[len(label_admin):]
         return ' · '.join(_dedupe_path([*district_parts, *tail]))
 
@@ -419,8 +431,8 @@ class PlaceIndex:
                     fields = line.split('\t')
                     if not line.startswith('#') and len(fields) > 4:
                         countries[fields[0]] = fields[4]
-            def add_point(lat, lon, label, kind='global'):
-                buckets[(math.floor(lat), math.floor(lon))].append((lat, lon, label, kind))
+            def add_point(lat, lon, label, kind='global', origin='GeoNames'):
+                buckets[(math.floor(lat), math.floor(lon))].append((lat, lon, label, kind, origin))
             geo_file = self.root / 'china-boundaries/extracted/ok_geo.csv'
             if geo_file.exists():
                 self.boundary_file = geo_file
@@ -520,7 +532,7 @@ class PlaceIndex:
                         continue
                     path = self._admin_path((name,), float(lat), float(lon), '北京市')
                     label = self._label(path or ('北京市', name))
-                    add_point(float(lat), float(lon), label, kind)
+                    add_point(float(lat), float(lon), label, kind, 'OpenStreetMap')
             self.districts = districts
             pack = self.root / 'geonames/cities500.zip'
             if pack.exists():
@@ -600,7 +612,10 @@ class PlaceIndex:
                     }
 
         def selected(label, source):
+            original_label = label
             label = self._with_district(label, district)
+            if label == district and label != original_label:
+                source = '离线行政区划边界；同名地点冲突，未采用街镇细名'
             if matched_rule:
                 label = self.normalize_manual(label, matched_rule['name'])
                 source = matched_rule['source']
@@ -626,11 +641,11 @@ class PlaceIndex:
         local = [(d, p) for d, p in scored if len(p) > 3 and p[3] == 'local' and d <= 0.8]
         if local:
             d, p = min(local, key=lambda x: x[0])
-            return selected(p[2], f'OpenStreetMap 社区/街区参考，约 {d:.1f} 公里；不是门牌地址')
+            return selected(p[2], f'{p[4]} 社区/街区参考，约 {d:.1f} 公里；不是门牌地址')
         streets = [(d, p) for d, p in scored if len(p) > 3 and p[3] == 'street' and d <= 1.5]
         if streets:
             d, p = min(streets, key=lambda x: x[0])
-            return selected(p[2], f'OpenStreetMap 街道参考，约 {d:.1f} 公里；不是门牌地址')
+            return selected(p[2], f'{p[4]} 街道参考，约 {d:.1f} 公里；不是门牌地址')
         if district:
             return selected(district, '离线行政区划边界；不是小区或街道精确地址')
         d, p = min(scored, key=lambda x: x[0])

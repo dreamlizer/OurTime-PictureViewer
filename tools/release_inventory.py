@@ -24,6 +24,8 @@ ALLOW_FILES = [
     "geo_labels.py",
     "library_db.py",
     "map_area_service.py",
+    "recent_operations.py",
+    "home_recommendations.py",
     "metadata_reader.py",
     "object_labels.py",
     "photo_export.py",

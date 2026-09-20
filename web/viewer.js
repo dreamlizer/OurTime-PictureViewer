@@ -102,8 +102,9 @@ const DEFAULT_FACE_STYLE={
 };
 const FACE_UNNAMED_MARKERS=new Set(['plus','pulse','ring']);
 const FACE_LABEL_POSITIONS=new Set(['auto','left','right','top','bottom']);
-const FACE_LABEL_OVERLAP_LIMIT=.12;
-const FACE_LABEL_FACE_OVERLAP_LIMIT=.25;
+// Independent denominators: smaller label area versus the covered face area.
+const FACE_LABEL_OVERLAP_LIMIT=.05;
+const FACE_LABEL_FACE_OVERLAP_LIMIT=.35;
 const FACE_LABEL_BASE_HEIGHT=56;
 const FACE_LABEL_FACE_RATIO=.4;
 const FACE_LABEL_MAX_SCALE=1.6;
@@ -126,6 +127,12 @@ function readViewerPrefs(){
   }catch(e){return {};}
 }
 const storedViewerPrefs=readViewerPrefs();
+// Start legacy installations in Chinese-first auto mode once; subsequent
+// explicit direction choices remain persistent and independent of positions.
+function initialFaceDirMode(){
+  return storedViewerPrefs.faceDirectionVersion===1 && ['auto','horizontal','vertical'].includes(storedViewerPrefs.faceDirMode)
+    ? storedViewerPrefs.faceDirMode : 'auto';
+}
 const LEGACY_FACE_THEMES=new Set(['ink','paper','cinnabar']);
 function initialFaceStyle(){
   const stored=storedViewerPrefs.faceStyle;
@@ -160,8 +167,10 @@ const viewer={
   returnScroll:undefined,openedPhotoId:null,openedAbsolute:null,openedContext:null,openedWaterfallGeneration:null,exit:null,
   sequencePromise:null,loadingTimer:null,transitionDirection:0,closingTimer:null,
   faceNames:storedViewerPrefs.faceNames!==false,
+  faceAliasMode: (storedViewerPrefs.faceAliasMode==='with'||storedViewerPrefs.faceAliasMode==='only')?storedViewerPrefs.faceAliasMode:(storedViewerPrefs.faceAlias===true?'with':'off'),
+  faceDirMode:initialFaceDirMode(),
   faceAlias:storedViewerPrefs.faceAlias===true,
-  faceVertical:storedViewerPrefs.faceVertical!==false,
+  faceVertical:initialFaceDirMode()!=='horizontal',
   faceLabelPosition:FACE_LABEL_POSITIONS.has(storedViewerPrefs.faceLabelPosition)?storedViewerPrefs.faceLabelPosition:'auto',
   faceUnnamedMarker:FACE_UNNAMED_MARKERS.has(storedViewerPrefs.faceUnnamedMarker)?storedViewerPrefs.faceUnnamedMarker:'plus',
   faceStyle:initialFaceStyle()
@@ -170,8 +179,11 @@ function saveViewerPrefs(){
   try{
     localStorage.setItem(VIEWER_PREFS_KEY,JSON.stringify({
       faceNames:viewer.faceNames!==false,
-      faceAlias:viewer.faceAlias===true,
-      faceVertical:viewer.faceVertical!==false,
+      faceAliasMode:viewer.faceAliasMode||'off',
+      faceDirMode:viewer.faceDirMode||'auto',
+      faceDirectionVersion:1,
+      faceAlias:viewer.faceAliasMode==='with'||viewer.faceAliasMode==='only',
+      faceVertical:viewer.faceDirMode!=='horizontal',
       faceLabelPosition:viewer.faceLabelPosition,
       faceUnnamedMarker:viewer.faceUnnamedMarker,
       faceStyle:viewer.faceStyle,
@@ -254,6 +266,7 @@ function buildViewerToolbar(){
   }
   buildFaceStylePopover();
   buildPhotoPeoplePopover();
+  buildPhotoPeopleHud();
   buildFaceActionPopover();
 }
 function buildFaceStylePopover(){
@@ -279,9 +292,10 @@ function buildFaceStylePopover(){
     </div>
     <div class="face-style-group">
       <div class="face-style-group-title">布局</div>
-      <label class="face-style-field"><span>标签位置</span><select id="face-label-position"><option value="manual" disabled>本张已手动调整</option><option value="auto">自动</option><option value="left">优先左侧</option><option value="right">优先右侧</option><option value="top">优先上方</option><option value="bottom">优先下方</option></select></label>
+      <label class="face-style-field"><span>标签排版</span><select id="face-label-position"><option value="auto">智能排布（默认）</option><option value="manual" disabled>自定义排版</option><option value="left">偏左</option><option value="right">偏右</option><option value="top">偏上</option><option value="bottom">偏下</option></select></label>
       <label class="face-style-field"><span>待命名标记</span><select id="face-unnamed-marker"><option value="plus">默认加号</option><option value="pulse">呼吸绿点</option><option value="ring">静态绿环</option></select></label>
-      <button type="button" id="face-label-reset-photo" class="face-label-reset-photo">恢复本张自动排列</button>
+      <button type="button" id="face-label-reset-photo" class="face-label-reset-photo">清除本张自定义排版</button>
+      <p id="face-label-layout-status" class="muted" role="status" hidden></p>
     </div>
     <div class="face-style-group">
       <div class="face-style-group-title">外观</div>
@@ -321,7 +335,7 @@ function buildFaceStylePopover(){
     viewer.faceStyle={...DEFAULT_FACE_STYLE};
     viewer.faceUnnamedMarker='plus';
     applyFaceStyle();
-    void selectFaceLabelPosition('auto');
+    syncFaceLabelResetButton();
   });
   buildLocalFontDialog();
   applyFaceStyle();
@@ -398,12 +412,64 @@ function setCurrentPeopleIgnored(personIds,ignored){
   }
   if(state.detail){renderFaceNames(state.detail);if(typeof renderOpenPhotoPeople==='function')renderOpenPhotoPeople();}
 }
+function faceKind(face){
+  if(Boolean(face?.ignored))return 'passerby';
+  return faceHasUsableName(face)?'named':'pending';
+}
+function buildPhotoPeopleHud(){
+  if($('#photo-people-hud'))return;
+  const mat=$('#photo-mat');if(!mat)return;
+  const hud=document.createElement('div');
+  hud.id='photo-people-hud';
+  hud.className='photo-people-hud';
+  hud.hidden=true;
+  hud.setAttribute('aria-label','本照片人物概况');
+  hud.innerHTML=`<span data-kind="named" tabindex="0"><b id="hud-named-count">0</b> 已命名</span><span data-kind="pending" tabindex="0"><b id="hud-pending-count">0</b> 待处理</span><span data-kind="passerby" tabindex="0"><b id="hud-passerby-count">0</b> 路人</span>`;
+  mat.appendChild(hud);
+  hud.addEventListener('pointerover',e=>{
+    const chip=e.target.closest('[data-kind]');
+    setFaceKindHighlight(chip?chip.dataset.kind:null);
+  });
+  hud.addEventListener('pointerleave',()=>setFaceKindHighlight(null));
+  hud.addEventListener('focusin',e=>{
+    const chip=e.target.closest('[data-kind]');
+    setFaceKindHighlight(chip?chip.dataset.kind:null);
+  });
+  hud.addEventListener('focusout',e=>{
+    if(!hud.contains(e.relatedTarget))setFaceKindHighlight(null);
+  });
+}
+function setFaceKindHighlight(kind){
+  const layer=$('#face-name-layer');
+  const hud=$('#photo-people-hud');
+  const next=kind||'';
+  if(hud){
+    hud.dataset.litKind=next;
+    hud.querySelectorAll('[data-kind]').forEach(chip=>chip.classList.toggle('is-lit',chip.dataset.kind===next));
+  }
+  if(!layer)return;
+  if(next){
+    layer.dataset.litKind=next;
+    layer.hidden=false;
+  }else{
+    delete layer.dataset.litKind;
+    layer.hidden=viewer.faceNames===false;
+  }
+}
 function updatePhotoPeoplePopover(){
-  const pop=$('#photo-people-popover');if(!pop)return;
   const summary=photoPeopleSummary();
   $('#photo-named-count').textContent=String(summary.named);
   $('#photo-pending-count').textContent=String(summary.pending);
   $('#photo-passerby-count').textContent=String(summary.passerby);
+  if($('#hud-named-count'))$('#hud-named-count').textContent=String(summary.named);
+  if($('#hud-pending-count'))$('#hud-pending-count').textContent=String(summary.pending);
+  if($('#hud-passerby-count'))$('#hud-passerby-count').textContent=String(summary.passerby);
+  const hud=$('#photo-people-hud');
+  if(hud){
+    const total=summary.named+summary.pending+summary.passerby;
+    hud.hidden=!state.detail||!total;
+  }
+  const pop=$('#photo-people-popover');if(!pop)return;
   const start=$('#photo-passersby-start');
   if(start){start.disabled=!summary.pending;start.textContent=summary.pending?`将剩余 ${summary.pending} 位设为路人`:'没有待命名人物';}
   const batch=viewer.lastPasserbyBatch;
@@ -503,7 +569,7 @@ function applyFacePreset(name){
   const valid=Object.prototype.hasOwnProperty.call(FACE_STYLE_PRESETS,name);
   const theme=valid?name:'classic';
   viewer.faceStyle={...FACE_STYLE_PRESETS[theme]};
-  if(FACE_LABEL_IMAGES[theme])viewer.faceVertical=true;
+  if(FACE_LABEL_IMAGES[theme]){viewer.faceVertical=true; viewer.faceDirMode='vertical';}
   applyFaceStyle();
   saveViewerPrefs();
   if(state.detail)requestAnimationFrame(()=>renderFaceNames(state.detail));
@@ -698,8 +764,30 @@ function faceLabelScaleForHeight(faceH){
   if(!(height>0))return 1;
   return Math.min(FACE_LABEL_MAX_SCALE, Math.max(1, FACE_LABEL_FACE_RATIO*height/FACE_LABEL_BASE_HEIGHT));
 }
+function isLatinDisplayName(text){
+  const s=String(text||'').trim();
+  const letters=(s.match(/[A-Za-z]/g)||[]).length;
+  if(letters<2) return false;
+  if(/[㐀-鿿豈-﫿぀-ヿ]/.test(s)) return false;
+  return true;
+}
+function faceDirMode(){
+  const mode=viewer.faceDirMode||'auto';
+  return (mode==='horizontal'||mode==='vertical'||mode==='auto')?mode:'auto';
+}
 function faceLabelsVertical(){
-  return Boolean(FACE_LABEL_IMAGES[viewer.faceStyle?.theme])||viewer.faceVertical!==false;
+  if(Boolean(FACE_LABEL_IMAGES[viewer.faceStyle?.theme])) return true;
+  const mode=faceDirMode();
+  if(mode==='horizontal') return false;
+  if(mode==='vertical') return true;
+  return true;
+}
+function faceLabelVerticalFor(text){
+  if(Boolean(FACE_LABEL_IMAGES[viewer.faceStyle?.theme])) return true;
+  const mode=faceDirMode();
+  if(mode==='horizontal') return false;
+  if(mode==='vertical') return true;
+  return !isLatinDisplayName(text);
 }
 function faceLabelThemeReady(theme){
   if(!FACE_LABEL_IMAGES[theme])return Promise.resolve(true);
@@ -763,7 +851,7 @@ function applyFaceStyle(){
     fontSize.value=String(s.fontSize);
   }
   syncFaceFontSelect(family,s,theme);
-  if(position)position.value=viewer.faceLabelPosition;
+  if(position)position.value=currentFaceLabelMode();
   if(marker)marker.value=root.dataset.unnamedMarker;
   if(text)text.value=s.textColor;
   if(bg)bg.value=s.backgroundColor;
@@ -837,10 +925,10 @@ function updateToolVisuals(){
     const fixedTheme=viewer.faceStyle?.theme;
     const fixedVertical=Boolean(FACE_LABEL_IMAGES[fixedTheme]);
     const vertical=faceLabelsVertical();
-    dir.innerHTML=vertical?iconSvg.vertical:iconSvg.horizontal;
-    const fixedThemeName=fixedTheme==='ivory'?'素笺':fixedTheme==='tea'?'茶棕':'图片标签';
-    const next=fixedVertical?`${fixedThemeName}使用竖排`:vertical?'切换为横排':'切换为竖排';
-    dir.title=next;dir.setAttribute('aria-label',next);
+    const mode=faceDirMode();
+    dir.innerHTML=mode==='horizontal'?iconSvg.horizontal:iconSvg.vertical;
+    const next=fixedVertical?('竖排'):(mode==='auto'?'自动（中文竖排、英文横排）':mode==='horizontal'?'横排':'竖排');
+    dir.title=next;dir.setAttribute('aria-label',next); dir.dataset.dirMode=mode;
   }
   const play=$('#viewer-play');
   if(play){
@@ -849,14 +937,22 @@ function updateToolVisuals(){
   }
 }
 
-function currentBrowseContext(){const mapFilter=state.placeMapFilter;return {q:state.q,filter:mapFilter?'all':state.view,person:state.person,directory:state.directory,sort:state.sort,date_from:state.dateFrom||'',date_to:state.dateTo||'',place:state.place||'',...(mapFilter?{map_cell:mapFilter.cell,map_lat_bucket:mapFilter.lat_bucket,map_lng_bucket:mapFilter.lng_bucket,...('map_west' in mapFilter?{map_west:mapFilter.map_west,map_south:mapFilter.map_south,map_east:mapFilter.map_east,map_north:mapFilter.map_north}:{})}:{}),max_id:state.maxId};}
+function currentBrowseContext(){const mapFilter=state.placeMapFilter;return {q:state.q,filter:mapFilter?'all':(state.homeSnapshotId?'all':state.view),person:state.person,directory:state.directory,sort:state.sort,date_from:state.dateFrom||'',date_to:state.dateTo||'',place:state.place||'',...(state.homeSnapshotId?{recommendation_snapshot:state.homeSnapshotId}:{}),...(mapFilter?{map_cell:mapFilter.cell,map_lat_bucket:mapFilter.lat_bucket,map_lng_bucket:mapFilter.lng_bucket,...('map_west' in mapFilter?{map_west:mapFilter.map_west,map_south:mapFilter.map_south,map_east:mapFilter.map_east,map_north:mapFilter.map_north}:{})}:{}),max_id:state.maxId};}
 function browseContextKey(context={}){
  const filter=String(context.filter||'all');
- return JSON.stringify({q:String(context.q||''),filter:filter==='all'?'timeline':filter,person:String(context.person||''),directory:String(context.directory||''),sort:String(context.sort||'date_desc'),date_from:String(context.date_from||''),date_to:String(context.date_to||''),place:String(context.place||''),map_cell:Number(context.map_cell||0),map_lat_bucket:Number(context.map_lat_bucket||0),map_lng_bucket:Number(context.map_lng_bucket||0),map_west:Number(context.map_west||0),map_south:Number(context.map_south||0),map_east:Number(context.map_east||0),map_north:Number(context.map_north||0),nearby:Number(context.nearby||0),radius_m:Number(context.radius_m||0),max_id:Number(context.max_id||0)});
+ return JSON.stringify({q:String(context.q||''),filter:filter==='all'?'timeline':filter,person:String(context.person||''),directory:String(context.directory||''),sort:String(context.sort||'date_desc'),date_from:String(context.date_from||''),date_to:String(context.date_to||''),place:String(context.place||''),map_cell:Number(context.map_cell||0),map_lat_bucket:Number(context.map_lat_bucket||0),map_lng_bucket:Number(context.map_lng_bucket||0),map_west:Number(context.map_west||0),map_south:Number(context.map_south||0),map_east:Number(context.map_east||0),map_north:Number(context.map_north||0),nearby:Number(context.nearby||0),radius_m:Number(context.radius_m||0),max_id:Number(context.max_id||0),recommendation_snapshot:String(context.recommendation_snapshot||'')});
 }
 function sameBrowseContext(a,b){return browseContextKey(a)===browseContextKey(b);}
 function contextLabel(c){const person=state.people.find(p=>String(p.id)===c.person);const filter=c.filter||'';const heading=c.nearby?`当前位置 ${Number(c.radius_m)||100} 米内`:c.map_cell?'地图定位点':c.person?(person?.name||'人物 '+c.person):filter.startsWith('year:')?(filter.slice(5)==='unknown'?'时间未记录':filter.slice(5)+' 年'):filter.startsWith('group:')?groupTitle(filter)[1]:filter.startsWith('place:')?(filter.slice(6)==='unknown'?'地点未记录':filter.slice(6)):titles[filter]?.[0]||'照片';return [heading,c.directory?basename(c.directory):'',c.place?prettyPlace(c.place):'',c.date_from||c.date_to?((c.date_from||'')+(c.date_to&&c.date_to!==c.date_from?' ~ '+c.date_to:'')):'',c.q?'搜索：'+c.q:''].filter(Boolean).join(' · ');}
 function viewerMessage(text){$('#viewer-message').textContent=text;}
+function seedViewerFromThumb(id){
+ const img=$('#detail-img');
+ if(!img)return false;
+ const card=document.querySelector('#photo-grid [data-photo="'+id+'"] img');
+ const src=card&&(card.currentSrc||card.getAttribute('src'));
+ if(!src)return false;
+ img.src=src;img.hidden=false;return true;
+}
 function clearViewerImage(){
  hideSignatureInfo();
  signatureInfo.sections=[];signatureInfo.text='';
@@ -875,22 +971,33 @@ function setViewerWritePending(pending){
  }
 }
 function setViewerLoading(loading,token=0){
- const dialog=$('#detail-dialog'),img=$('#detail-img'),signature=$('#photo-signature'),stage=document.querySelector('.viewer-stage');
+ const dialog=$('#detail-dialog'),img=$('#detail-img'),signature=$('#photo-signature');
+ const host=document.querySelector('#detail-dialog .dialog-shell')||document.querySelector('.viewer-stage');
  if(!dialog)return;
  let indicator=$('#viewer-loading');
- if(!indicator&&stage){indicator=document.createElement('div');indicator.id='viewer-loading';indicator.textContent='加载中…';indicator.setAttribute('aria-live','polite');stage.appendChild(indicator);}
+ if(!indicator&&host){
+  indicator=document.createElement('div');
+  indicator.id='viewer-loading';
+  indicator.setAttribute('aria-live','polite');
+  host.appendChild(indicator);
+ }else if(indicator&&host&&indicator.parentElement!==host){
+  host.appendChild(indicator);
+ }
+ if(indicator)indicator.textContent='加载中';
  clearTimeout(viewer.loadingTimer);viewer.loadingTimer=null;
-  dialog.classList.toggle('is-loading',Boolean(loading));viewer.loadingToken=loading?token:0;
- dialog.classList.remove('is-switching');
+ viewer.loadingToken=loading?token:0;
+ dialog.classList.remove('is-switching','is-wait');
+ dialog.classList.toggle('is-loading',Boolean(loading));
  if(loading){
-   if(indicator)indicator.hidden=true;
-   viewer.loadingTimer=setTimeout(()=>{if(dialog.open&&dialog.classList.contains('is-loading')&&viewer.loadingToken===token&&indicator)indicator.hidden=false;},220);
-   setViewerWritePending(true);
+  if(indicator)indicator.hidden=true;
+  viewer.loadingTimer=setTimeout(()=>{if(viewer.loadingToken!==token)return;const late=$('#viewer-loading');if(late)late.hidden=false;dialog.classList.add('is-wait');},220);
+  setViewerWritePending(true);
  }else{
-   if(indicator)indicator.hidden=true;
-   if(img)img.hidden=!img.getAttribute('src');
-   if(signature)signature.hidden=!signature.childElementCount;
-   setViewerWritePending(false);
+  dialog.classList.remove('is-wait');
+  if(indicator)indicator.hidden=true;
+  if(img)img.hidden=!img.getAttribute('src');
+  if(signature)signature.hidden=!signature.childElementCount;
+  setViewerWritePending(false);
  }
 }
 function viewerImageFailed(message){
@@ -918,11 +1025,11 @@ function stopSlides(){viewer.playing=false;clearTimeout(viewer.timer);viewer.tim
 function pressTool(id, on){const el=$(id); if(!el)return; el.setAttribute('aria-pressed', String(!!on));}
 function syncViewerTools(){
  pressTool('#toggle-face-names', viewer.faceNames!==false);
- pressTool('#toggle-face-alias', viewer.faceAlias===true);
- pressTool('#toggle-face-dir', viewer.faceVertical!==false);
+ pressTool('#toggle-face-alias', faceAliasMode()!=='off');
+ pressTool('#toggle-face-dir', faceDirMode()!=='horizontal');
  pressTool('#viewer-info', !$('#detail-dialog').classList.contains('hide-info'));
  pressTool('#viewer-play', viewer.playing);
- const aliasBtn=$('#toggle-face-alias'); if(aliasBtn) aliasBtn.disabled=viewer.faceNames===false;
+ const aliasBtn=$('#toggle-face-alias'); if(aliasBtn){ aliasBtn.disabled=viewer.faceNames===false; const am=faceAliasMode(); aliasBtn.title=am==='off'?'显示姓名和别名':am==='with'?'只显示别名':'只显示姓名'; aliasBtn.setAttribute('aria-label', aliasBtn.title); aliasBtn.dataset.aliasMode=am; }
  const dirBtn=$('#toggle-face-dir'); if(dirBtn) dirBtn.disabled=viewer.faceNames===false||Boolean(FACE_LABEL_IMAGES[viewer.faceStyle?.theme]);
  const styleBtn=$('#face-style-button');if(styleBtn)styleBtn.disabled=viewer.faceNames===false;
  updateToolVisuals();
@@ -1389,10 +1496,20 @@ function faceBox(face){
  if(![x1,y1,x2,y2].every(Number.isFinite))return null;
  return {x1,y1,x2,y2,w:w||0,h:h||0,cx:(x1+x2)/2,cy:(y1+y2)/2,width:Math.max(1,x2-x1),height:Math.max(1,y2-y1)};
 }
+function faceAliasMode(){
+  const mode=viewer.faceAliasMode||'off';
+  return (mode==='off'||mode==='with'||mode==='only')?mode:'off';
+}
 function faceLabelText(face, alias){
   if(face.ignored) return '+';
-  if(face.name) return alias&&face.alias?(face.name+' / '+face.alias):face.name;
-  return '+';
+  const name=String(face.name||'').trim();
+  const aka=String(face.alias||'').trim();
+  const mode=alias===true?'with':(alias===false?'off':faceAliasMode());
+  if(!name && !aka) return '+';
+  if(mode==='only') return aka || name || '+';
+  if(mode==='with' && aka && name && aka!==name) return name+' / '+aka;
+  if(mode==='with' && aka && !name) return aka;
+  return name || aka || '+';
 }
 const faceLabelCommittedPositions=new Map();
 const faceLabelOptimisticPositions=new Map();
@@ -1411,15 +1528,28 @@ function storedFaceLabelPosition(face){
 function effectiveFaceLabelPosition(face){
   return faceLabelOptimisticPositions.get(Number(face?.id))||storedFaceLabelPosition(face);
 }
+// Choice is per photo. Old database overrides automatically count as custom;
+// choosing an automatic layout never deletes those overrides.
+const faceLabelPhotoModes=new Map();
+function currentFaceLabelMode(){
+  const hasManual=(state.detail?.faces||[]).some(face=>Boolean(effectiveFaceLabelPosition(face)));
+  const selected=faceLabelPhotoModes.get(Number(state.detail?.id));
+  if(selected==='manual')return hasManual?'manual':'auto';
+  return selected || (hasManual?'manual':'auto');
+}
 function syncFaceLabelResetButton(){
   const button=$('#face-label-reset-photo');
   const hasManual=(state.detail?.faces||[]).some(face=>Boolean(effectiveFaceLabelPosition(face)));
   if(button){
     button.disabled=!hasManual;
-    button.title=hasManual?'清除这张照片保存的标签位置':'本张照片正在自动排列';
+    button.title=hasManual?'仅此按钮会删除已保存的手动位置；切换排版不会删除':'本张照片没有自定义排版';
   }
   const position=$('#face-label-position');
-  if(position)position.value=hasManual?'manual':viewer.faceLabelPosition;
+  if(position){
+    const custom=position.querySelector('option[value="manual"]');
+    if(custom)custom.disabled=!hasManual;
+    position.value=currentFaceLabelMode();
+  }
 }
 function applyFaceLabelPositionToState(faceId,position){
   const face=(state.detail?.faces||[]).find(item=>Number(item.id)===Number(faceId));
@@ -1438,6 +1568,7 @@ async function persistFaceLabelPosition(faceId,position){
   }
   faceLabelOptimisticPositions.set(fid,position);
   applyFaceLabelPositionToState(fid,position);
+  faceLabelPhotoModes.set(photoId,'manual');
   faceLabelPendingCounts.set(fid,(faceLabelPendingCounts.get(fid)||0)+1);
   syncFaceLabelResetButton();
   const payload={x_ratio:position.x,y_ratio:position.y};
@@ -1498,8 +1629,9 @@ async function resetCurrentPhotoFaceLabels(){
         face.label_x_ratio=null;
         face.label_y_ratio=null;
       }
+      faceLabelPhotoModes.set(photoId,'auto');
       renderFaceNames(state.detail);
-      toast('已恢复本张自动排列');
+      toast('已清除本张自定义排版，恢复智能排布');
     }
     return true;
   }catch(error){
@@ -1510,14 +1642,10 @@ async function resetCurrentPhotoFaceLabels(){
   }
 }
 async function selectFaceLabelPosition(value){
-  const next=FACE_LABEL_POSITIONS.has(value)?value:'auto';
-  viewer.faceLabelPosition=next;
-  saveViewerPrefs();
+  const next=value==='manual'?'manual':FACE_LABEL_POSITIONS.has(value)?value:'auto';
   const hasManual=(state.detail?.faces||[]).some(face=>Boolean(effectiveFaceLabelPosition(face)));
-  if(hasManual){
-    await resetCurrentPhotoFaceLabels();
-    return;
-  }
+  if(next==='manual'&&!hasManual){syncFaceLabelResetButton();return;}
+  faceLabelPhotoModes.set(Number(state.detail?.id),next);
   if(state.detail)renderFaceNames(state.detail);
 }
 function rectOverlapArea(a,b){
@@ -1573,12 +1701,113 @@ function faceLabelSide(items, ox, imgW){
   return leftMin>=rightMin?'left':'right';
 }
 function faceLabelSides(items,ox,imgW,vertical){
-  const forced=viewer.faceLabelPosition;
+  const forced=currentFaceLabelMode();
   if(forced==='left'||forced==='right')return [forced,forced==='left'?'right':'left'];
   if(forced==='top'||forced==='bottom')return [forced,forced==='top'?'bottom':'top'];
   if(!vertical)return ['bottom','top'];
-  const automatic=faceLabelSide(items,ox,imgW);
-  return [automatic,automatic==='left'?'right':'left'];
+  return ['left','right'];
+}
+function faceLabelEyeRegion(item){
+  // Only bounding boxes are stored; this is an estimated eye band, not landmarks.
+  return {x:item.fx+item.fw*.18,y:item.fy+item.fh*.22,w:item.fw*.64,h:item.fh*.30};
+}
+function placeSmartVerticalLabels(geometries, items, placed, bounds){
+  const faces=items.map(it=>({x:it.fx,y:it.fy,w:it.fw,h:it.fh}));
+  const eyeRegions=items.map(faceLabelEyeRegion);
+  const heads=items.map(it=>({x:it.fx-it.fw*.12,y:it.fy-it.fh*.25,w:it.fw*1.24,h:it.fh*1.33}));
+  const pending=geometries.filter(g=>g.smart);
+  const candidates=new Map();
+  for(const g of pending){
+    const it=g.it,head=heads[g.index];
+    const idealGap=Math.max(8,Math.min(20,it.fw*.18));
+    const list=[];
+    // Keep labels near the head row; avoid distant above/below detours.
+    // Additional gaps retract toward the owner: flush to the face box, then
+    // at most 10% / 18% into its edge, still outside the central facial area.
+    const gaps=[idealGap,4,-it.fw*.12,-it.fw*.22,-it.fw*.30];
+    for(const side of ['left','right'])for(const gap of gaps)for(const shift of [0,-.3,.3,-.6,.6]){
+      const rect={x:side==='left'?head.x-g.w-gap:head.x+head.w+gap,
+        y:it.cy+it.fh*.1-g.h/2+shift*it.fh,w:g.w,h:g.h,side,btn:g.btn};
+      rect.outside=rect.x<bounds.x||rect.x+rect.w>bounds.x+bounds.w;
+      rect.shift=Math.abs(shift);
+      rect.x=Math.max(bounds.x,Math.min(bounds.x+bounds.w-g.w,rect.x));
+      rect.y=Math.max(bounds.y,Math.min(bounds.y+bounds.h-g.h,rect.y));
+      // Score the exact integer coordinates that will be painted.
+      rect.x=Math.round(rect.x);rect.y=Math.round(rect.y);
+      const own=faceLabelDistance(rect,it);
+      const others=items.filter(other=>other!==it).map(other=>faceLabelDistance(rect,other));
+      const ambiguity=others.length?Math.max(0,own-Math.min(...others)):0;
+      const faceArea=faces.reduce((s,f)=>s+rectOverlapArea(rect,f),0);
+      const ownArea=rectOverlapArea(rect,faces[g.index]);
+      const otherArea=Math.max(0,faceArea-ownArea);
+      const headArea=heads.reduce((s,f)=>s+rectOverlapArea(rect,f),0);
+      // Keep breathing room when available. In a narrow gap, protect the
+      // neighbour more strongly than the owner's cheek edge and retract until
+      // the label is at least as close to its owner as to another face.
+      rect.attachment=8*otherArea/(g.w*g.h)+ownArea/(g.w*g.h)
+        +4*ambiguity/it.fw+.25*Math.abs(gap-idealGap)/it.fw;
+      rect.eyeArea=eyeRegions.reduce((s,f)=>s+rectOverlapArea(rect,f),0);
+      rect.faceRatio=Math.max(0,...faces.map(f=>rectOverlapArea(rect,f)/(f.w*f.h)));
+      rect.base=[faceArea,headArea,ambiguity,
+        Math.abs(rect.y+g.h/2-(it.cy+it.fh*.1))*.2+Math.abs(gap-idealGap)+(side==='left'?0:6)];
+      list.push(rect);
+    }
+    candidates.set(g,list);
+  }
+  // Constrained labels get first choice. Stable ties make redraws deterministic.
+  pending.sort((a,b)=>candidates.get(a).filter(c=>!c.base[0]&&!c.base[1]).length-
+    candidates.get(b).filter(c=>!c.base[0]&&!c.base[1]).length||a.index-b.index);
+  const chosen=new Map();
+  function score(rect,g){
+    const others=[...placed,...[...chosen].filter(([other])=>other!==g).map(([,r])=>r)];
+    const overlap=others.reduce((s,other)=>s+rectOverlapArea(rect,other),0);
+    const labelRatio=Math.max(0,...others.map(other=>rectOverlapArea(rect,other)/Math.min(rect.w*rect.h,other.w*other.h)));
+    const excess=Math.max(0,labelRatio-FACE_LABEL_OVERLAP_LIMIT);
+    return [excess>0?1:0,excess,rect.eyeArea>0?1:0,rect.eyeArea,
+      Math.max(0,rect.faceRatio-FACE_LABEL_FACE_OVERLAP_LIMIT),Number(rect.outside),
+      rect.side==='left'?0:1,rect.shift,rect.attachment,rect.base[0]+overlap,rect.base[1],rect.base[3]];
+  }
+  for(let pass=0;pass<8;pass++)for(const g of pending){
+    let best=null,bestScore=null;
+    for(const rect of candidates.get(g)){
+      const value=score(rect,g);
+      if(!bestScore||compareFaceLabelScore(value,bestScore)<0){best=rect;bestScore=value;}
+    }
+    chosen.set(g,best);
+  }
+  // Resolve the group jointly when local choices trap neighbours. Only safe,
+  // <=5%-overlap candidates enter the beam; this also allows an outer person
+  // to switch right instead of forcing the whole row into left-side slots.
+  const safe=new Map(pending.map(g=>[g,candidates.get(g).filter(r=>!r.outside && !r.eyeArea
+    && r.faceRatio<=FACE_LABEL_FACE_OVERLAP_LIMIT
+    && placed.every(o=>rectOverlapRatio(r,o)<=FACE_LABEL_OVERLAP_LIMIT))]));
+  const preferRight=new Set(pending.filter(g=>{
+    const it=g.it;
+    const row=items.filter(o=>o!==it && o.fy<it.fy+it.fh && o.fy+o.fh>it.fy);
+    // Outer edge of a face row (not the whole photo): open space on the right
+    // can release a crowded inside gap without moving the label up/down.
+    return !row.some(o=>o.cx>it.cx)
+      && row.some(o=>o.cx<it.cx && it.fx-(o.fx+o.fw)<it.fw*3+g.w)
+      && safe.get(g).some(r=>r.side==='right' && !r.shift && r.faceRatio<=.15);
+  }));
+  const order=[...pending].sort((a,b)=>safe.get(a).length-safe.get(b).length||a.index-b.index);
+  let beam=[{rects:new Map(),cost:0}];
+  for(const g of order){
+    const next=[];
+    for(const state of beam)for(const rect of safe.get(g)){
+      if([...state.rects.values()].some(o=>rectOverlapRatio(rect,o)>FACE_LABEL_OVERLAP_LIMIT))continue;
+      const preferred=preferRight.has(g)?'right':'left';
+      const cost=state.cost+(rect.side===preferred?0:4)+rect.shift*10+rect.attachment;
+      next.push({rects:new Map([...state.rects,[g,rect]]),cost});
+    }
+    next.sort((a,b)=>a.cost-b.cost);
+    beam=next.slice(0,96);
+    if(!beam.length)break;
+  }
+  if(beam.length && beam[0].rects.size===pending.length){
+    chosen.clear();for(const [g,rect] of beam[0].rects)chosen.set(g,rect);
+  }
+  for(const [g,rect] of chosen){g.btn.classList.add(rect.side);placed.push(rect);}
 }
 function layoutFaceNameButtons(layer, faces, alias){
   const img=$('#detail-img');
@@ -1597,13 +1826,15 @@ function layoutFaceNameButtons(layer, faces, alias){
     const fw=box.width/box.w*imgW;
     const fh=box.height/box.h*imgH;
     const passerby=Boolean(face.ignored);
-    items.push({face, passerby, named:!passerby&&Boolean(face.name), label:faceLabelText(face,alias), fx, fy, fw, fh, cx:fx+fw/2, cy:fy+fh/2});
+    const kind=faceKind(face);
+    items.push({face, passerby, kind, named:!passerby&&Boolean(face.name), label:faceLabelText(face,alias), fx, fy, fw, fh, cx:fx+fw/2, cy:fy+fh/2});
   });
   items.sort((a,b)=>a.cy-b.cy||a.cx-b.cx);
   layer.innerHTML=items.map(it=>{
     const hint=it.named?`${it.label}；拖动调整位置，双击管理这张脸`:(it.passerby?'路人；拖动调整位置，单击或双击可重新命名':'拖动调整位置，单击或双击命名人物');
-    return `<button type="button" class="face-name${it.named?'':' unnamed'}${it.passerby?' passerby':''}" data-face-id="${Number(it.face.id)||''}" data-face-person="${it.face.person_id}" title="${esc(hint)}" aria-label="${esc(hint)}">${esc(it.label)}</button>`;
+    return `<button type="button" class="face-name${it.named?'':' unnamed'}${it.passerby?' passerby':''}" data-face-id="${Number(it.face.id)||''}" data-face-person="${it.face.person_id}" data-face-kind="${it.kind}" title="${esc(hint)}" aria-label="${esc(hint)}">${esc(it.label)}</button>`;
   }).join('')+'<svg class="face-hover-guide" aria-hidden="true"><path></path><circle r="2.6"></circle></svg><span class="face-hover-box" aria-hidden="true"></span>';
+  items.forEach(it=>{ it.vertical = it.passerby || !it.named ? false : faceLabelVerticalFor(it.label); });
   const buttons=[...layer.querySelectorAll('.face-name')];
   const vertical=faceLabelsVertical();
   const placed=[];
@@ -1611,14 +1842,20 @@ function layoutFaceNameButtons(layer, faces, alias){
   const sides=faceLabelSides(items,ox,imgW,vertical);
   const preferredSide=sides[0];
   const faceRects=items.map(item=>({x:item.fx,y:item.fy,w:item.fw,h:item.fh}));
+  const mode=currentFaceLabelMode();
+  const verticalHeights=items.filter(it=>it.named&&it.vertical).map(it=>it.fh).sort((a,b)=>a-b);
+  const middle=Math.floor(verticalHeights.length/2);
+  const typicalHeight=verticalHeights.length?(verticalHeights[middle]+verticalHeights[Math.floor((verticalHeights.length-1)/2)])/2:0;
+  const uniformScale=faceLabelScaleForHeight(typicalHeight);
   const geometries=buttons.map((btn,i)=>{
     const it=items[i];
     it.btn=btn;
     if(it.named){
       applyFaceLabelProfile(btn,it.label);
-      const scale=faceLabelScaleForHeight(it.fh);
+      const scale=it.vertical?uniformScale:faceLabelScaleForHeight(it.fh);
       btn.style.setProperty('--face-scale',scale.toFixed(3));
       btn.dataset.faceScale=scale.toFixed(3);
+      btn.classList.toggle('is-horizontal', it.vertical===false);
     }
     const w=Math.max(18, btn.offsetWidth);
     const h=Math.max(18, btn.offsetHeight);
@@ -1626,7 +1863,8 @@ function layoutFaceNameButtons(layer, faces, alias){
     if(!faceLabelPendingCounts.has(fid)){
       faceLabelCommittedPositions.set(fid,storedFaceLabelPosition(it.face));
     }
-    return {btn,it,w,h,index:i,manual:effectiveFaceLabelPosition(it.face)};
+    const manual=mode==='manual'?effectiveFaceLabelPosition(it.face):null;
+    return {btn,it,w,h,index:i,manual,smart:!manual&&it.named&&it.vertical&&(mode==='auto'||mode==='manual')};
   });
   geometries.filter(item=>item.manual).forEach(item=>{
     const {btn,w,h,manual}=item;
@@ -1640,12 +1878,13 @@ function layoutFaceNameButtons(layer, faces, alias){
     placed.push(chosen);
   });
   geometries.filter(item=>!item.manual).forEach(item=>{
+    if(item.smart)return;
     const {btn,it,w,h,index:i}=item;
     const offsetsBySide=new Map(sides.map(side=>[side,faceLabelOffsets(side,w,h,layerW,layerH)]));
     const candidates=new Map();
     for(const side of sides){
       for(const offset of offsetsBySide.get(side)){
-        const candidate=faceLabelCandidate(it,side,vertical,w,h,offset,gap);
+        const candidate=faceLabelCandidate(it,side,it.vertical,w,h,offset,gap);
         clampFaceLabel(candidate,layerW,layerH,4);
         const key=`${side}:${Math.round(candidate.x)}:${Math.round(candidate.y)}`;
         if(!candidates.has(key))candidates.set(key,candidate);
@@ -1656,14 +1895,17 @@ function layoutFaceNameButtons(layer, faces, alias){
       const labelRatios=placed.map(other=>rectOverlapRatio(candidate,other));
       const maxLabelRatio=labelRatios.length?Math.max(...labelRatios):0;
       const placedOverlap=placed.reduce((sum,other)=>sum+rectOverlapArea(candidate,other),0);
-      const faceRatios=faceRects.map((faceRect,faceIndex)=>faceIndex===i?0:rectOverlapRatio(candidate,faceRect));
+      const faceRatios=faceRects.map(faceRect=>rectOverlapArea(candidate,faceRect)/(faceRect.w*faceRect.h));
       const maxFaceRatio=Math.max(0,...faceRatios);
+      const eyeArea=items.reduce((sum,face)=>sum+rectOverlapArea(candidate,faceLabelEyeRegion(face)),0);
       const otherFaceOverlap=faceRects.reduce((sum,faceRect,faceIndex)=>sum+(faceIndex===i?0:rectOverlapArea(candidate,faceRect)),0);
       const hardLabel=maxLabelRatio>FACE_LABEL_OVERLAP_LIMIT?1:0;
       const hardFace=maxFaceRatio>FACE_LABEL_FACE_OVERLAP_LIMIT?1:0;
       const score=[
-        hardLabel||hardFace?1:0,
         hardLabel,
+        hardLabel?maxLabelRatio:0,
+        eyeArea>0?1:0,
+        eyeArea,
         hardFace,
         maxLabelRatio,
         hardFace?maxFaceRatio:0,
@@ -1678,18 +1920,38 @@ function layoutFaceNameButtons(layer, faces, alias){
         bestScore=score;
       }
     }
-    chosen=chosen||clampFaceLabel(faceLabelCandidate(it,sides[0],vertical,w,h,0,gap),layerW,layerH,4);
+    chosen=chosen||clampFaceLabel(faceLabelCandidate(it,sides[0],it.vertical,w,h,0,gap),layerW,layerH,4);
     chosen.btn=btn;
     placed.push(chosen);
     btn.classList.add(chosen.side);
     if(!it.named)btn.setAttribute('title',it.passerby?'路人；拖动调整位置，单击或双击可重新命名':'拖动调整位置，单击或双击命名人物');
   });
+  placeSmartVerticalLabels(geometries,items,placed,{x:Math.max(4,ox+4),y:Math.max(4,oy+4),
+    w:Math.max(1,Math.min(layerW-4,ox+imgW-4)-Math.max(4,ox+4)),
+    h:Math.max(1,Math.min(layerH-4,oy+imgH-4)-Math.max(4,oy+4))});
+  let layoutLabelRatio=0,layoutFaceRatio=0,layoutEyeArea=0;
+  placed.forEach((rect,index)=>{
+    rect.x=Math.round(rect.x);rect.y=Math.round(rect.y);
+  });
   placed.forEach((rect,index)=>{
     const maxRatio=placed.reduce((max,other,otherIndex)=>otherIndex===index?max:Math.max(max,rectOverlapRatio(rect,other)),0);
+    layoutLabelRatio=Math.max(layoutLabelRatio,maxRatio);
+    layoutFaceRatio=Math.max(layoutFaceRatio,...faceRects.map(f=>rectOverlapArea(rect,f)/(f.w*f.h)));
+    layoutEyeArea+=items.reduce((sum,f)=>sum+rectOverlapArea(rect,faceLabelEyeRegion(f)),0);
     rect.btn.dataset.labelOverlapRatio=maxRatio.toFixed(3);
     rect.btn.style.left=Math.round(rect.x)+'px';
     rect.btn.style.top=Math.round(rect.y)+'px';
   });
+  const issues=[];
+  if(layoutLabelRatio>FACE_LABEL_OVERLAP_LIMIT)issues.push(`标签重叠 ${(layoutLabelRatio*100).toFixed(1)}%，超过 5%`);
+  if(layoutFaceRatio>FACE_LABEL_FACE_OVERLAP_LIMIT)issues.push('人脸遮挡超过 35%');
+  if(layoutEyeArea>0)issues.push('覆盖估算眼部区域');
+  layer.dataset.layoutValid=String(!issues.length);
+  const layoutStatus=$('#face-label-layout-status');
+  if(layoutStatus){
+    layoutStatus.hidden=!issues.length;
+    layoutStatus.textContent=issues.length?`${issues.join('；')}。${mode==='manual'?'已保留自定义位置，可拖动调整。':'当前空间未找到同时满足限制的排布，请拖动微调。'}`:'';
+  }
   syncFaceLabelResetButton();
 }
 function faceForLabel(button){
@@ -1735,21 +1997,22 @@ function renderFaceNames(photo){
  const layer=$('#face-name-layer'); if(!layer)return;
  if(faceLabelDrag)return;
  const show=viewer.faceNames!==false;
- const alias=viewer.faceAlias===true;
+ const alias=faceAliasMode();
   const vertical=faceLabelsVertical();
  layer.hidden=!show;
- layer.classList.toggle('horizontal',!vertical);
-  if(!show){layer.innerHTML='';syncViewerTools();return;}
+ layer.classList.toggle('horizontal', faceDirMode()==='horizontal' && !Boolean(FACE_LABEL_IMAGES[viewer.faceStyle?.theme]));
+  if(!show){layer.innerHTML='';syncViewerTools();updatePhotoPeoplePopover();return;}
   const faces=visibleFaces(photo);
   if(!$('#detail-img')?.naturalWidth || !layer.clientWidth){
     layer.innerHTML='';
     requestAnimationFrame(()=>{ if(state.detail===photo) layoutFaceNameButtons(layer, faces, alias); });
   }else layoutFaceNameButtons(layer, faces, alias);
   syncViewerTools();
+  updatePhotoPeoplePopover();
 }
 function zoomTo(scale){viewer.fit=false;viewer.scale=Math.max(.05,Math.min(4,scale));updateZoom();}
 async function displayPhoto(id){
-  closeFaceActionPopover();togglePhotoPeoplePopover(false);
+  closeFaceActionPopover();togglePhotoPeoplePopover(false);setFaceKindHighlight(null);
  const request=++viewer.presentation;
  setViewerLoading(true,request);
  if(viewer.loaderCancel)viewer.loaderCancel();
@@ -1840,7 +2103,7 @@ async function loadViewerSequence(id,nextContext,generation){
 }
 async function openPhoto(id,context=null){
  const wasOpen=$('#detail-dialog').open;
- if(!wasOpen){viewer.returnScroll=scrollY;viewer.openedPhotoId=null;viewer.openedAbsolute=null;viewer.openedContext=null;viewer.openedWaterfallGeneration=null;viewer.exit=null;clearViewerImage();}
+ if(!wasOpen){viewer.returnScroll=scrollY;viewer.openedPhotoId=null;viewer.openedAbsolute=null;viewer.openedContext=null;viewer.openedWaterfallGeneration=null;viewer.exit=null;if(!seedViewerFromThumb(id))clearViewerImage();}
  stopSlides();
  const alreadyOpen=wasOpen;
  const generation=++viewer.generation;
@@ -2075,8 +2338,8 @@ faceLayer&&faceLayer.addEventListener('dblclick',e=>{
  openFaceLabelEditor(b);
 });
 $('#toggle-face-names').addEventListener('click',()=>{viewer.faceNames=!viewer.faceNames;saveViewerPrefs();renderFaceNames(state.detail);});
-$('#toggle-face-alias').addEventListener('click',()=>{viewer.faceAlias=!viewer.faceAlias;saveViewerPrefs();renderFaceNames(state.detail);});
-$('#toggle-face-dir').addEventListener('click',()=>{viewer.faceVertical=!viewer.faceVertical;saveViewerPrefs();renderFaceNames(state.detail);if(!$('#face-style-popover')?.hidden)applyFaceStyle();});
+$('#toggle-face-alias').addEventListener('click',()=>{const order=['off','with','only']; const cur=faceAliasMode(); viewer.faceAliasMode=order[(order.indexOf(cur)+1)%3]; viewer.faceAlias=viewer.faceAliasMode!=='off'; saveViewerPrefs();renderFaceNames(state.detail);});
+$('#toggle-face-dir').addEventListener('click',()=>{const order=['auto','horizontal','vertical']; const cur=faceDirMode(); viewer.faceDirMode=order[(order.indexOf(cur)+1)%3]; viewer.faceVertical=viewer.faceDirMode!=='horizontal'; saveViewerPrefs();renderFaceNames(state.detail);if(!$('#face-style-popover')?.hidden)applyFaceStyle();});
 $('#face-style-button')?.addEventListener('click',e=>{e.stopPropagation();toggleFaceStylePopover();});
 $('#photo-people-manage')?.addEventListener('click',e=>{e.stopPropagation();togglePhotoPeoplePopover();});
 document.addEventListener('click',e=>{
@@ -2108,7 +2371,7 @@ new ResizeObserver(()=>{if($('#detail-dialog').open)updateZoom();}).observe(view
 // Remember where a gesture began: dragging a zoomed photo onto the background
 // must not close it. Buttons, links and the detail drawer keep their own actions.
 let outsidePhotoDown=false;
- const keepOpenSelector='#detail-img,button,a,input,textarea,select,.detail-info,.face-name-layer,.face-name,.viewer-tools,.viewer-arrow,.dialog-close,#photo-mat,#photo-signature,.signature-info-popover,.face-style-popover,.people-manage-popover,.face-action-popover';
+ const keepOpenSelector='#detail-img,button,a,input,textarea,select,.detail-info,.face-name-layer,.face-name,.viewer-tools,.viewer-arrow,.dialog-close,#photo-mat,#photo-signature,#photo-people-hud,.signature-info-popover,.face-style-popover,.people-manage-popover,.face-action-popover';
 $('#detail-dialog').addEventListener('pointerdown',e=>{
  outsidePhotoDown=e.button===0&&!e.target.closest(keepOpenSelector);
 });

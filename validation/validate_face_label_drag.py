@@ -116,6 +116,74 @@ def close_face_editor(page) -> None:
         page.keyboard.press("Escape")
         page.wait_for_selector("#face-action-popover", state="hidden")
 
+def add_real_layout_fixture(connection, photos):
+    """Copy only an existing preview and seven boxes, never write the real library."""
+    source_id=int(os.environ.get('LABEL_FIXTURE_ASSET','12294'))
+    with sqlite3.connect((ROOT/'data/library.sqlite3').as_uri()+'?mode=ro',uri=True) as source:
+        asset=source.execute('SELECT sha256 FROM assets WHERE id=?',(source_id,)).fetchone()
+        faces=source.execute('SELECT f.bbox,p.name FROM faces f JOIN people p ON p.id=f.person_id WHERE f.asset_id=?',(source_id,)).fetchall()
+    add_asset(connection,photos,3,303,3)
+    image_path=photos/'drag-3.jpg'
+    shutil.copyfile(ROOT/'data/thumbs'/f'{asset[0]}.jpg',image_path)
+    with Image.open(image_path) as image: width,height=image.size
+    connection.execute('UPDATE assets SET width=?,height=?,sha256=? WHERE id=3',(width,height,hashlib.sha256(image_path.read_bytes()).hexdigest()))
+    connection.execute('UPDATE files SET size=?,mtime_ns=? WHERE asset_id=3',(image_path.stat().st_size,image_path.stat().st_mtime_ns))
+    connection.execute('DELETE FROM faces WHERE asset_id=3')
+    for i,(bbox,name) in enumerate(faces):
+        connection.execute('INSERT INTO people(id,name,confirmed,ignored) VALUES(?,?,1,0)',(3000+i,name))
+        connection.execute('INSERT INTO faces(id,asset_id,person_id,bbox,embedding,score,reviewed,ignored) VALUES(?,3,?,?,?,.99,1,0)',(3000+i,3000+i,bbox,b'\0'*16))
+
+def check_smart_layout(page):
+    report=ROOT/'validation/reports'/('smart-face-labels-20260919-'+os.environ.get('LABEL_FIXTURE_ASSET','12294'))
+    report.mkdir(parents=True,exist_ok=True)
+    if os.environ.get('LABEL_TALL_VIEW'): page.set_viewport_size({'width':1294,'height':1844})
+    page.evaluate("openPhoto(3,{filter:'all',sort:'date_desc'})")
+    page.wait_for_selector('#face-name-layer [data-face-id="3000"]')
+    page.evaluate("async()=>{updateFaceStyle({...FACE_STYLE_PRESETS.ivory});await document.fonts.ready;await selectFaceLabelPosition('auto');}")
+    if os.environ.get('LABEL_TEA'): page.evaluate("async()=>{updateFaceStyle({...FACE_STYLE_PRESETS.tea});await document.fonts.ready;}")
+    if os.environ.get('LABEL_FONT_SIZE'): page.evaluate('(n)=>updateFaceStyle({fontSize:n})',int(os.environ['LABEL_FONT_SIZE']))
+    page.wait_for_timeout(250)
+    metrics=page.evaluate("""() => {
+      const img=document.querySelector('#detail-img').getBoundingClientRect();
+      const faces=state.detail.faces.map(f=>{const b=faceBox(f);return {x:img.x+b.x1/b.w*img.width,y:img.y+b.y1/b.h*img.height,w:b.width/b.w*img.width,h:b.height/b.h*img.height}});
+      const labels=[...document.querySelectorAll('.face-name-layer .face-name')].map(e=>{const r=e.getBoundingClientRect();return {x:r.x,y:r.y,w:r.width,h:r.height,scale:Number(e.dataset.faceScale),side:e.classList.contains('left')?'left':'right'}});
+      return {labels,faceOverlap:labels.reduce((s,l)=>s+faces.reduce((t,f)=>t+rectOverlapArea(l,f),0),0),labelOverlap:labels.reduce((s,l,i)=>s+labels.slice(0,i).reduce((t,o)=>t+rectOverlapArea(l,o),0),0)};
+    }""")
+    check(len(metrics['labels'])==7,'真实七人预览使用实际字体显示七个标签')
+    check(len({r['scale'] for r in metrics['labels']})==1,'同图竖版标签统一倍率')
+    check(metrics['faceOverlap']<1 and metrics['labelOverlap']<1,'真实七人排布不遮脸且标签无重叠')
+    page.screenshot(path=str(report/'seven-people.png'))
+    with page.expect_download(timeout=30000) as downloaded:
+        page.click('#export-annotated-photo')
+    downloaded.value.save_as(str(report/'seven-people-export.jpg'))
+    with Image.open(report/'seven-people-export.jpg') as exported:
+        check(exported.width>0 and exported.height>0,'真实导出按钮生成可读带标签JPEG')
+    # Verify the joint solver independently with a case where right is clearly safer.
+    joint=page.evaluate("""() => {
+      const items=[{fx:200,fy:200,fw:80,fh:100,cx:240,cy:250},{fx:310,fy:200,fw:80,fh:100,cx:350,cy:250}];
+      const gs=items.map((it,index)=>({it,index,w:38,h:72,smart:true,btn:{classList:{add(){}}}}));
+      const placed=[];placeSmartVerticalLabels(gs,items,placed,{x:0,y:0,w:700,h:500});
+      return placed.map(r=>({side:r.side,x:r.x,y:r.y}));
+    }""")
+    check({r['side'] for r in joint}=={'left','right'},'近邻之间不足放标签时自动改用外侧')
+    before=page.evaluate("state.detail.faces")
+    scales=page.evaluate("""() => {
+      state.detail.faces=state.detail.faces.slice(0,2).map((f,i)=>({...f,bbox:[i*600+100,100,i*600+300,700,1500,1000]}));
+      layoutFaceNameButtons(document.querySelector('#face-name-layer'),state.detail.faces,false);
+      return [...document.querySelectorAll('.face-name-layer .face-name')].map(e=>Number(e.dataset.faceScale));
+    }""")
+    check(all(s==1.6 for s in scales),'近景大脸整组放大且封顶1.6')
+    from validate_face_label_scale import synthetic_scale_result
+    mixed=synthetic_scale_result(page)
+    check(abs(mixed['small']['scale']-170/140)<.02 and abs(mixed['large']['scale']-170/140)<.02,
+          '远近脸高60与280时采用中位170的统一倍率，不被最大脸独占')
+    check(abs(mixed['small']['fontSize']-mixed['large']['fontSize'])<.1,
+          '同图远近人物字号相同')
+    check(mixed['unnamed']['width']<=26 and mixed['unnamed']['height']<=26,
+          '未命名小标记不随组倍率放大')
+    page.evaluate('(faces)=>{state.detail.faces=faces;renderFaceNames(state.detail)}',before)
+    (report/'result.json').write_text(json.dumps({'real_seven':metrics,'crowded_pair':joint,'large_faces':scales,'mixed_sizes':mixed,'checks':checks},ensure_ascii=False,indent=2),encoding='utf-8')
+
 
 def main() -> int:
     WORK_ROOT.mkdir(parents=True, exist_ok=True)
@@ -130,6 +198,7 @@ def main() -> int:
         init_schema(connection)
         add_asset(connection, photos, 1, 101, 1)
         add_asset(connection, photos, 2, 202, 2)
+        add_real_layout_fixture(connection, photos)
         connection.execute(
             """INSERT INTO face_label_overrides(
                  face_id,asset_id,x_ratio,y_ratio,layout_version,updated_at
@@ -174,6 +243,16 @@ def main() -> int:
             page.on("pageerror", lambda error: errors.append(str(error)))
             page.goto(base_url, wait_until="domcontentloaded")
             page.wait_for_function("typeof openPhoto === 'function'")
+            check(page.evaluate("faceDirMode()==='auto' && faceLabelVerticalFor('测试人物')"), '首次打开默认中文竖排')
+            page.evaluate("localStorage.setItem(VIEWER_PREFS_KEY,JSON.stringify({faceDirMode:'horizontal',faceVertical:false}))")
+            page.reload(wait_until='domcontentloaded')
+            page.wait_for_function("typeof openPhoto === 'function'")
+            check(page.evaluate("faceDirMode()==='auto' && faceLabelVerticalFor('测试人物')"), '旧版横排设置升级为中文默认竖排')
+            page.evaluate("viewer.faceDirMode='horizontal';saveViewerPrefs()")
+            page.reload(wait_until='domcontentloaded')
+            page.wait_for_function("typeof openPhoto === 'function'")
+            check(page.evaluate("faceDirMode()==='horizontal' && !faceLabelVerticalFor('测试人物')"), '升级后主动选横排仍可保存')
+            page.evaluate("viewer.faceDirMode='auto';saveViewerPrefs()")
             page.evaluate(
                 "openPhoto(1,{q:'',filter:'all',person:'',directory:'',sort:'date_desc'})"
             )
@@ -183,6 +262,7 @@ def main() -> int:
             )
 
             label = page.locator('#face-name-layer [data-face-id="101"]')
+            check(label.evaluate("e=>getComputedStyle(e).writingMode==='vertical-rl'"), "默认风格中文标签实际渲染为竖排")
             label.click()
             page.wait_for_timeout(120)
             check(
@@ -330,10 +410,7 @@ def main() -> int:
                 page.locator("#face-label-position").input_value() == "manual",
                 "存在手动位置时布局选择器明确显示本张为手动位置",
             )
-            with page.expect_response(
-                lambda response: response.url.endswith("/api/photos/1/face-labels/reset")
-            ):
-                page.select_option("#face-label-position", "top")
+            page.select_option("#face-label-position", "top")
             page.wait_for_function(
                 """() => {
                   const label=document.querySelector('#face-name-layer [data-face-id="101"]');
@@ -346,11 +423,17 @@ def main() -> int:
                     "SELECT count(*) FROM face_label_overrides WHERE asset_id=2"
                 ).fetchone()[0]
             check(
-                reset_detail["label_x_ratio"] is None
-                and reset_detail["label_y_ratio"] is None
+                reset_detail["label_x_ratio"] == saved_after_race["label_x_ratio"]
+                and reset_detail["label_y_ratio"] == saved_after_race["label_y_ratio"]
                 and other_count == 1,
-                "选择靠上会清理当前照片手动位置并保留其他照片位置",
+                "选择偏上保留当前和其他照片的自定义记录",
             )
+            page.select_option("#face-label-position", "auto")
+            check(not normalized_label_position(page,101)["manual"], "智能排布不使用手动坐标")
+            page.select_option("#face-label-position", "manual")
+            restored=normalized_label_position(page,101)
+            check(restored["manual"] and abs(restored["x"]-reset_detail["label_x_ratio"])<.025,
+                  "切回自定义恢复原坐标，切换不清库")
 
             page.click("#face-style-close")
             drag_label(page, 101, 0.36, 0.72)
@@ -365,18 +448,18 @@ def main() -> int:
                     body='{"detail":"forced reset failure"}',
                 ),
             )
-            page.select_option("#face-label-position", "right")
+            page.click("#face-label-reset-photo")
             page.wait_for_timeout(180)
             check(
                 page.locator('#face-name-layer [data-face-id="101"]').get_attribute("data-label-manual") == "true"
                 and page.locator("#face-label-position").input_value() == "manual",
-                "布局重置失败时保留手动标签且不伪装为已清理",
+                "显式清除失败时保留自定义标签且不伪装为已清理",
             )
             page.unroute("**/api/photos/1/face-labels/reset")
             with page.expect_response(
                 lambda response: response.url.endswith("/api/photos/1/face-labels/reset")
             ):
-                page.select_option("#face-label-position", "auto")
+                page.click("#face-label-reset-photo")
             page.wait_for_function(
                 """() => {
                   const label=document.querySelector('#face-name-layer [data-face-id="101"]');
@@ -388,8 +471,16 @@ def main() -> int:
             check(
                 saved_before_failed_reset["label_x_ratio"] is not None
                 and reset_after_failure["label_x_ratio"] is None,
-                "失败后重新选择自动可清空手动位置并恢复自动排列",
+                "失败后显式清除可删除本张自定义并恢复智能排布",
             )
+            page.wait_for_function("document.querySelector('#face-label-position option[value=manual]').disabled")
+            check(page.locator('#face-label-position option[value="manual"]').evaluate('(el)=>el.disabled'),
+                  "无自定义坐标时选项置灰")
+            page.click('#face-style-close')
+            page.evaluate("openPhoto(2,{filter:'all',sort:'date_desc'})")
+            page.wait_for_selector('#face-name-layer [data-face-id="202"]')
+            check(normalized_label_position(page,202)["manual"],"旧数据库坐标无需迁移，自动进入自定义")
+            check_smart_layout(page)
             check(not errors, "浏览器没有 pageerror")
             browser.close()
         print(f"PASS {len(checks)} checks", flush=True)

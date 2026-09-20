@@ -28,7 +28,7 @@ EXCLUDE_DISTS = {
 }
 APP_PY = [
     "app.py", "ourtime_config.py", "browse_queries.py", "geo_labels.py",
-    "library_db.py", "map_area_service.py", "metadata_reader.py",
+    "library_db.py", "map_area_service.py", "metadata_reader.py", "recent_operations.py",
     "object_labels.py", "photo_export.py", "requirements.txt", "Logo.png",
     "AppIcon.png",
 ]

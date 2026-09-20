@@ -48,6 +48,17 @@ from browse_queries import (
     map_viewport_predicate,
     nearby_photo_spec,
 )
+from home_recommendations import (
+    RecommendationError,
+    ALGORITHM_VERSION as HOME_ALGORITHM_VERSION,
+    build_recommendations,
+    catalog_meta,
+    ensure_home_schema,
+    fetch_snapshot_photos,
+    invalidate_home_cache,
+    open_group as open_home_group,
+    rebuild_home_catalog,
+)
 from map_area_service import (
     map_area_preview_payload,
     map_area_selection_fingerprint,
@@ -113,6 +124,7 @@ APP_PORT = int(os.environ.get('PHOTO_LIBRARY_PORT', '8765'))
 RUNTIME_VERSION = 'not-started'
 SCAN_THREAD = None
 UVICORN_SERVER = None
+HOME_CATALOG_LOCK = threading.Lock()
 UI_IDLE_EXIT_SECONDS = int(os.environ.get('PHOTO_UI_IDLE_EXIT_SECONDS') or '0')
 UI_LAST_PING = time.monotonic()
 UI_SEEN = False
@@ -273,6 +285,45 @@ def start_ui_idle_watch():
     threading.Thread(target=watch,daemon=True,name='ui-idle-exit').start()
 
 
+def rebuild_home_catalog_now():
+    with db() as connection:
+        return rebuild_home_catalog(connection)
+
+
+def start_home_catalog_rebuild():
+    def run():
+        if not HOME_CATALOG_LOCK.acquire(blocking=False):
+            return
+        try:
+            rebuild_home_catalog_now()
+        except Exception:
+            try:
+                with db() as connection:
+                    ensure_home_schema(connection)
+                    connection.execute(
+                        "INSERT OR REPLACE INTO home_catalog_state(id, built_at, algorithm_version, status, message) VALUES (1,?,?,?,?)",
+                        (now(), HOME_ALGORITHM_VERSION, "error", "推荐目录更新失败"),
+                    )
+            except Exception:
+                pass
+        finally:
+            HOME_CATALOG_LOCK.release()
+    threading.Thread(target=run, daemon=True, name="home-catalog").start()
+
+
+def start_home_catalog_warmup():
+    try:
+        with db() as connection:
+            assets = connection.execute("SELECT count(*) FROM assets").fetchone()[0]
+            meta = catalog_meta(connection)
+            ready = meta.get("status") == "ready" and meta.get("algorithm_version") == HOME_ALGORITHM_VERSION
+            if assets < 50 or ready:
+                return
+    except Exception:
+        return
+    start_home_catalog_rebuild()
+
+
 def initialize_application():
     """Explicit startup boundary. Importing this module remains read-only."""
     global APP_OWNER,APP_INITIALIZED,RUNTIME_VERSION
@@ -295,6 +346,7 @@ def initialize_application():
         APP_OWNER=owner
         APP_INITIALIZED=True
         start_ui_idle_watch()
+        start_home_catalog_warmup()
 
 
 def shutdown_application(timeout=15.0):
@@ -1445,6 +1497,7 @@ def reconcile_missing_files(root, *, stop_event=STOP, stat_path=None,
     return result
 
 def run_scan(jid):
+    catalog_after=False
     try:
         with db() as c:
             job=dict(c.execute('SELECT * FROM jobs WHERE id=?',(jid,)).fetchone())
@@ -1619,6 +1672,7 @@ def run_scan(jid):
         with db() as c:
             count=c.execute('SELECT errors FROM jobs WHERE id=?',(jid,)).fetchone()[0]
             status='paused' if STOP.is_set() else ('completed_with_errors' if count else 'completed')
+            catalog_after = status in ('completed', 'completed_with_errors')
             c.execute('UPDATE jobs SET status=?,finished_at=?,current_path=?,message=? WHERE id=?',
                       (status,now(),'','扫描已暂停，继续时会跳过已完成文件' if STOP.is_set() else '扫描结束；请查看读取问题' if count else '扫描完成',jid))
     except Exception as e:
@@ -1628,6 +1682,8 @@ def run_scan(jid):
     finally:
         close_readers()
         SCAN_LOCK.release()
+        if catalog_after:
+            start_home_catalog_rebuild()
 
 PositiveId = Annotated[int, Field(strict=True,gt=0)]
 
@@ -2171,18 +2227,26 @@ def asset_dict(row):
     return d
 
 @app.get('/api/photos')
-def photos(q:str='',filter:str='all',person:str='',offset:int=0,limit:int=60,directory:str='',sort:str='date_desc',sequence:bool=False,max_id:int=0,around:int=0,tail:bool=False,date_from:str='',date_to:str='',place:str='',nearby:int=0,radius_m:int=100,map_cell:float=0,map_lat_bucket:float|None=None,map_lng_bucket:float|None=None,map_west:float|None=None,map_south:float|None=None,map_east:float|None=None,map_north:float|None=None):
+def photos(q:str='',filter:str='all',person:str='',offset:int=0,limit:int=60,directory:str='',sort:str='date_desc',sequence:bool=False,max_id:int=0,around:int=0,tail:bool=False,date_from:str='',date_to:str='',place:str='',nearby:int=0,radius_m:int=100,map_cell:float=0,map_lat_bucket:float|None=None,map_lng_bucket:float|None=None,map_west:float|None=None,map_south:float|None=None,map_east:float|None=None,map_north:float|None=None,recommendation_snapshot:str=''):
     if offset<0 or limit<1 or limit>500 or max_id<0 or around<0 or nearby<0:
         raise ApiProblem(400,'分页或照片编号参数无效','invalid_request')
     try:
         with db() as c:
-            result=fetch_photos(
-                c, q=q, filter=filter, person=person, offset=offset, limit=limit,
-                directory=directory, sort=sort, sequence=sequence, max_id=max_id, around=around, tail=tail,
-                date_from=date_from, date_to=date_to, place=place, nearby=nearby, radius_m=radius_m,
-                map_cell=map_cell, map_lat_bucket=map_lat_bucket, map_lng_bucket=map_lng_bucket,
-                map_west=map_west, map_south=map_south, map_east=map_east, map_north=map_north,
-            )
+            if recommendation_snapshot:
+                extra=any([q, person, directory, date_from, date_to, place, nearby, map_cell, map_west is not None, map_south is not None, map_east is not None, map_north is not None])
+                if extra or (filter not in ('all','timeline','home-group','home','')):
+                    raise ApiProblem(400,'推荐快照不能与普通筛选叠加','invalid_request')
+                result=fetch_snapshot_photos(c, recommendation_snapshot, offset=offset, limit=limit, sequence=sequence, around=around, tail=tail)
+            else:
+                result=fetch_photos(
+                    c, q=q, filter=filter, person=person, offset=offset, limit=limit,
+                    directory=directory, sort=sort, sequence=sequence, max_id=max_id, around=around, tail=tail,
+                    date_from=date_from, date_to=date_to, place=place, nearby=nearby, radius_m=radius_m,
+                    map_cell=map_cell, map_lat_bucket=map_lat_bucket, map_lng_bucket=map_lng_bucket,
+                    map_west=map_west, map_south=map_south, map_east=map_east, map_north=map_north,
+                )
+    except RecommendationError as exc:
+        raise ApiProblem(exc.status_code, exc.detail, exc.error_code) from exc
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     if sequence:
@@ -2192,15 +2256,12 @@ def photos(q:str='',filter:str='all',person:str='',offset:int=0,limit:int=60,dir
             payload['around']=result.get('around')
         return payload
     items=[dict(asset_dict(item), path=item.get('path')) for item in result.get('items') or []]
-    return {'total':result['total'],'items':items,'max_id':result['max_id']}
-
-
-def nearby_distance_m(latitude, longitude, anchor):
-    latitude_scale=111_132.0
-    longitude_scale=max(1.0,111_320.0*abs(math.cos(math.radians(anchor['latitude']))))
-    north=(float(latitude)-anchor['latitude'])*latitude_scale
-    east=(float(longitude)-anchor['longitude'])*longitude_scale
-    return round(math.hypot(north,east),1)
+    payload={'total':result['total'],'items':items,'max_id':result['max_id']}
+    if result.get('recommendation_snapshot'):
+        payload['recommendation_snapshot']=result['recommendation_snapshot']
+        payload['title']=result.get('title')
+        payload['group_id']=result.get('group_id')
+    return payload
 
 
 @app.get('/api/photos/{aid}/nearby')
@@ -2885,6 +2946,7 @@ def edit_photos(body:EditRequest):
             c.execute('UPDATE assets SET '+','.join(f'{k}=?' for k in changes)+' WHERE id=?',list(changes.values())+[aid])
             c.execute('INSERT INTO edits(created_at,target,before_json,after_json) VALUES (?,?,?,?)',
                       (now(),f'asset:{aid}',json.dumps({k:before[k] for k in changes},ensure_ascii=False),json.dumps(changes,ensure_ascii=False)))
+        invalidate_home_cache(c)
     return {'updated':len(ids)}
 
 @app.get('/api/people')
@@ -3514,6 +3576,49 @@ def backup():
     finally: target.close();source.close()
     return {'path':str(path),'message':'数据库备份包含人物特征和全部标注；原照片仍在原位置，缩略图可重建'}
 
+
+from recent_operations import register as register_recent_operations
+register_recent_operations(app,globals())
+
+class HomeGroupOpen(BaseModel):
+    group_id:str=Field(min_length=1,max_length=200)
+
+
+@app.get('/api/home/recommendations')
+def home_recommendations(category:str='all', cursor:str=''):
+    try:
+        with db() as c:
+            return build_recommendations(c, category=category, cursor=cursor)
+    except RecommendationError as exc:
+        raise ApiProblem(exc.status_code, exc.detail, exc.error_code) from exc
+
+
+@app.post('/api/home/groups/open')
+def home_group_open(body:HomeGroupOpen):
+    try:
+        with db() as c:
+            return open_home_group(c, body.group_id)
+    except RecommendationError as exc:
+        raise ApiProblem(exc.status_code, exc.detail, exc.error_code) from exc
+
+
+@app.get('/api/home/catalog')
+def home_catalog_status():
+    with db() as c:
+        return catalog_meta(c)
+
+
+@app.post('/api/home/catalog/rebuild')
+def home_catalog_rebuild():
+    acquired = HOME_CATALOG_LOCK.acquire(timeout=180)
+    if not acquired:
+        raise ApiProblem(409, '正在更新推荐', 'busy')
+    try:
+        return rebuild_home_catalog_now()
+    except RecommendationError as exc:
+        raise ApiProblem(exc.status_code, exc.detail, exc.error_code) from exc
+    finally:
+        HOME_CATALOG_LOCK.release()
 
 app.mount('/',StaticFiles(directory=Path(os.environ.get('PHOTO_WEB_ROOT',str(BASE/'web'))),html=True),name='web')
 

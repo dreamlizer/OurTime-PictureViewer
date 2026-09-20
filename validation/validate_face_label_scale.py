@@ -1,4 +1,4 @@
-"""Live-browser checks: nameplates scale with displayed face height."""
+"""Live-browser checks: vertical nameplates share the median-face scale."""
 import json
 import sqlite3
 from pathlib import Path
@@ -125,7 +125,10 @@ def main():
                   fontSize:parseFloat(getComputedStyle(btn).fontSize)
                 };
               });
-              return labels.sort((a,b)=>a.faceH-b.faceH);
+              labels.sort((a,b)=>a.faceH-b.faceH);
+              const mid=Math.floor(labels.length/2);
+              const expected=faceLabelScaleForHeight((labels[mid].faceH+labels[Math.floor((labels.length-1)/2)].faceH)/2);
+              return labels.map(item=>({...item,expected}));
             }"""
         )
         screenshot = REPORT_DIR / "face-label-scale.png"
@@ -139,28 +142,28 @@ def main():
         check(abs(synthetic["formula"]["cap"] - 1.6) < 1e-6, "224px 及以上封顶 1.6 倍", checks)
         check(synthetic["formula"]["huge"] == 1.6, "特写不会超过 1.6 倍", checks)
         check(
-            abs(synthetic["small"]["scale"] - 1) < 0.02
-            and abs(synthetic["small"]["width"] - 38) <= 1
-            and abs(synthetic["small"]["height"] - 56) <= 1,
-            "小脸标签仍是 38x56 现用尺寸",
+            abs(synthetic["small"]["scale"] - 170/140) < 0.02
+            and abs(synthetic["small"]["width"] - 38*170/140) <= 1
+            and abs(synthetic["small"]["height"] - 56*170/140) <= 1,
+            "小脸标签使用整图中位脸高 170px 的倍率",
             checks,
         )
         check(
-            abs(synthetic["large"]["scale"] - 1.6) < 0.02
-            and abs(synthetic["large"]["width"] - 60.8) <= 1
-            and abs(synthetic["large"]["height"] - 89.6) <= 1,
-            "大脸标签放大到 1.6 倍且宽高一起变",
+            abs(synthetic["large"]["scale"] - 170/140) < 0.02
+            and abs(synthetic["large"]["width"] - 38*170/140) <= 1
+            and abs(synthetic["large"]["height"] - 56*170/140) <= 1,
+            "大脸标签与同图小脸统一倍率且宽高一起变",
             checks,
         )
         small_font = synthetic["small"]["fontSize"]
         large_font = synthetic["large"]["fontSize"]
         check(
-            small_font > 0 and abs(large_font / small_font - 1.6) < 0.08,
+            small_font > 0 and abs(large_font / small_font - 1) < 0.08,
             "字号与底牌使用同一倍率",
             checks,
         )
         check(
-            abs(synthetic["large"]["paddingLeft"] / max(synthetic["small"]["paddingLeft"], 0.01) - 1.6) < 0.12,
+            abs(synthetic["large"]["paddingLeft"] / max(synthetic["small"]["paddingLeft"], 0.01) - 1) < 0.12,
             "底牌内边距与字号同步放大",
             checks,
         )
@@ -176,12 +179,7 @@ def main():
         check(all(abs(item["scale"] - item["expected"]) < 0.02 for item in real), "真实合影的缩放系数按脸高计算", checks)
         check(all(item["scale"] >= 0.999 for item in real), "真实合影没有小于当前尺寸的标签", checks)
         check(all(item["scale"] <= 1.601 for item in real), "真实合影没有超过 1.6 倍的标签", checks)
-        if real[0]["faceH"] < 140:
-            check(abs(real[0]["scale"] - 1) < 0.02, "真实合影里的小脸保持当前尺寸", checks)
-        if real[-1]["faceH"] >= 224:
-            check(abs(real[-1]["scale"] - 1.6) < 0.02, "真实合影里的大脸封顶 1.6 倍", checks)
-        elif real[-1]["faceH"] > real[0]["faceH"] + 20 and real[-1]["scale"] + 1e-6 >= real[0]["scale"]:
-            check(True, "真实合影里较大的脸标签不小于较小的脸", checks)
+        check(len({round(item["scale"], 3) for item in real}) == 1, "真实合影的竖版标签倍率一致", checks)
 
         check(not errors, "大图没有页面脚本错误", checks)
         browser.close()

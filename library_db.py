@@ -309,6 +309,28 @@ def init_schema(conn):
     }.items():
         if name not in existing_assets:
             conn.execute(f'ALTER TABLE assets ADD COLUMN {name} {declaration}')
+    conn.executescript('''
+        CREATE TABLE IF NOT EXISTS home_snapshots (
+            snapshot_id TEXT PRIMARY KEY,
+            group_id TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            as_of_date TEXT NOT NULL,
+            revision TEXT NOT NULL,
+            algorithm_version TEXT NOT NULL,
+            title TEXT NOT NULL,
+            subtitle TEXT NOT NULL,
+            photo_count INTEGER NOT NULL,
+            payload_json TEXT NOT NULL,
+            member_ids TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS home_snapshots_created ON home_snapshots(created_at);
+        CREATE TABLE IF NOT EXISTS home_recommendation_cache (
+            cache_key TEXT PRIMARY KEY,
+            payload_json TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+    ''')
 
 
 def recover_interrupted_jobs(conn):
