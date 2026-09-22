@@ -124,6 +124,19 @@ def main():
         fail("扫描完成后的推荐目录更新入口未接上")
     if 'id="home-refresh-catalog"' not in html or "refreshCatalog" not in home_js:
         fail("首页缺少更新推荐入口")
+    if "CREATE TABLE IF NOT EXISTS photo_quality" not in home_py and "QUALITY_TABLE_SQL" not in Path(ROOT / "memory_curation.py").read_text(encoding="utf-8"):
+        fail("回忆清晰度表未落地")
+    memory_py = read(ROOT / "memory_curation.py")
+    if "def curate_highlights" not in memory_py or "def compute_thumb_metrics" not in memory_py:
+        fail("回忆精选未落到 memory_curation.py")
+    if "startMemoryPlayer" not in home_js or 'id="memory-player"' not in html:
+        fail("回忆连播播放器未接上")
+    if "boardHasContent" not in home_js or "inflight" not in home_js:
+        fail("home tab loading must reuse in-flight homepage payload")
+    if "home-skeleton" in home_js:
+        fail("home loading must not use skeleton blocks")
+    if "label:'回忆'" not in home_js:
+        fail("首页默认标签未改成回忆")
     ok("首页发现入口、默认视图和推荐快照已接上")
 
     for name in REQUIRED:

@@ -23,27 +23,37 @@ $serverProcessId = [int](Get-Content -LiteralPath $pidFile)
 $process = Get-CimInstance Win32_Process -Filter "ProcessId=$serverProcessId"
 $appPath = Join-Path $PSScriptRoot 'app.py'
 if ($process -and $process.CommandLine.Contains($appPath)) {
+    if (-not (Test-OurTimeListening $port)) {
+        Stop-OurTimeAppTree $serverProcessId $PSScriptRoot
+        Remove-Item -LiteralPath $pidFile -Force -ErrorAction SilentlyContinue
+        Write-Output 'OurTime had already stopped listening; the leftover process was cleared.'
+        exit 0
+    }
     try {
-        $health = Invoke-RestMethod "$serverUrl/api/health" -TimeoutSec 3
+        $health = Invoke-OurTimeApi "$serverUrl/api/health" 'GET' 3
         if ([string]$health.data_key -ne $dataKey -or [int]$health.pid -ne $serverProcessId) {
             throw 'The server on this port does not own the configured data directory.'
         }
-        Invoke-RestMethod "$serverUrl/api/scan/pause" -Method Post -TimeoutSec 3 | Out-Null
+        Invoke-OurTimeApi "$serverUrl/api/scan/pause" 'POST' 3 | Out-Null
         for ($i = 0; $i -lt 60; $i++) {
-            $state = Invoke-RestMethod "$serverUrl/api/status" -TimeoutSec 3
+            $state = Invoke-OurTimeApi "$serverUrl/api/status" 'GET' 3
             if (-not $state.job -or $state.job.status -notin @('running', 'pausing')) { break }
             Start-Sleep -Milliseconds 500
         }
         if ($state.job -and $state.job.status -in @('running', 'pausing')) {
             throw 'The current file has not reached a safe stop point.'
         }
-        Invoke-RestMethod "$serverUrl/api/shutdown" -Method Post -TimeoutSec 3 | Out-Null
+        Invoke-OurTimeApi "$serverUrl/api/shutdown" 'POST' 3 | Out-Null
         for ($i = 0; $i -lt 40; $i++) {
             if (-not (Get-Process -Id $serverProcessId -ErrorAction SilentlyContinue)) { break }
             Start-Sleep -Milliseconds 250
         }
         if (Get-Process -Id $serverProcessId -ErrorAction SilentlyContinue) {
-            throw 'The server did not stop safely; it was not force-terminated.'
+            if (-not (Test-OurTimeListening $port)) {
+                Stop-OurTimeAppTree $serverProcessId $PSScriptRoot
+            } else {
+                throw 'The server did not stop safely; it was not force-terminated.'
+            }
         }
     } catch {
         throw "OurTime did not stop safely: $_"

@@ -10,6 +10,8 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from PIL import Image, ImageDraw
+
 ROOT = Path(__file__).resolve().parents[1]
 WORK = ROOT / "validation" / "work"
 
@@ -54,6 +56,27 @@ def insert_face(connection, face_id, asset_id, person_id, bbox='[0,0,10,10,20,20
     )
 
 
+def write_thumb(data_dir, asset_id, kind="sharp", seed=0):
+    folder = Path(data_dir) / "thumbs"
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / f"{asset_id:064x}.jpg"
+    image = Image.new("RGB", (320, 240), (18, 22, 20))
+    draw = ImageDraw.Draw(image)
+    if kind == "blur":
+        image = Image.new("RGB", (320, 240), (90 + seed, 92, 88))
+    else:
+        step = 6 if kind == "sharp" else 12
+        color = (230, 230, 220) if kind != "dup" else (226, 226, 216)
+        for x in range(seed % 5, 320, step):
+            draw.line((x, 0, x, 240), fill=color)
+        for y in range(seed % 4, 240, step):
+            draw.line((0, y, 320, y), fill=(12, 16, 14))
+        if kind == "faceish":
+            draw.ellipse((110, 60, 210, 180), fill=(210, 170, 140))
+    image.save(path, quality=92)
+    return path
+
+
 class HomeRecommendationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -91,6 +114,8 @@ class HomeRecommendationTests(unittest.TestCase):
         with self.module.db() as connection:
             for table in ("home_snapshots", "home_recommendation_cache", "home_catalog",
                           "home_catalog_state", "operation_items",
+                          "home_stories",
+                          "photo_quality",
                           "operations", "edits", "faces", "people", "files", "assets"):
                 try:
                     connection.execute(f"DELETE FROM {table}")
@@ -326,6 +351,70 @@ class HomeRecommendationTests(unittest.TestCase):
         self.assertEqual(2, covers_2012[0]["asset_id"])
         self.assertEqual(12, covers_2012[0]["target_face_id"])
 
+    def test_people_years_keeps_protagonist_not_background(self):
+        with self.module.db() as c:
+            insert_person(c, 1, "林女士")
+            for extra in range(2, 8):
+                insert_person(c, extra, f"路人{extra}", confirmed=1)
+            insert_asset(c, 10, captured_at="2012-06-01T10:00:00", width=1600, height=1000)
+            insert_face(c, 10, 10, 1, bbox="[400,80,1100,900,1600,1000]")
+            insert_asset(c, 20, captured_at="2018-06-01T10:00:00", width=1600, height=1000)
+            insert_face(c, 20, 20, 1, bbox="[20,20,70,80,1600,1000]")
+            for index, person_id in enumerate(range(2, 8), start=21):
+                left = 120 + (index - 21) * 180
+                insert_face(c, index, 20, person_id, bbox=f"[{left},140,{left + 160},520,1600,1000]")
+            insert_asset(c, 30, captured_at="2024-06-01T10:00:00", width=900, height=1200)
+            insert_face(c, 30, 30, 1, bbox="[180,80,720,980,900,1200]")
+        data = self.rec("people_years").json()
+        card = next(item for item in data["items"] if item["title"] == "林女士")
+        self.assertIn(10, card["highlight_ids"])
+        self.assertIn(30, card["highlight_ids"])
+        self.assertNotIn(20, card["highlight_ids"])
+        self.assertEqual(3, card["source_count"])
+        opened = self.client.post("/api/home/groups/open", json={"group_id": card["group_id"]}).json()
+        photos = self.client.get("/api/photos", params={"recommendation_snapshot": opened["snapshot_id"], "limit": 60}).json()
+        ids = [item["id"] for item in photos["items"]]
+        self.assertEqual(card["highlight_ids"], ids)
+        self.assertNotIn(20, ids)
+
+    def test_people_years_does_not_dump_every_shot_in_a_year(self):
+        with self.module.db() as c:
+            insert_person(c, 1, "林女士")
+            for index in range(1, 9):
+                insert_asset(c, index, captured_at=f"2020-05-{index:02d}T10:00:00", width=1600, height=1000)
+                insert_face(c, index, index, 1, bbox="[400,80,1100,900,1600,1000]")
+        data = self.rec("people_years").json()
+        card = data["items"][0]
+        self.assertEqual(8, card["source_count"])
+        self.assertLessEqual(len(card["highlight_ids"]), 2)
+        opened = self.client.post("/api/home/groups/open", json={"group_id": card["group_id"]}).json()
+        self.assertLessEqual(opened["photo_count"], 2)
+        photos = self.client.get("/api/photos", params={"recommendation_snapshot": opened["snapshot_id"], "limit": 60}).json()
+        self.assertLessEqual(len(photos["items"]), 2)
+
+
+    def test_people_years_keeps_recent_years_when_span_exceeds_limit(self):
+        with self.module.db() as c:
+            insert_person(c, 1, "徐先生")
+            for index, year in enumerate(range(2000, 2026), start=1):
+                insert_asset(c, index, captured_at=f"{year}-06-01T10:00:00", width=1600, height=1000)
+                insert_face(c, index, index, 1, bbox="[400,80,1100,900,1600,1000]")
+        data = self.rec("people_years").json()
+        card = data["items"][0]
+        self.assertLessEqual(len(card["highlight_ids"]), 18)
+        with self.module.db() as c:
+            years = [
+                c.execute("SELECT substr(captured_at,1,4) FROM assets WHERE id=?", (asset_id,)).fetchone()[0]
+                for asset_id in card["highlight_ids"]
+            ]
+        self.assertEqual("2000", years[0])
+        self.assertEqual("2025", years[-1])
+        self.assertGreaterEqual(sum(1 for year in years if int(year) >= 2020), 4)
+        opened = self.client.post("/api/home/groups/open", json={"group_id": card["group_id"]}).json()
+        photos = self.client.get("/api/photos", params={"recommendation_snapshot": opened["snapshot_id"], "limit": 60}).json()
+        opened_years = [str(item["effective_date"])[:4] for item in photos["items"]]
+        self.assertEqual("2025", opened_years[-1])
+
     def test_place_cover_does_not_prefer_faces(self):
         with self.module.db() as c:
             insert_person(c, 1, '林女士')
@@ -364,9 +453,168 @@ class HomeRecommendationTests(unittest.TestCase):
         rebuilt = self.client.post("/api/home/catalog/rebuild")
         self.assertEqual(200, rebuilt.status_code, rebuilt.text)
         self.assertEqual("ready", rebuilt.json()["status"])
-        self.assertEqual("home-discovery-v5", rebuilt.json()["algorithm_version"])
+        self.assertEqual("home-discovery-v10", rebuilt.json()["algorithm_version"])
         fresh = self.rec("people_years").json()
         self.assertEqual({"林女士", "王先生"}, {g["title"] for g in fresh["items"]})
+
+
+    def test_quality_prefers_sharp_over_blur(self):
+        from memory_curation import compute_thumb_metrics, curate_highlights, hamming_distance
+        sharp = write_thumb(self.data, 1, "sharp", 1)
+        blur = write_thumb(self.data, 2, "blur", 0)
+        s = compute_thumb_metrics(sharp)["sharpness"]
+        b = compute_thumb_metrics(blur)["sharpness"]
+        self.assertGreater(s, 1)
+        self.assertLess(b, 0.12)
+        rows = [
+            {"id": 1, "sharpness": s, "dhash": "1111", "favorite": 0, "face_count": 1, "bad_cover": 0, "day_date": "2024-05-01", "captured_at": "2024-05-01T10:00:00", "width": 1200, "height": 800},
+            {"id": 2, "sharpness": b, "dhash": "2222", "favorite": 0, "face_count": 0, "bad_cover": 0, "day_date": "2024-05-01", "captured_at": "2024-05-01T10:01:00", "width": 1200, "height": 800},
+            {"id": 3, "sharpness": s, "dhash": "3333", "favorite": 0, "face_count": 1, "bad_cover": 0, "day_date": "2024-05-02", "captured_at": "2024-05-02T10:00:00", "width": 1200, "height": 800},
+            {"id": 4, "sharpness": s, "dhash": "4444", "favorite": 0, "face_count": 1, "bad_cover": 0, "day_date": "2024-05-03", "captured_at": "2024-05-03T10:00:00", "width": 1200, "height": 800},
+            {"id": 5, "sharpness": s, "dhash": "5555", "favorite": 0, "face_count": 1, "bad_cover": 0, "day_date": "2024-05-04", "captured_at": "2024-05-04T10:00:00", "width": 1200, "height": 800},
+            {"id": 6, "sharpness": s, "dhash": "1111", "favorite": 0, "face_count": 1, "bad_cover": 0, "day_date": "2024-05-01", "captured_at": "2024-05-01T10:00:03", "width": 1200, "height": 800},
+            {"id": 7, "sharpness": s, "dhash": "7777", "favorite": 0, "face_count": 1, "bad_cover": 0, "day_date": "2024-05-05", "captured_at": "2024-05-05T10:00:00", "width": 1600, "height": 900},
+            {"id": 8, "sharpness": s, "dhash": "8888", "favorite": 0, "face_count": 1, "bad_cover": 0, "day_date": "2024-05-06", "captured_at": "2024-05-06T10:00:00", "width": 1600, "height": 900},
+            {"id": 9, "sharpness": s, "dhash": "9999", "favorite": 0, "face_count": 1, "bad_cover": 0, "day_date": "2024-05-07", "captured_at": "2024-05-07T10:00:00", "width": 1600, "height": 900},
+            {"id": 10, "sharpness": s, "dhash": "aaaa", "favorite": 1, "face_count": 1, "bad_cover": 0, "day_date": "2024-05-02", "captured_at": "2024-05-02T10:05:00", "width": 250, "height": 187},
+        ]
+        picked = curate_highlights(rows, mode="trip", limit=10)
+        self.assertNotIn(2, picked)
+        self.assertNotIn(10, picked)
+        self.assertFalse({1, 6}.issubset(set(picked)))
+        self.assertTrue(set(picked) <= {1, 3, 4, 5, 6, 7, 8, 9})
+        self.assertLessEqual(len(picked), 10)
+        self.assertGreaterEqual(len(picked), 7)
+        self.assertGreaterEqual(hamming_distance("00ff", "00fe"), 1)
+
+    def test_quality_skips_burst_neighbors(self):
+        from memory_curation import curate_highlights
+        rows = []
+        for i, day in enumerate(["2024-05-01", "2024-05-01", "2024-05-01", "2024-05-02", "2024-05-03", "2024-05-04", "2024-05-05", "2024-05-06", "2024-05-07"]):
+            rows.append({
+                "id": 200 + i,
+                "sharpness": 2.0,
+                "dhash": f"{i+1:04x}",
+                "favorite": 0,
+                "face_count": 1,
+                "bad_cover": 0,
+                "day_date": day,
+                "captured_at": f"{day}T10:00:{i:02d}" if i < 3 else f"{day}T10:00:00",
+                "width": 1600,
+                "height": 900,
+            })
+        picked = curate_highlights(rows, mode="trip", limit=10)
+        self.assertFalse({200, 201, 202}.issubset(set(picked)))
+        self.assertLessEqual(len(set(picked) & {200, 201, 202}), 1)
+
+    def test_day_event_does_not_mix_disjoint_people(self):
+        from memory_curation import pick_day_event
+        rows = [
+            {"id": 24292, "captured_at": "2014-09-21T08:58:48", "person_ids": [6454]},
+            {"id": 24294, "captured_at": "2014-09-21T09:03:42", "person_ids": [6454]},
+            {"id": 24293, "captured_at": "2014-09-21T09:06:08", "person_ids": [6454]},
+            {"id": 24296, "captured_at": "2014-09-21T10:31:08", "person_ids": [6454]},
+            {"id": 24298, "captured_at": "2014-09-21T10:31:44", "person_ids": [6454]},
+            {"id": 24297, "captured_at": "2014-09-21T10:31:45", "person_ids": [6454]},
+            {"id": 24291, "captured_at": "2014-09-21T08:51:46", "person_ids": []},
+            {"id": 24295, "captured_at": "2014-09-21T09:13:53", "person_ids": []},
+            {"id": 799, "captured_at": "2014-09-21T11:42:23", "person_ids": [1255, 1283, 1334]},
+            {"id": 800, "captured_at": "2014-09-21T11:42:28", "person_ids": [1255, 1283, 1334]},
+            {"id": 801, "captured_at": "2014-09-21T11:42:31", "person_ids": [1255, 1283, 1334]},
+            {"id": 802, "captured_at": "2014-09-21T12:27:58", "person_ids": [1255]},
+            {"id": 24300, "captured_at": "2014-09-21T17:28:48", "person_ids": [1255, 1334]},
+            {"id": 24299, "captured_at": "2014-09-21T17:28:50", "person_ids": [1255, 1334]},
+        ]
+        picked = {int(row["id"]) for row in pick_day_event(rows)}
+        xi = {24291, 24292, 24293, 24294, 24295, 24296, 24297, 24298}
+        xu = {799, 800, 801, 802, 24299, 24300}
+        self.assertTrue(picked >= xu or picked <= xi)
+        self.assertFalse(picked & xi and picked & xu)
+
+    def test_homepage_memories_play_highlights_not_full_group(self):
+        with self.module.db() as c:
+            insert_person(c, 1, "林女士")
+            for i in range(1, 8):
+                insert_asset(c, i, captured_at=f"2024-05-{i:02d}T10:00:00", place="杭州 · 西湖", width=1600, height=900)
+                write_thumb(self.data, i, "sharp", i)
+            for i in range(1, 8):
+                year = 2016 + i
+                aid = 20 + i
+                insert_asset(c, aid, captured_at=f"{year}-06-01T10:00:00", width=1200, height=800)
+                insert_face(c, aid, aid, 1, bbox="[200,80,700,680,1200,800]")
+                write_thumb(self.data, aid, "faceish", i)
+            for i in range(1, 8):
+                aid = 40 + i
+                insert_asset(c, aid, captured_at=f"2023-09-18T1{i}:00:00", width=1400, height=900)
+                write_thumb(self.data, aid, "sharp", i + 10)
+        rebuilt = self.client.post("/api/home/catalog/rebuild")
+        self.assertEqual(200, rebuilt.status_code, rebuilt.text)
+        data = self.rec("all").json()
+        kinds = [item["kind"] for item in data["items"]]
+        self.assertTrue(kinds)
+        self.assertTrue(all(kind.startswith("memory_") for kind in kinds))
+        playable = [item for item in data["items"] if item.get("playable")]
+        self.assertTrue(playable)
+        card = playable[0]
+        self.assertGreaterEqual(len(card.get("highlight_ids") or card["cover_asset_ids"]), 7)
+        opened = self.client.post("/api/home/groups/open", json={"group_id": card["group_id"]}).json()
+        self.assertTrue(opened.get("playable"))
+        photos = self.client.get("/api/photos", params={"recommendation_snapshot": opened["snapshot_id"]}).json()
+        self.assertGreaterEqual(len(photos["items"]), 7)
+        self.assertLessEqual(len(photos["items"]), 10)
+        if card.get("source_count"):
+            self.assertLessEqual(len(photos["items"]), card["source_count"])
+
+    def test_closed_stories_do_not_change_on_rebuild(self):
+        with self.module.db() as c:
+            for i in range(1, 8):
+                insert_asset(c, i, captured_at=f"2024-05-{i:02d}T10:00:00", place="杭州 · 西湖", width=1600, height=900)
+                write_thumb(self.data, i, "sharp", i)
+        first = self.client.post("/api/home/catalog/rebuild")
+        self.assertEqual(200, first.status_code, first.text)
+        data = self.rec("all").json()
+        self.assertTrue(data["items"])
+        card = data["items"][0]
+        highlights = list(card.get("highlight_ids") or card.get("cover_asset_ids") or [])
+        self.assertTrue(highlights)
+        with self.module.db() as c:
+            insert_asset(c, 99, captured_at="2024-05-03T12:00:00", place="杭州 · 西湖", width=1600, height=900, favorite=1)
+            write_thumb(self.data, 99, "sharp", 9)
+            c.execute("DELETE FROM home_recommendation_cache")
+        second = self.client.post("/api/home/catalog/rebuild")
+        self.assertEqual(200, second.status_code, second.text)
+        again = self.rec("all").json()
+        match = next((item for item in again["items"] + (again.get("candidates") or {}).get("memory_trip") or [] if item.get("group_id") == card["group_id"]), None)
+        self.assertIsNotNone(match)
+        self.assertEqual(highlights, list(match.get("highlight_ids") or match.get("cover_asset_ids") or []))
+
+    def test_homepage_all_keeps_memory_candidates_bounded(self):
+        with self.module.db() as c:
+            for i in range(25):
+                card = {
+                    "group_id": f"memory:trip:{i}",
+                    "source_group_id": f"place:{i}",
+                    "kind": "memory_trip",
+                    "title": f"出行 {i}",
+                    "subtitle": "春天",
+                    "date_from": "2024-04-01",
+                    "date_to": "2024-04-03",
+                    "playable": True,
+                    "highlight_ids": [i + 1],
+                    "cover_asset_ids": [i + 1],
+                    "covers": [{"asset_id": i + 1}],
+                }
+                c.execute(
+                    "INSERT INTO home_stories(story_id, kind, source_group_id, season, date_from, date_to, title, subtitle, payload_json, created_at) "
+                    "VALUES (?,?,?,?,?,?,?,?,?, datetime('now'))",
+                    (card["group_id"], card["kind"], card["source_group_id"], "spring",
+                     card["date_from"], card["date_to"], card["title"], card["subtitle"],
+                     __import__("json").dumps(card, ensure_ascii=False)),
+                )
+        data = self.rec("all").json()
+        candidates = (data.get("candidates") or {}).get("memory_trip") or []
+        self.assertEqual(24, len(candidates))
+        self.assertLessEqual(len(data.get("items") or []), 3)
 
 if __name__ == "__main__":
     unittest.main()

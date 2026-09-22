@@ -159,5 +159,26 @@
 <dialog aria-label="选择照片文件夹" id="folder-dialog" class="compact-dialog"><button class="dialog-close" data-close="folder-dialog" aria-label="关闭目录选择">×</button><h2>选择照片文件夹</h2><div id="folder-current" class="folder-current"></div><div id="folder-list" class="folder-list"></div><button id="use-folder" class="primary">使用这个文件夹</button></dialog>
 <dialog aria-label="确认排除范围" id="exclude-dialog" class="compact-dialog"><button class="dialog-close" data-close="exclude-dialog" aria-label="关闭排除确认">×</button><div class="eyebrow">保留值得珍藏的照片</div><h2>确认排除范围</h2><div id="exclude-impact" class="exclusion-impact"></div><p class="muted">将移出照片库并清理不再使用的缩略图、人脸小图和人脸识别结果。原图片文件、人工补录和排除记录保留；恢复后可重建预览，人脸需要重新识别。</p><label for="exclude-reason">原因（可选）</label><input id="exclude-reason" value="不需要的图片" maxlength="200"><button id="confirm-exclusion" class="primary">确认排除并清理缓存</button></dialog>
 <div id="toast" role="status" aria-live="polite"></div>
+<div id="memory-player" hidden>
+  <div class="memory-stage">
+    <div class="memory-ken" id="memory-ken-a"><img id="memory-frame-a" alt=""></div>
+    <div class="memory-ken" id="memory-ken-b"><img id="memory-frame-b" alt=""></div>
+    <div id="memory-flash" class="memory-flash" aria-hidden="true"></div>
+  </div>
+  <div id="memory-overture" class="memory-overture" hidden aria-hidden="true">
+    <p class="memory-overture-brand">拾光</p>
+    <p class="memory-overture-line" id="memory-overture-line"></p>
+  </div>
+  <button type="button" id="memory-close" class="memory-close" aria-label="关闭">×</button>
+  <button type="button" id="memory-prev" class="memory-nav prev" aria-label="上一张">‹</button>
+  <button type="button" id="memory-next" class="memory-nav next" aria-label="下一张">›</button>
+  <div class="memory-caption"><strong id="memory-title"></strong><span id="memory-year" hidden></span><span id="memory-progress"></span></div>
+  <div id="memory-dots" class="memory-dots"></div>
+  <button type="button" id="memory-open-photo" class="memory-open-photo">看这张</button>
+  <div id="memory-end" class="memory-end" hidden>
+    <button type="button" id="memory-again">再看一次</button>
+    <button type="button" id="memory-all">看全部</button>
+  </div>
+</div>
 <script src="/vendor/leaflet.js"></script><script src="/operation-runtime.js"></script><script src="/app.js"></script><script src="/home-discovery.js"></script><script src="/map-area-editor.js"></script><script src="/viewer.js"></script><script src="/photo-export.js"></script><script src="/recent-operations.js"></script><script src="/browse-continuity.js"></script><script src="/waterfall.js"></script><script src="/home-query-bridge.js"></script><script src="/home-query-ui.js"></script><script src="/home-query-init.js"></script>
 </body></html>

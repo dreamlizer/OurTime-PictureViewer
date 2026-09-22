@@ -251,7 +251,7 @@ async function loadPhotos(options={}){
  const mapFilter=state.placeMapFilter;
  waterfall.query={q:state.q,filter:mapFilter?'all':(state.homeSnapshotId?'all':state.view),person:state.person,directory:state.directory,sort:state.sort,date_from:state.dateFrom||'',date_to:state.dateTo||'',place:state.place||'',...(state.homeSnapshotId?{recommendation_snapshot:state.homeSnapshotId}:{}),...(mapFilter?{map_cell:mapFilter.cell,map_lat_bucket:mapFilter.lat_bucket,map_lng_bucket:mapFilter.lng_bucket,...('map_west' in mapFilter?{map_west:mapFilter.map_west,map_south:mapFilter.map_south,map_east:mapFilter.map_east,map_north:mapFilter.map_north}:{})}:{})};
  waterfall.width=streamMetrics().width;waterfall.columns=streamMetrics().columns;state.offset=0;
- const grid=$('#photo-grid');const keepHeight=Math.max(grid.offsetHeight||0,window.innerHeight*0.45);waterfall.seenPhotos=new Set();streamEntrance.disconnect();grid.classList.add('is-updating');grid.style.minHeight=keepHeight+'px';$('#stream-status').textContent='正在加载照片…';$('#stream-retry').hidden=true;$('#no-results').hidden=true;$('#empty').hidden=true;$('#result-count').textContent='加载中';
+ const grid=$('#photo-grid');waterfall.seenPhotos=new Set();streamEntrance.disconnect();grid.replaceChildren();grid.classList.add('is-updating');grid.style.minHeight='';grid.style.height='';$('#stream-status').textContent='正在加载照片…';$('#stream-retry').hidden=true;$('#no-results').hidden=true;$('#empty').hidden=true;$('#result-count').textContent='加载中';
  if(typeof syncGroupResultCount==='function') syncGroupResultCount(state.view,{clear:true});
   const first=await streamPage(0);
  if(ticket!==waterfall.generation){if(external)external.removeEventListener('abort',abortFromExternal);return false;}
@@ -273,6 +273,7 @@ async function loadPhotos(options={}){
   waterfall.query=previous.query;
   g.classList.remove('is-updating');
   g.style.minHeight='';
+  if(waterfall.shapes.length) streamPaint();
  }
  if(external)external.removeEventListener('abort',abortFromExternal);
  if(first)await window.OurTimeContinuity?.photosLoaded();

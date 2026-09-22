@@ -3,6 +3,7 @@ $projectRoot = $PSScriptRoot
 $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 $port = if ($env:PHOTO_LIBRARY_PORT) { [int]$env:PHOTO_LIBRARY_PORT } else { 8765 }
 $serverUrl = "http://127.0.0.1:$port"
+. (Join-Path $projectRoot 'ourtime-config.ps1')
 $mutex = [Threading.Mutex]::new($false, 'Local\OurTimePictureViewerRestart')
 $ownsMutex = $false
 $exitCode = 0
@@ -54,7 +55,7 @@ try {
         throw 'The start step failed.'
     }
 
-    $health = Invoke-RestMethod -Uri "$serverUrl/api/health" -TimeoutSec 5
+    $health = Invoke-OurTimeApi "$serverUrl/api/health" 'GET' 5
     if (-not $health.ok -or -not $health.owner) {
         throw 'The restarted service did not confirm ownership.'
     }

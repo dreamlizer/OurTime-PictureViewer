@@ -8,18 +8,34 @@ import re
 import threading
 import uuid
 from datetime import date, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 from library_db import ACTIVE_ASSET, ASSET_LIST_COLUMNS, EFFECTIVE_PLACE, now
+from memory_curation import (
+    HIGHLIGHT_MAX,
+    HIGHLIGHT_MIN,
+    curate_highlights,
+    ensure_quality,
+    ensure_quality_schema,
+    pick_day_event,
+)
+from ourtime_config import DATA
 
-ALGORITHM_VERSION = "home-discovery-v5"
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+ALGORITHM_VERSION = "home-discovery-v10"
 CATALOG_BUILD_LOCK = threading.Lock()
 SNAPSHOT_LIMIT = 80
 PAGE_SIZE = 6
 MAX_PLACE_DAYS = 7
 MIN_PLACE_PHOTOS = 3
 MIN_PERSON_PHOTOS = 2
+PROTAGONIST_MIN_RATIO = 0.018
+PROTAGONIST_SOFT_RATIO = 0.012
+PERSON_YEAR_PER_YEAR = 2
+PERSON_HIGHLIGHT_MAX = 18
+PERSON_POOL_MAX = 80
+INLINE_CATALOG_ASSETS = 200
 PRECISION_DAY = "日"
 PRECISION_MONTH = "月"
 PRECISION_YEAR = "年"
@@ -117,6 +133,7 @@ def data_revision(conn) -> str:
 
 
 def ensure_home_schema(conn) -> None:
+    ensure_quality_schema(conn)
     conn.executescript(
         """
         CREATE TABLE IF NOT EXISTS home_snapshots (
@@ -152,6 +169,20 @@ def ensure_home_schema(conn) -> None:
             status TEXT,
             message TEXT
         );
+        CREATE TABLE IF NOT EXISTS home_stories (
+            story_id TEXT PRIMARY KEY,
+            kind TEXT NOT NULL,
+            source_group_id TEXT NOT NULL,
+            season TEXT,
+            date_from TEXT,
+            date_to TEXT,
+            title TEXT,
+            subtitle TEXT,
+            payload_json TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS home_stories_source ON home_stories(source_group_id);
+        CREATE INDEX IF NOT EXISTS home_stories_season ON home_stories(season, kind);
         """
     )
 
@@ -301,15 +332,21 @@ def _cover_from_row(row, *, year=None):
 def _person_photo_score(row):
     metrics = _face_metrics(row)
     face_count = int(row.get("face_count") or 0)
-    visible = 1 if 0.02 <= metrics["ratio"] <= 0.5 else (0.4 if metrics["ratio"] > 0.5 else 0)
-    solo = 1 if face_count <= 2 else 0
+    crowd = int(row.get("scene_face_count") or face_count or 0)
+    rank = int(row.get("face_rank") or 1)
+    share = float(row.get("face_share") or 1.0)
+    visible = 1 if PROTAGONIST_MIN_RATIO <= metrics["ratio"] <= 0.62 else (0.45 if metrics["ratio"] > 0.62 else 0)
+    solo = 1 if crowd <= 2 else (0.55 if crowd <= 4 else 0)
+    lead = 1 if rank == 1 else (0.6 if share >= 0.75 else 0)
     return (
+        1 if _is_protagonist(row) else 0,
         1 if metrics["ok"] else 0,
         visible,
+        lead,
         solo,
         metrics["ratio"],
         int(row.get("favorite") or 0),
-        -face_count,
+        -crowd,
         -int(row["id"]),
     )
 
@@ -353,6 +390,240 @@ def _best_person_rows(items):
     return list(best.values())
 
 
+def _chunks(items, size=400):
+    sequence = list(items)
+    for index in range(0, len(sequence), size):
+        yield sequence[index:index + size]
+
+
+def _row_day(row):
+    day = str(row.get("day_date") or "").strip()
+    if len(day) >= 10:
+        return day[:10]
+    captured = str(row.get("captured_at") or "")
+    return captured[:10] if len(captured) >= 10 else ""
+
+
+def _annotate_scene_roles(conn, rows):
+    if not rows:
+        return rows
+    sizes = {}
+    for row in rows:
+        asset_id = int(row["id"])
+        sizes[asset_id] = (row.get("width"), row.get("height"), row.get("bbox"))
+    ratios_by_asset = {asset_id: [] for asset_id in sizes}
+    ids = list(sizes)
+    for chunk in _chunks(ids):
+        placeholders = ",".join("?" for _ in chunk)
+        sql = (
+            "SELECT asset_id, bbox FROM faces "
+            "WHERE coalesce(ignored,0)=0 AND asset_id IN (" + placeholders + ")"
+        )
+        for item in conn.execute(sql, chunk).fetchall():
+            asset_id = int(item["asset_id"])
+            width, height, _bbox = sizes.get(asset_id, (0, 0, None))
+            metrics = _face_metrics({
+                "bbox": item["bbox"],
+                "width": width,
+                "height": height,
+            })
+            ratios_by_asset.setdefault(asset_id, []).append(metrics["ratio"])
+    for row in rows:
+        mine = _face_metrics(row)["ratio"]
+        ratios = sorted(ratios_by_asset.get(int(row["id"])) or [mine], reverse=True)
+        largest = float(ratios[0] or 0.0)
+        rank = 1 + sum(1 for value in ratios if value > mine + 1e-9)
+        crowd = max(int(row.get("face_count") or 0), len(ratios))
+        row["scene_face_count"] = crowd
+        row["face_rank"] = rank
+        row["largest_ratio"] = largest
+        row["face_share"] = (mine / largest) if largest > 0 else 0.0
+    return rows
+
+
+def _is_protagonist(row):
+    metrics = _face_metrics(row)
+    ratio = metrics["ratio"]
+    if not metrics["ok"] or ratio < PROTAGONIST_MIN_RATIO:
+        return False
+    if metrics["cx"] < 0.08 or metrics["cx"] > 0.92 or metrics["cy"] < 0.05 or metrics["cy"] > 0.90:
+        return False
+    crowd = int(row.get("scene_face_count") or row.get("face_count") or 0)
+    rank = int(row.get("face_rank") or 1)
+    share = float(row.get("face_share") or 1.0)
+    if crowd <= 3 and rank == 1:
+        return True
+    if rank == 1 and share >= 0.85:
+        return True
+    if ratio < 0.025:
+        return False
+    if crowd >= 6 and (rank > 2 or share < 0.75):
+        return False
+    if crowd >= 4 and rank > 1 and share < 0.62:
+        return False
+    if rank > 1 and share < 0.70:
+        return False
+    return True
+
+
+def _person_pool_rows(members):
+    leads = [row for row in members if _is_protagonist(row)]
+    if len(leads) >= MIN_PERSON_PHOTOS:
+        return leads
+    visible = [row for row in members if _face_metrics(row)["ok"] or _is_protagonist(row)]
+    if len(visible) >= MIN_PERSON_PHOTOS:
+        return visible
+    return list(members)
+
+
+def _year_number(value):
+    text = str(value or "").strip()
+    return int(text[:4]) if len(text) >= 4 and text[:4].isdigit() else 0
+
+
+def _spread_year_order(years, limit):
+    ordered = sorted({str(year) for year in years if year}, key=_year_number)
+    if len(ordered) <= limit:
+        return ordered
+    chosen = [ordered[0], ordered[-1]]
+    span = _year_number(ordered[-1]) - _year_number(ordered[0])
+    targets = [(_year_number(ordered[0]) + span * index / (limit - 1), index) for index in range(1, limit - 1)]
+    used = set(chosen)
+    for target, index in targets:
+        remaining = [year for year in ordered if year not in used]
+        pick = min(remaining, key=lambda year: (abs(_year_number(year) - target), abs(ordered.index(year) - index), _year_number(year)))
+        chosen.append(pick)
+        used.add(pick)
+    return sorted(chosen, key=_year_number)
+
+
+def _pick_spread_rows(rows, *, per_year, limit):
+    by_year = {}
+    undated = []
+    for row in sorted(rows, key=_person_photo_score, reverse=True):
+        year = str(row.get("year_date") or "").strip()
+        if year:
+            by_year.setdefault(year, []).append(row)
+        else:
+            undated.append(row)
+    years = _spread_year_order(by_year, limit)
+    picked = []
+    used_ids = set()
+    used_days = set()
+
+    def take(source, cap_year=None):
+        if len(picked) >= limit:
+            return
+        year_taken = 0
+        for row in source:
+            if len(picked) >= limit:
+                return
+            if cap_year is not None and year_taken >= cap_year:
+                return
+            asset_id = int(row["id"])
+            if asset_id in used_ids:
+                continue
+            day = _row_day(row)
+            if day and day in used_days:
+                continue
+            picked.append(row)
+            used_ids.add(asset_id)
+            if day:
+                used_days.add(day)
+            year_taken += 1
+
+    for year in years:
+        take(by_year[year], 1)
+    if len(picked) < limit:
+        for year in years:
+            already = sum(1 for row in picked if str(row.get("year_date") or "") == year)
+            take(by_year[year], max(0, per_year - already))
+    if len(picked) < limit:
+        take(undated)
+    picked.sort(key=lambda row: (str(row.get("year_date") or "9999"), _row_day(row), int(row["id"])))
+    return picked[:limit]
+
+
+def _person_rows(conn, person_id=None):
+    sql = (
+        "SELECT p.id person_id, p.name person_name, a.id, a.width, a.height, coalesce(a.favorite,0) favorite, "
+        "a.captured_at captured_at"
+        + COVER_INNER_SQL + YEAR_DATE_SQL + " year_date, " + DAY_DATE_SQL + " day_date, "
+        "x.id face_id, x.bbox bbox FROM people p "
+        "JOIN faces x ON x.person_id=p.id AND coalesce(x.ignored,0)=0 "
+        "JOIN assets a ON a.id=x.asset_id "
+        "WHERE coalesce(p.ignored,0)=0 AND p.confirmed=1 AND trim(coalesce(p.name,''))<>'' "
+        "AND " + QUALIFIED_SQL
+    )
+    params = [*_year_params(), *_day_params(), *QUALIFIED_VALUES]
+    if person_id:
+        sql += " AND p.id=?"
+        params.append(int(person_id))
+    rows = [dict(item) for item in conn.execute(sql, params).fetchall()]
+    return _annotate_scene_roles(conn, rows)
+
+
+def _person_card_from_items(person_id, items):
+    members = _best_person_rows(items)
+    if len(members) < MIN_PERSON_PHOTOS:
+        return None
+    years = sorted({row["year_date"] for row in members if row.get("year_date")})
+    name = members[0]["person_name"]
+    if len(years) >= 2:
+        kind, title, subtitle, cta = "person_years", name, f"{years[0]} — {years[-1]}", "看看这些年"
+    else:
+        kind, title, subtitle, cta = "person_fragment", f"与{name}的片段", f"{years[0]}" if years else "", "看看这些年"
+    pool = _person_pool_rows(members)
+    highlights = _pick_spread_rows(pool, per_year=PERSON_YEAR_PER_YEAR, limit=PERSON_HIGHLIGHT_MAX)
+    if len(highlights) < MIN_PERSON_PHOTOS:
+        highlights = _pick_spread_rows(members, per_year=PERSON_YEAR_PER_YEAR, limit=PERSON_HIGHLIGHT_MAX)
+    if len(highlights) < MIN_PERSON_PHOTOS:
+        return None
+    pool_ids = [int(row["id"]) for row in _pick_spread_rows(pool, per_year=4, limit=PERSON_POOL_MAX)]
+    highlight_ids = [int(row["id"]) for row in highlights]
+    by_year = {}
+    for row in pool:
+        year = row.get("year_date")
+        if year:
+            by_year.setdefault(str(year), []).append(row)
+    chosen_years = _choose_span_years(list(by_year) or [row.get("year_date") for row in highlights if row.get("year_date")])
+    covers = []
+    used_ids = set()
+    alts = []
+    for year in chosen_years:
+        ranked_rows = sorted(by_year.get(year, []), key=_person_photo_score, reverse=True)
+        picked = None
+        for row in ranked_rows:
+            if int(row["id"]) in used_ids:
+                continue
+            if picked is None:
+                picked = row
+            else:
+                alts.append(_cover_from_row(row, year=year))
+        if picked is None:
+            continue
+        used_ids.add(int(picked["id"]))
+        covers.append(_cover_from_row(picked, year=year))
+    if not covers:
+        for row in highlights[:4]:
+            covers.append(_cover_from_row(row, year=row.get("year_date")))
+    return _card(
+        kind, f"person:{person_id}", title, subtitle, len(highlight_ids), [item["asset_id"] for item in covers[:4]],
+        f"{years[0]}-01-01" if years else None, f"{years[-1]}-12-31" if years else None,
+        {
+            "person_id": person_id,
+            "person_name": name,
+            "years": years,
+            "cta": cta,
+            "covers": covers[:4],
+            "_alts": alts,
+            "highlight_ids": highlight_ids,
+            "source_count": len(members),
+            "_pool_ids": pool_ids or highlight_ids,
+        },
+    )
+
+
 def _covers_payload(cover_ids, *, year=None, face_id=None):
     return [
         {
@@ -389,6 +660,10 @@ def _card(kind, group_id, title, subtitle, photo_count, cover_ids, date_from, da
         "person_name": extra.get("person_name"),
         "years": extra.get("years"),
         "cta": extra.get("cta") or "看看这一天",
+        "source_group_id": extra.get("source_group_id"),
+        "source_count": extra.get("source_count"),
+        "highlight_ids": extra.get("highlight_ids") or [],
+        "playable": extra.get("playable") or False,
         "_alts": extra.get("_alts") or [],
     }
 
@@ -532,64 +807,15 @@ def _place_groups(conn, today: date):
 
 
 def _person_groups(conn):
-    sql = (
-        "SELECT p.id person_id, p.name person_name, a.id, a.width, a.height, coalesce(a.favorite,0) favorite"
-        + COVER_INNER_SQL + YEAR_DATE_SQL + " year_date, x.id face_id, x.bbox bbox FROM people p "
-        "JOIN faces x ON x.person_id=p.id AND coalesce(x.ignored,0)=0 "
-        "JOIN assets a ON a.id=x.asset_id "
-        "WHERE coalesce(p.ignored,0)=0 AND p.confirmed=1 AND trim(coalesce(p.name,''))<>'' "
-        "AND " + QUALIFIED_SQL
-    )
-    rows = [dict(r) for r in conn.execute(sql, (*_year_params(), *QUALIFIED_VALUES)).fetchall()]
+    rows = _person_rows(conn)
     by_person = {}
     for row in rows:
         by_person.setdefault(int(row["person_id"]), []).append(row)
     groups = []
     for person_id, items in by_person.items():
-        members = _best_person_rows(items)
-        if len(members) < MIN_PERSON_PHOTOS:
-            continue
-        years = sorted({row["year_date"] for row in members if row.get("year_date")})
-        name = members[0]["person_name"]
-        if len(years) >= 2:
-            kind, title, subtitle, cta = "person_years", name, f"{years[0]} — {years[-1]}", "看看这些年"
-        else:
-            kind, title, subtitle, cta = "person_fragment", f"与{name}的片段", f"{len(members)} 张照片", "看看这些年"
-        by_year = {}
-        undated = []
-        for row in members:
-            year = row.get("year_date")
-            if year:
-                by_year.setdefault(str(year), []).append(row)
-            else:
-                undated.append(row)
-        chosen_years = _choose_span_years(list(by_year))
-        covers = []
-        used_ids = set()
-        alts = []
-        for year in chosen_years:
-            ranked_rows = sorted(by_year.get(year, []), key=_person_photo_score, reverse=True)
-            picked = None
-            for row in ranked_rows:
-                if int(row["id"]) in used_ids:
-                    continue
-                if picked is None:
-                    picked = row
-                else:
-                    alts.append(_cover_from_row(row, year=year))
-            if picked is None:
-                continue
-            used_ids.add(int(picked["id"]))
-            covers.append(_cover_from_row(picked, year=year))
-        if not covers:
-            ranked_rows = sorted(members, key=_person_photo_score, reverse=True)
-            for row in ranked_rows[:4]:
-                covers.append(_cover_from_row(row, year=row.get("year_date")))
-        groups.append(_card(
-            kind, f"person:{person_id}", title, subtitle, len(members), [item["asset_id"] for item in covers[:4]],
-            f"{years[0]}-01-01" if years else None, f"{years[-1]}-12-31" if years else None,
-            {"person_id": person_id, "person_name": name, "years": years, "cta": cta, "covers": covers[:4], "_alts": alts},
-        ))
+        card = _person_card_from_items(person_id, items)
+        if card:
+            groups.append(card)
     groups.sort(key=lambda card: (0 if card["kind"] == "person_years" else 1, -card["photo_count"], card["group_id"]))
     return groups
 
@@ -615,7 +841,7 @@ def _rank_groups(groups, today: date, category: str):
             return (recency, -photos, seed)
         if category == "people_years":
             span = len(card.get("years") or [])
-            dominant = 1 if int(card.get("photo_count") or 0) >= 8000 else 0
+            dominant = 1 if int(card.get("source_count") or card.get("photo_count") or 0) >= 8000 else 0
             return (0 if card["kind"] == "person_years" else 1, dominant, -span, seed)
         return (seed, card["group_id"])
     return sorted(groups, key=key)
@@ -624,6 +850,13 @@ def _rank_groups(groups, today: date, category: str):
 def _public_card(card):
     item = dict(card)
     item.pop("_alts", None)
+    item.pop("_pool_ids", None)
+    return item
+
+
+def _stored_person_card(card):
+    item = dict(card)
+    item.pop("_pool_ids", None)
     return item
 
 
@@ -647,7 +880,8 @@ def _dedupe_covers(cards):
                 seen.add(int(replacement["asset_id"]))
         if not kept:
             continue
-        limit = 4 if str(card["kind"]).startswith("person") else 1
+        kind = str(card["kind"] or "")
+        limit = 4 if kind.startswith("person") or kind.startswith("memory") else 1
         kept = kept[:limit]
         item = _public_card(card)
         item["covers"] = kept
@@ -655,6 +889,410 @@ def _dedupe_covers(cards):
         result.append(item)
     return result
 
+
+
+
+
+MEMORY_TRIP_MIN = 7
+MEMORY_PERSON_MIN = 7
+MEMORY_DAY_MIN = 7
+
+
+def _thumb_dir():
+    return Path(DATA) / "thumbs"
+
+
+def _detail_rows(conn, ids):
+    if not ids:
+        return []
+    placeholders = ",".join("?" for _ in ids)
+    sql = (
+        "SELECT a.id, a.sha256, a.width, a.height, coalesce(a.favorite,0) favorite, a.captured_at"
+        + COVER_INNER_SQL + DAY_DATE_SQL + " day_date, " + YEAR_DATE_SQL + " year_date, "
+        + EFFECTIVE_PLACE + " place "
+        "FROM assets a WHERE a.id IN (" + placeholders + ") AND " + QUALIFIED_SQL
+    )
+    params = (*_day_params(), *_year_params(), *ids, *QUALIFIED_VALUES)
+    found = {int(row["id"]): dict(row) for row in conn.execute(sql, params).fetchall()}
+    rows = [found[asset_id] for asset_id in ids if asset_id in found]
+    for row in rows:
+        row["face_ratio"] = 0.0
+    return rows
+
+
+def _attach_person_faces(conn, rows, person_id=None):
+    if not rows:
+        return rows
+    ids = [int(row["id"]) for row in rows]
+    placeholders = ",".join("?" for _ in ids)
+    sql = (
+        "SELECT x.asset_id, x.bbox FROM faces x JOIN people p ON p.id=x.person_id "
+        "WHERE x.asset_id IN (" + placeholders + ") AND coalesce(x.ignored,0)=0 "
+        "AND coalesce(p.ignored,0)=0"
+    )
+    params = list(ids)
+    if person_id:
+        sql += " AND x.person_id=?"
+        params.append(int(person_id))
+    best = {}
+    for row in conn.execute(sql, params).fetchall():
+        item = {"id": row["asset_id"], "bbox": row["bbox"], "width": 0, "height": 0}
+        current = best.get(int(row["asset_id"]))
+        metrics = _face_metrics(item)
+        if current is None or metrics["ratio"] > current:
+            best[int(row["asset_id"])] = metrics["ratio"]
+    for row in rows:
+        row["face_ratio"] = float(best.get(int(row["id"])) or 0.0)
+    return rows
+
+
+def _attach_people_sets(conn, rows):
+    if not rows:
+        return rows
+    ids = [int(row["id"]) for row in rows]
+    placeholders = ",".join("?" for _ in ids)
+    grouped = {asset_id: set() for asset_id in ids}
+    for row in conn.execute(
+        """SELECT x.asset_id, x.person_id FROM faces x
+           JOIN people p ON p.id=x.person_id
+           WHERE x.asset_id IN (""" + placeholders + """)
+             AND coalesce(x.ignored,0)=0 AND coalesce(p.ignored,0)=0""",
+        ids,
+    ):
+        grouped[int(row["asset_id"])].add(int(row["person_id"]))
+    for row in rows:
+        row["person_ids"] = sorted(grouped.get(int(row["id"])) or [])
+    return rows
+
+
+def _memory_card(kind, source, highlight_ids, extra=None):
+    extra = extra or {}
+    covers = extra.get("covers") or _covers_payload(highlight_ids[:4])
+    title = extra.get("title") or source.get("title")
+    subtitle = extra.get("subtitle") or source.get("subtitle")
+    source_id = source.get("group_id")
+    group_id = extra.get("group_id") or ("memory:" + kind.split("_", 1)[-1] + ":" + source_id)
+    return _card(
+        kind,
+        group_id,
+        title,
+        subtitle,
+        len(highlight_ids),
+        highlight_ids[:4],
+        source.get("date_from"),
+        source.get("date_to"),
+        {
+            **extra,
+            "covers": covers,
+            "place": source.get("place") or extra.get("place"),
+            "place_label": source.get("place_label") or extra.get("place_label"),
+            "title_full": source.get("title_full") or extra.get("title_full"),
+            "person_id": source.get("person_id") or extra.get("person_id"),
+            "person_name": source.get("person_name") or extra.get("person_name"),
+            "years": source.get("years") or extra.get("years"),
+            "cta": extra.get("cta") or "播放",
+            "source_group_id": source_id,
+            "source_count": extra.get("source_count") or source.get("photo_count"),
+            "highlight_ids": highlight_ids,
+            "playable": True,
+        },
+    )
+
+
+def _curate_group(conn, source, ids, *, mode, person_id=None, min_source=5):
+    if len(ids) < min_source:
+        return None
+    if len(ids) > 80:
+        step = max(1, len(ids) // 80)
+        ids = ids[::step][:80]
+    rows = _detail_rows(conn, ids)
+    if person_id:
+        _attach_person_faces(conn, rows, person_id)
+    if mode == "day":
+        _attach_people_sets(conn, rows)
+        rows = pick_day_event(rows)
+        if len(rows) < min_source:
+            return None
+    ensure_quality(conn, rows, _thumb_dir())
+    highlights = curate_highlights(rows, mode=mode, limit=10)
+    if len(highlights) < HIGHLIGHT_MIN:
+        return None
+    return highlights
+
+
+def _build_trip_memories(conn, places, today):
+    ranked = _rank_groups(places, today, "place_revisit")
+    out = []
+    for card in ranked:
+        if int(card.get("photo_count") or 0) < MEMORY_TRIP_MIN:
+            continue
+        try:
+            meta, ids = _members_for_source(conn, card["group_id"], today)
+        except RecommendationError:
+            continue
+        highlights = _curate_group(conn, card, ids, mode="trip", min_source=MEMORY_TRIP_MIN)
+        if not highlights:
+            continue
+        first = date.fromisoformat(str(card.get("date_from")))
+        last = date.fromisoformat(str(card.get("date_to")))
+        subtitle = _place_range_label(first, last, len(highlights)).split(" · ")[0]
+        out.append(_memory_card("memory_trip", card, highlights, {
+            "subtitle": subtitle,
+            "title": card.get("place_label") or card.get("title"),
+        }))
+        if len(out) >= 24:
+            break
+    return out
+
+
+def _build_person_memories(conn, people, today):
+    ranked = _rank_groups(people, today, "people_years")
+    out = []
+    for card in ranked:
+        if card.get("kind") != "person_years":
+            continue
+        if int(card.get("source_count") or card.get("photo_count") or 0) < MEMORY_PERSON_MIN:
+            continue
+        years = card.get("years") or []
+        if len(years) < 2:
+            continue
+        try:
+            ids = [int(item) for item in (card.get("_pool_ids") or card.get("highlight_ids") or [])]
+            if not ids:
+                _meta, ids = _members_for_source(conn, card["group_id"], today)
+        except RecommendationError:
+            continue
+        highlights = _curate_group(
+            conn, card, ids, mode="person", person_id=card.get("person_id"), min_source=MEMORY_PERSON_MIN
+        )
+        if not highlights:
+            continue
+        subtitle = f"{years[0]} — {years[-1]}"
+        out.append(_memory_card("memory_person", card, highlights, {
+            "subtitle": subtitle,
+            "title": card.get("person_name") or card.get("title"),
+        }))
+        if len(out) >= 24:
+            break
+    return out
+
+
+def _build_day_memories(conn, today):
+    groups = _on_this_day_groups(conn, today) or _on_this_month_groups(conn, today)
+    ranked = _rank_groups(groups, today, "on_this_day")
+    out = []
+    for card in ranked:
+        if int(card.get("photo_count") or 0) < MEMORY_DAY_MIN:
+            continue
+        try:
+            meta, ids = _members_for_source(conn, card["group_id"], today)
+        except RecommendationError:
+            continue
+        highlights = _curate_group(conn, card, ids, mode="day", min_source=MEMORY_DAY_MIN)
+        if not highlights:
+            continue
+        place = card.get("place_label") or ""
+        subtitle = place or str(len(highlights))
+        out.append(_memory_card("memory_day", card, highlights, {
+            "subtitle": place,
+            "title": card.get("title"),
+        }))
+        if len(out) >= 12:
+            break
+    return out
+
+
+def _members_for_source(conn, group_id: str, today: date):
+    return _members_for_group(conn, group_id, today)
+
+
+def _load_memory_catalog(conn, kind):
+    cached = _load_catalog_kind(conn, kind)
+    if cached is None:
+        return []
+    if isinstance(cached, dict):
+        return cached.get("items") or []
+    return cached
+
+
+def _memory_items(payload):
+    if payload is None:
+        return None
+    if isinstance(payload, dict):
+        return payload.get("items") or []
+    return payload
+
+
+def _memory_from_catalog(conn, group_id: str):
+    row = conn.execute(
+        "SELECT payload_json FROM home_stories WHERE story_id=? OR source_group_id=?",
+        (group_id, group_id),
+    ).fetchone()
+    if row:
+        return json.loads(row[0])
+    for card in _load_all_stories(conn):
+        if card.get("group_id") == group_id or card.get("source_group_id") == group_id:
+            return card
+    for kind in ("memory_trip", "memory_person", "memory_day"):
+        for card in _load_memory_catalog(conn, kind):
+            if card.get("group_id") == group_id:
+                return card
+    return None
+
+
+
+
+def _season_of(value) -> str:
+    text = str(value or "")
+    if len(text) < 7:
+        return ""
+    try:
+        month = int(text[5:7])
+    except ValueError:
+        return ""
+    if month in (3, 4, 5):
+        return "spring"
+    if month in (6, 7, 8):
+        return "summer"
+    if month in (9, 10, 11):
+        return "autumn"
+    if month in (12, 1, 2):
+        return "winter"
+    return ""
+
+
+def _existing_story_sources(conn) -> set[str]:
+    return {str(row[0]) for row in conn.execute("SELECT source_group_id FROM home_stories").fetchall()}
+
+
+def _insert_story(conn, card) -> bool:
+    source = str(card.get("source_group_id") or card.get("group_id") or "")
+    if not source:
+        return False
+    story_id = str(card.get("group_id") or ("story:" + source))
+    before = conn.execute("SELECT 1 FROM home_stories WHERE story_id=? OR source_group_id=?", (story_id, source)).fetchone()
+    if before:
+        return False
+    conn.execute(
+        "INSERT OR IGNORE INTO home_stories(story_id, kind, source_group_id, season, date_from, date_to, title, subtitle, payload_json, created_at) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?)",
+        (story_id, card.get("kind") or "memory_trip", source, _season_of(card.get("date_from")),
+         card.get("date_from"), card.get("date_to"), card.get("title") or "", card.get("subtitle") or "",
+         json.dumps(_public_card(card), ensure_ascii=False), now()),
+    )
+    return conn.execute("SELECT changes()").fetchone()[0] > 0
+
+
+def _load_all_stories(conn):
+    rows = conn.execute("SELECT payload_json, season FROM home_stories").fetchall()
+    stories = []
+    for row in rows:
+        card = json.loads(row[0])
+        card["_season"] = row[1] or _season_of(card.get("date_from"))
+        stories.append(card)
+    return stories
+
+
+def _pick_homepage_stories(stories, today: date):
+    season = _season_of(today.isoformat())
+    def sort_key(card):
+        same = 0 if (card.get("_season") or "") == season else 1
+        kind_order = 0 if str(card.get("kind") or "").endswith("trip") else (1 if "person" in str(card.get("kind")) else 2)
+        seed = _stable(f"{today.isoformat()}|{card.get('group_id')}")
+        return (same, kind_order, seed)
+    ranked = sorted(stories, key=sort_key)
+    picked = []
+    seen_kind = set()
+    seen_id = set()
+    for card in ranked:
+        gid = card.get("group_id")
+        kind = str(card.get("kind") or "")
+        if gid in seen_id:
+            continue
+        if kind in seen_kind:
+            continue
+        picked.append(card)
+        seen_kind.add(kind)
+        seen_id.add(gid)
+        if len(picked) >= 3:
+            break
+    if len(picked) < 3:
+        for card in ranked:
+            gid = card.get("group_id")
+            if gid in seen_id:
+                continue
+            picked.append(card)
+            seen_id.add(gid)
+            if len(picked) >= 3:
+                break
+    by_kind = {"memory_day": [], "memory_trip": [], "memory_person": []}
+    for card in ranked:
+        kind = str(card.get("kind") or "")
+        if kind in by_kind:
+            by_kind[kind].append(_public_card(card))
+        elif "trip" in kind:
+            by_kind["memory_trip"].append(_public_card(card))
+        elif "person" in kind:
+            by_kind["memory_person"].append(_public_card(card))
+        else:
+            by_kind["memory_day"].append(_public_card(card))
+    return [_public_card(card) for card in picked], by_kind
+
+
+def _ingest_closed_stories(conn, places, people, today: date) -> int:
+    existing = _existing_story_sources(conn)
+    added = 0
+    for card in _rank_groups(places, today, "place_revisit"):
+        if card.get("group_id") in existing:
+            continue
+        if int(card.get("photo_count") or 0) < MEMORY_TRIP_MIN:
+            continue
+        try:
+            _meta, ids = _members_for_source(conn, card["group_id"], today)
+        except RecommendationError:
+            continue
+        highlights = _curate_group(conn, card, ids, mode="trip", min_source=MEMORY_TRIP_MIN)
+        if not highlights:
+            continue
+        first = date.fromisoformat(str(card.get("date_from")))
+        last = date.fromisoformat(str(card.get("date_to")))
+        memory = _memory_card("memory_trip", card, highlights, {
+            "subtitle": _place_range_label(first, last, len(highlights)).split(" · ")[0],
+            "title": card.get("place_label") or card.get("title"),
+        })
+        if _insert_story(conn, memory):
+            added += 1
+            existing.add(card["group_id"])
+            conn.commit()
+    for card in _rank_groups(people, today, "people_years"):
+        if card.get("kind") != "person_years":
+            continue
+        source = card.get("group_id")
+        if source in existing:
+            continue
+        if int(card.get("source_count") or card.get("photo_count") or 0) < MEMORY_PERSON_MIN:
+            continue
+        years = card.get("years") or []
+        if len(years) < 2:
+            continue
+        try:
+            ids = [int(item) for item in (card.get("_pool_ids") or card.get("highlight_ids") or [])]
+            if not ids:
+                _meta, ids = _members_for_source(conn, source, today)
+        except RecommendationError:
+            continue
+        highlights = _curate_group(conn, card, ids, mode="person", person_id=card.get("person_id"), min_source=MEMORY_PERSON_MIN)
+        if not highlights:
+            continue
+        memory = _memory_card("memory_person", card, highlights, {
+            "subtitle": f"{years[0]} — {years[-1]}",
+            "title": card.get("person_name") or card.get("title"),
+        })
+        if _insert_story(conn, memory):
+            added += 1
+            existing.add(source)
+            conn.commit()
+    return added
 
 
 def catalog_meta(conn):
@@ -680,9 +1318,15 @@ def _save_catalog_kind(conn, kind, payload):
 
 
 def _load_catalog_kind(conn, kind):
+    return _load_catalog_kind_row(conn, kind, match_version=True)
+
+
+def _load_catalog_kind_row(conn, kind, *, match_version=True):
     row = conn.execute(
-        "SELECT payload_json FROM home_catalog WHERE kind=? AND algorithm_version=?",
-        (kind, ALGORITHM_VERSION),
+        "SELECT payload_json FROM home_catalog WHERE kind=? AND algorithm_version=?"
+        if match_version else
+        "SELECT payload_json FROM home_catalog WHERE kind=? ORDER BY built_at DESC LIMIT 1",
+        (kind, ALGORITHM_VERSION) if match_version else (kind,),
     ).fetchone()
     if not row:
         return None
@@ -695,12 +1339,15 @@ def rebuild_home_catalog(conn, *, today=None):
         today = today or as_of_date()
         people = _person_groups(conn)
         places = _place_groups(conn, today)
-        _save_catalog_kind(conn, "people_years", people)
+        _save_catalog_kind(conn, "people_years", [_stored_person_card(card) for card in people])
         _save_catalog_kind(conn, "place_revisit", places)
+        conn.commit()
+        added = _ingest_closed_stories(conn, places, people, today)
+        conn.commit()
         built = now()
         conn.execute(
             "INSERT OR REPLACE INTO home_catalog_state(id, built_at, algorithm_version, status, message) VALUES (1,?,?,?,?)",
-            (built, ALGORITHM_VERSION, "ready", ""),
+            (built, ALGORITHM_VERSION, "ready", f"added {added}"),
         )
         conn.execute("DELETE FROM home_recommendation_cache")
         return catalog_meta(conn)
@@ -710,11 +1357,16 @@ def _person_groups_ready(conn):
     cached = _load_catalog_kind(conn, "people_years")
     if cached is not None:
         return cached
+    stale = _load_catalog_kind_row(conn, "people_years", match_version=False)
+    assets = int(conn.execute("SELECT count(*) FROM assets").fetchone()[0] or 0)
+    if stale is not None or assets > INLINE_CATALOG_ASSETS:
+        return stale or []
     with CATALOG_BUILD_LOCK:
         cached = _load_catalog_kind(conn, "people_years")
         if cached is not None:
             return cached
         groups = _person_groups(conn)
+        groups = [_stored_person_card(card) for card in groups]
         _save_catalog_kind(conn, "people_years", groups)
         _touch_catalog_state(conn)
         return groups
@@ -724,6 +1376,10 @@ def _place_groups_ready(conn, today: date):
     cached = _load_catalog_kind(conn, "place_revisit")
     if cached is not None:
         return cached
+    stale = _load_catalog_kind_row(conn, "place_revisit", match_version=False)
+    assets = int(conn.execute("SELECT count(*) FROM assets").fetchone()[0] or 0)
+    if stale is not None or assets > INLINE_CATALOG_ASSETS:
+        return stale or []
     with CATALOG_BUILD_LOCK:
         cached = _load_catalog_kind(conn, "place_revisit")
         if cached is not None:
@@ -751,10 +1407,50 @@ def build_recommendations(conn, *, category: str = "all", cursor: str = "", toda
     live_revision = data_revision(conn)
     revision = f"{ALGORITHM_VERSION}|{catalog_stamp}|{live_revision}"
     cache_key = f"{ALGORITHM_VERSION}|{today.isoformat()}|{catalog_stamp}|{live_revision}|{category}|{cursor}"
+    if category == "all":
+        cache_key = f"{ALGORITHM_VERSION}|mem|{today.isoformat()}|{catalog_stamp}|all|{cursor}"
     cached = conn.execute("SELECT payload_json FROM home_recommendation_cache WHERE cache_key=?", (cache_key,)).fetchone()
     if cached:
         payload = json.loads(cached[0])
         payload["catalog"] = meta
+        return payload
+    if category == "all":
+        stories = _load_all_stories(conn)
+        if not stories:
+            places = _place_groups_ready(conn, today)
+            people = _person_groups_ready(conn)
+            _ingest_closed_stories(conn, places, people, today)
+            stories = _load_all_stories(conn)
+        items, by_kind = _pick_homepage_stories(stories, today)
+        day_cards = [_public_card(card) for card in (_on_this_day_groups(conn, today) or [])[:12]]
+        place_cards = [_public_card(card) for card in (_load_catalog_kind(conn, "place_revisit") or [])[:24]]
+        people_cards = [_public_card(card) for card in (_load_catalog_kind(conn, "people_years") or [])[:24]]
+        for kind in ("memory_day", "memory_trip", "memory_person"):
+            by_kind[kind] = (by_kind.get(kind) or [])[:24]
+        conn.commit()
+        payload = {
+            "schema_version": SCHEMA_VERSION,
+            "as_of_date": today.isoformat(),
+            "generated_at": now(),
+            "revision": revision,
+            "category": category,
+            "weekday": format_weekday(today),
+            "items": _dedupe_covers(items),
+            "candidates": {
+                "on_this_day": day_cards,
+                "place_revisit": place_cards,
+                "people_years": people_cards,
+                "memory_day": by_kind.get("memory_day") or [],
+                "memory_trip": by_kind.get("memory_trip") or [],
+                "memory_person": by_kind.get("memory_person") or [],
+            },
+            "next_cursor": None,
+            "catalog": meta,
+        }
+        conn.execute(
+            "INSERT OR REPLACE INTO home_recommendation_cache(cache_key,payload_json,created_at) VALUES (?,?,?)",
+            (cache_key, json.dumps(payload, ensure_ascii=False), now()),
+        )
         return payload
     day_groups = _on_this_day_groups(conn, today)
     month_groups = _on_this_month_groups(conn, today)
@@ -776,49 +1472,27 @@ def build_recommendations(conn, *, category: str = "all", cursor: str = "", toda
     live_revision = data_revision(conn)
     revision = f"{ALGORITHM_VERSION}|{catalog_stamp}|{live_revision}"
     cache_key = f"{ALGORITHM_VERSION}|{today.isoformat()}|{catalog_stamp}|{live_revision}|{category}|{cursor}"
-    if category == "all":
-        primary_list = day_groups or month_groups
-        day_ranked = _rank_groups(primary_list, today, "on_this_day")
-        place_ranked = _rank_groups(places, today, "place_revisit")
-        people_ranked = _rank_groups(people, today, "people_years")
-        items = [card for card in (day_ranked[:1] + place_ranked[:1] + people_ranked[:1]) if card]
-        payload = {
-            "schema_version": SCHEMA_VERSION,
-            "as_of_date": today.isoformat(),
-            "generated_at": now(),
-            "revision": revision,
-            "category": category,
-            "weekday": format_weekday(today),
-            "items": _dedupe_covers(items),
-            "candidates": {
-                "on_this_day": [_public_card(card) for card in day_ranked[:24]],
-                "place_revisit": [_public_card(card) for card in place_ranked[:24]],
-                "people_years": [_public_card(card) for card in people_ranked[:24]],
-            },
-            "next_cursor": None,
-            "catalog": meta,
-        }
-    else:
-        ranked = _rank_groups(source, today, category)
-        offset = 0
-        if cursor:
-            if not re.fullmatch(r"o:\d+", cursor):
-                raise RecommendationError(400, "分页游标无效", "invalid_request")
-            offset = int(cursor.split(":")[1])
-        page = ranked[offset:offset + PAGE_SIZE]
-        payload = {
-            "schema_version": SCHEMA_VERSION,
-            "as_of_date": today.isoformat(),
-            "generated_at": now(),
-            "revision": revision,
-            "category": category,
-            "weekday": format_weekday(today),
-            "items": [_public_card(card) for card in page],
-            "candidates": {category: [_public_card(card) for card in ranked]},
-            "next_cursor": f"o:{offset + PAGE_SIZE}" if offset + PAGE_SIZE < len(ranked) else None,
-            "total_groups": len(ranked),
-            "catalog": meta,
-        }
+    conn.commit()
+    ranked = _rank_groups(source, today, category)
+    offset = 0
+    if cursor:
+        if not re.fullmatch(r"o:\d+", cursor):
+            raise RecommendationError(400, "分页游标无效", "invalid_request")
+        offset = int(cursor.split(":")[1])
+    page = ranked[offset:offset + PAGE_SIZE]
+    payload = {
+        "schema_version": SCHEMA_VERSION,
+        "as_of_date": today.isoformat(),
+        "generated_at": now(),
+        "revision": revision,
+        "category": category,
+        "weekday": format_weekday(today),
+        "items": [_public_card(card) for card in page],
+        "candidates": {category: [_public_card(card) for card in ranked[:60]]},
+        "next_cursor": f"o:{offset + PAGE_SIZE}" if offset + PAGE_SIZE < len(ranked) else None,
+        "total_groups": len(ranked),
+        "catalog": meta,
+    }
     conn.execute(
         "INSERT OR REPLACE INTO home_recommendation_cache(cache_key,payload_json,created_at) VALUES (?,?,?)",
         (cache_key, json.dumps(payload, ensure_ascii=False), now()),
@@ -836,6 +1510,28 @@ def invalidate_home_cache(conn) -> None:
 
 
 def _members_for_group(conn, group_id: str, today: date):
+    if str(group_id or "").startswith("memory:"):
+        card = _memory_from_catalog(conn, group_id)
+        if not card:
+            source_id = group_id.split(":", 2)[-1] if group_id.count(":") >= 2 else ""
+            if source_id:
+                return _members_for_group(conn, source_id, today)
+            raise RecommendationError(404, "这条回忆已经不可用", "not_found")
+        ids = [int(item) for item in (card.get("highlight_ids") or card.get("cover_asset_ids") or [])]
+        if not ids:
+            raise RecommendationError(404, "这条回忆已经没有可看的照片", "not_found")
+        meta = {
+            "kind": card.get("kind") or "memory_trip",
+            "title": card.get("title"),
+            "date_from": card.get("date_from"),
+            "date_to": card.get("date_to"),
+            "place": card.get("place"),
+            "source_group_id": card.get("source_group_id"),
+            "source_count": card.get("source_count"),
+            "highlight_ids": ids,
+            "playable": True,
+        }
+        return meta, ids
     if group_id.startswith("day:"):
         day = date.fromisoformat(group_id.split(":", 1)[1])
         sql = "SELECT a.id FROM assets a WHERE " + QUALIFIED_SQL + " AND " + DAY_DATE_SQL + "=? ORDER BY a.id"
@@ -865,26 +1561,36 @@ def _members_for_group(conn, group_id: str, today: date):
         return {"kind": "place_span", "date_from": parts[2], "date_to": parts[3], "place": match["place"], "title": match["title"]}, ids
     if group_id.startswith("person:"):
         person_id = int(group_id.split(":")[1])
-        sql = (
-            "SELECT DISTINCT a.id, " + YEAR_DATE_SQL + " year_date FROM assets a "
-            "JOIN faces x ON x.asset_id=a.id AND x.person_id=? AND coalesce(x.ignored,0)=0 "
-            "JOIN people p ON p.id=? AND p.confirmed=1 AND coalesce(p.ignored,0)=0 "
-            "AND trim(coalesce(p.name,''))<>'' "
-            "WHERE " + QUALIFIED_SQL + " ORDER BY a.id"
+        match = next(
+            (card for card in (_load_catalog_kind(conn, "people_years") or []) if str(card.get("group_id")) == group_id),
+            None,
         )
-        rows = conn.execute(sql, (*_year_params(), person_id, person_id, *QUALIFIED_VALUES)).fetchall()
-        dated = []
-        undated = []
-        for row in rows:
-            (dated if row[1] else undated).append(row)
-        dated.sort(key=lambda row: (row[1], row[0]))
-        ids = [int(r[0]) for r in dated + undated]
-        person = conn.execute("SELECT name FROM people WHERE id=?", (person_id,)).fetchone()
-        if not person or not ids:
+        ids = []
+        for item in (match or {}).get("highlight_ids") or []:
+            try:
+                ids.append(int(item))
+            except (TypeError, ValueError):
+                continue
+        if not ids:
+            card = _person_card_from_items(person_id, _person_rows(conn, person_id))
+            match = card or match
+            ids = [int(item) for item in (card or {}).get("highlight_ids") or []]
+        if not ids:
             raise RecommendationError(404, "这组人物推荐已经不在了", "not_found")
-        years = [r[1] for r in dated]
-        title = person[0] if len(set(years)) >= 2 else f"与{person[0]}的片段"
-        return {"kind": "person_years" if len(set(years)) >= 2 else "person_fragment", "person_id": person_id, "title": title}, ids
+        title = (match or {}).get("title")
+        if not title:
+            person = conn.execute("SELECT name FROM people WHERE id=?", (person_id,)).fetchone()
+            if not person:
+                raise RecommendationError(404, "这组人物推荐已经不在了", "not_found")
+            title = person[0]
+        kind = (match or {}).get("kind") or ("person_years" if len((match or {}).get("years") or []) >= 2 else "person_fragment")
+        return {
+            "kind": kind,
+            "person_id": person_id,
+            "title": title,
+            "highlight_ids": ids,
+            "source_count": (match or {}).get("source_count"),
+        }, ids
     raise RecommendationError(400, "推荐组无效", "invalid_request")
 
 
@@ -910,6 +1616,10 @@ def open_group(conn, group_id: str):
         "cover_asset_ids": ids[:4],
         "date_from": meta.get("date_from"),
         "date_to": meta.get("date_to"),
+        "source_group_id": meta.get("source_group_id"),
+        "source_count": meta.get("source_count"),
+        "highlight_ids": meta.get("highlight_ids") or ids,
+        "playable": bool(meta.get("playable")),
         "browse": {"recommendation_snapshot": snapshot_id},
     }
     conn.execute(

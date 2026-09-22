@@ -82,3 +82,62 @@ function Assert-OurTimeWritable([string]$dataRoot) {
         throw "资料库目录无法写入：$dataRoot`n请把拾光放到可写位置，或在 config.local.json 里指定 data_dir。"
     }
 }
+
+function Test-OurTimeListening([int]$port) {
+    try {
+        $client = [Net.Sockets.TcpClient]::new()
+        $client.Connect('127.0.0.1', $port)
+        $ok = $client.Connected
+        $client.Close()
+        return $ok
+    } catch {
+        return $false
+    }
+}
+
+function Invoke-OurTimeApi([string]$uri, [string]$method = 'GET', [int]$timeoutSec = 5) {
+    $request = [Net.HttpWebRequest]::Create($uri)
+    $request.Proxy = $null
+    $request.Method = $method
+    $request.Timeout = [Math]::Max(1000, $timeoutSec * 1000)
+    $request.ReadWriteTimeout = $request.Timeout
+    $request.ContentLength = 0
+    $request.KeepAlive = $false
+    $response = $null
+    try {
+        $response = $request.GetResponse()
+        $stream = $response.GetResponseStream()
+        $reader = New-Object IO.StreamReader($stream, [Text.Encoding]::UTF8)
+        $text = $reader.ReadToEnd()
+        $reader.Close()
+        if ([string]::IsNullOrWhiteSpace($text)) { return $null }
+        return $text | ConvertFrom-Json
+    } finally {
+        if ($response) { $response.Close() }
+    }
+}
+
+function Get-OurTimeAppProcesses([string]$projectRoot) {
+    $appPath = Join-Path $projectRoot 'app.py'
+    @(Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" -ErrorAction SilentlyContinue) |
+        Where-Object { $_.CommandLine -and $_.CommandLine.IndexOf($appPath, [StringComparison]::OrdinalIgnoreCase) -ge 0 }
+}
+
+function Stop-OurTimeAppTree([int]$processId, [string]$projectRoot) {
+    $appPath = Join-Path $projectRoot 'app.py'
+    $target = Get-CimInstance Win32_Process -Filter "ProcessId=$processId" -ErrorAction SilentlyContinue
+    $ids = @()
+    if ($target) { $ids += [int]$target.ProcessId }
+    if ($target -and $target.ParentProcessId) {
+        $parent = Get-CimInstance Win32_Process -Filter "ProcessId=$($target.ParentProcessId)" -ErrorAction SilentlyContinue
+        if ($parent -and $parent.CommandLine -and $parent.CommandLine.IndexOf($appPath, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
+            $ids += [int]$parent.ProcessId
+        }
+    }
+    Get-OurTimeAppProcesses $projectRoot | ForEach-Object {
+        if ([int]$_.ParentProcessId -eq $processId) { $ids += [int]$_.ProcessId }
+    }
+    $ids | Select-Object -Unique | ForEach-Object {
+        Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue
+    }
+}

@@ -20,6 +20,8 @@ class ExportAndMapUiContractTests(unittest.TestCase):
         self.assertNotIn("actions.append(picker)", source)
         self.assertIn("<svg", source)
         self.assertIn("JPEG", source)
+        self.assertIn("photo-people-hud", source)
+        self.assertIn("people-manage-popover", source)
 
     def test_map_area_button_has_no_decorative_box_and_reports_phase(self):
         html = (ROOT / "web" / "index.html").read_text(encoding="utf-8")

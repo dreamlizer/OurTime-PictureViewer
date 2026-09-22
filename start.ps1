@@ -18,7 +18,8 @@ Assert-OurTimeWritable $dataRoot
 
 function Test-OurTimePage {
     try {
-        $health = Invoke-RestMethod -Uri "$serverUrl/api/health" -TimeoutSec 2
+        if (-not (Test-OurTimeListening $port)) { return $false }
+        $health = Invoke-OurTimeApi "$serverUrl/api/health" 'GET' 2
         return $health.ok -and ([string]$health.data_key -eq $dataKey)
     } catch {
         return $false
@@ -62,6 +63,18 @@ $env:PHOTO_LIBRARY_PORT = [string]$port
 $appPath = Join-Path $projectRoot 'app.py'
 $stdoutLog = Join-Path $dataRoot 'server.log'
 $stderrLog = Join-Path $dataRoot 'server-error.log'
+$pidFile = Join-Path $dataRoot 'server.pid'
+if (-not (Test-OurTimeListening $port)) {
+    if (Test-Path -LiteralPath $pidFile) {
+        $staleId = 0
+        [void][int]::TryParse((Get-Content -LiteralPath $pidFile -ErrorAction SilentlyContinue), [ref]$staleId)
+        if ($staleId -gt 0) { Stop-OurTimeAppTree $staleId $projectRoot }
+        Remove-Item -LiteralPath $pidFile -Force -ErrorAction SilentlyContinue
+    }
+    Get-OurTimeAppProcesses $projectRoot | ForEach-Object {
+        Stop-OurTimeAppTree ([int]$_.ProcessId) $projectRoot
+    }
+}
 $process = Start-Process -FilePath $pythonExe -ArgumentList @(
     '"' + $appPath + '"', '--port', "$port"
 ) -WorkingDirectory $projectRoot -WindowStyle Hidden -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog -PassThru
@@ -70,7 +83,7 @@ Write-Output "Waiting for $serverUrl ..."
 for ($attempt = 0; $attempt -lt 45; $attempt++) {
     Start-Sleep -Milliseconds 500
     if (Test-OurTimePage) {
-        $health = Invoke-RestMethod -Uri "$serverUrl/api/health" -TimeoutSec 2
+        $health = Invoke-OurTimeApi "$serverUrl/api/health" 'GET' 2
         ([int]$health.pid) | Set-Content -LiteralPath (Join-Path $dataRoot 'server.pid') -Encoding ASCII
         if ($env:PHOTO_NO_BROWSER -ne '1') { Open-OurTimePage }
         exit 0
