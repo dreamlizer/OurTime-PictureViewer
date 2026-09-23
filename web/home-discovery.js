@@ -15,7 +15,19 @@
   const cache=new Map();
   const inflight=new Map();
   let homeAbort=null, waitTimer=null;
-  let player={open:false,ids:[],index:0,timer:null,generation:0,snapshot:'',sourceId:'',title:''};
+  let player={
+    open:false,
+    ids:[],
+    index:0,
+    timer:null,
+    generation:0,
+    snapshot:'',
+    sourceId:'',
+    title:'',
+    status:'idle',
+    introShown:false,
+    returnFocus:null
+  };
   const HOLD_MS=6000;
   const KEN_MS=6400;
   const BURST_SEC=20;
@@ -120,9 +132,11 @@
   function tools(card, slot, options){
     const withSwap=!(options && options.swap===false);
     return '<div class="home-card-tools">'
+      +'<button type="button" class="home-card-more" data-home-actions-toggle aria-expanded="false">更多</button>'
+      +'<div class="home-card-menu" hidden>'
       +(withSwap?'<button type="button" data-home-swap="'+esc(slot)+'">换一组</button>':'')
-      +'<button type="button" data-home-hide="'+esc(card.group_id)+'">不推荐</button>'
-      +'</div>';
+      +'<button type="button" data-home-hide="'+esc(card.group_id)+'">暂时不推荐</button>'
+      +'</div></div>';
   }
   function heroCopy(card){
     const n=Number(card.photo_count||0);
@@ -453,6 +467,101 @@
   function frameSrc(id){ return '/api/preview/'+id; }
   function stopPlayerTimer(){ if(player.timer){ clearTimeout(player.timer); player.timer=null; } }
   function kenWrap(img){ return img && (img.closest('.memory-ken') || img.parentElement); }
+  function memoryKenLayers(){ return [kenWrap($('#memory-frame-a')), kenWrap($('#memory-frame-b'))].filter(Boolean); }
+  function setKenPaused(paused){
+    memoryKenLayers().forEach(layer=>{
+      const animation=layer._memoryKenAnimation;
+      if(!animation) return;
+      try{ if(paused) animation.pause(); else animation.play(); }catch{/* animation may already be replaced */}
+    });
+  }
+  function currentKenLayer(){
+    const img=player.index%2===1?$('#memory-frame-b'):$('#memory-frame-a');
+    return kenWrap(img);
+  }
+  function setMemoryStatus(message=''){
+    const status=$('#memory-status');
+    if(!status) return;
+    status.textContent=message;
+    status.hidden=!message;
+  }
+  function syncMemoryPlayerUI(){
+    const root=playerEl();
+    if(root) root.dataset.state=player.status;
+    const toggle=$('#memory-toggle');
+    if(toggle){
+      const paused=player.status==='paused';
+      toggle.hidden=player.status==='ended';
+      toggle.disabled=!['playing','paused'].includes(player.status);
+      toggle.textContent=paused?'继续':'暂停';
+      toggle.setAttribute('aria-pressed',String(paused));
+      toggle.setAttribute('aria-label',paused?'继续播放回忆':'暂停播放回忆');
+    }
+    const ended=player.status==='ended';
+    const endBox=$('#memory-end');
+    if(endBox) endBox.hidden=!ended;
+    const actions=$('#memory-actions');
+    if(actions) actions.hidden=ended;
+  }
+  function schedulePlayerAdvance(last, ticket, token, index){
+    stopPlayerTimer();
+    if(player.status!=='playing') return;
+    player.timer=setTimeout(()=>{
+      if(player.generation!==ticket || player.frameToken!==token || player.index!==index || !player.open || player.status!=='playing') return;
+      if(last) finishMemoryPlayer();
+      else showPlayerFrame(player.index+1, true);
+    }, HOLD_MS);
+  }
+  function pauseMemoryPlayer({announce=true}={}){
+    if(player.status!=='playing') return;
+    player.status='paused';
+    stopPlayerTimer();
+    setKenPaused(true);
+    setMemoryStatus(announce?'已暂停':'');
+    syncMemoryPlayerUI();
+  }
+  function resumeMemoryPlayer(){
+    if(player.status!=='paused') return;
+    player.status='playing';
+    setMemoryStatus('');
+    const layer=currentKenLayer();
+    const img=layer&&layer.querySelector('img');
+    if(layer&&img){
+      if(layer._memoryKenAnimation) layer._memoryKenAnimation.cancel();
+      applyKen(layer, img, player.meta&&player.meta[player.ids[player.index]], player.index);
+    }
+    const last=player.index>=player.ids.length-1;
+    schedulePlayerAdvance(last, player.generation, player.frameToken, player.index);
+    syncMemoryPlayerUI();
+  }
+  function toggleMemoryPlayer(){
+    if(player.status==='playing') pauseMemoryPlayer();
+    else if(player.status==='paused') resumeMemoryPlayer();
+  }
+  function memoryFocusable(){
+    const root=playerEl();
+    if(!root) return [];
+    return [...root.querySelectorAll('button:not([hidden]):not(:disabled), [href], [tabindex]:not([tabindex="-1"])')]
+      .filter(item=>!item.closest('[hidden]') && item.offsetParent!==null);
+  }
+  function focusMemoryControl(){
+    const target=$('#memory-toggle');
+    if(target&&!target.hidden&&!target.disabled) target.focus();
+    else playerEl()?.focus();
+  }
+  function trapMemoryFocus(event){
+    const items=memoryFocusable();
+    if(!items.length){ event.preventDefault(); playerEl()?.focus(); return; }
+    const first=items[0],last=items[items.length-1],active=document.activeElement;
+    if(event.shiftKey && (active===first || !playerEl()?.contains(active))){ event.preventDefault(); last.focus(); }
+    else if(!event.shiftKey && active===last){ event.preventDefault(); first.focus(); }
+  }
+  function isTypingTarget(target){
+    return Boolean(target&&target.closest&&target.closest('input,textarea,select,[contenteditable="true"]'));
+  }
+  function isInteractiveTarget(target){
+    return Boolean(target&&target.closest&&target.closest('button,a,input,textarea,select,[contenteditable="true"]'));
+  }
   function parseStamp(value){
     if(!value) return 0;
     const t=Date.parse(String(value).replace(' ','T'));
@@ -548,6 +657,7 @@
   function resetKen(el){
     if(!el) return;
     el.getAnimations().forEach(anim=>anim.cancel());
+    el._memoryKenAnimation=null;
     el.classList.remove('is-in');
     el.style.transformOrigin='';
     el.style.transform='';
@@ -566,7 +676,7 @@
     }
     el.style.transformOrigin=plan.ox+'% '+plan.oy+'%';
     el.style.transform='scale('+plan.from+') translate('+plan.tx0+'%, '+plan.ty0+'%)';
-    el.animate(
+    el._memoryKenAnimation=el.animate(
       [
         {transform:'scale('+plan.from+') translate('+plan.tx0+'%, '+plan.ty0+'%)'},
         {transform:'scale('+plan.to+') translate('+plan.tx1+'%, '+plan.ty1+'%)'}
@@ -727,21 +837,25 @@
     });
   }
   function closeMemoryPlayer(){
-    player.open=false; player.generation++; stopPlayerTimer();
+    const returnFocus=player.returnFocus;
+    player.open=false; player.generation++; player.status='idle'; stopPlayerTimer();
     hideOverture();
     const el=playerEl();
-    if(el){ el.hidden=true; el.classList.remove('is-on','is-ending'); }
+    if(el){ el.hidden=true; el.classList.remove('is-on','is-ending'); delete el.dataset.state; }
     document.body.classList.remove('is-memory-player');
+    setMemoryStatus('');
     clearMemoryLayers();
+    player.returnFocus=null;
+    if(returnFocus&&returnFocus.isConnected&&typeof returnFocus.focus==='function') returnFocus.focus();
   }
-  function finishMemoryPlayer(){
-    const el=playerEl();
-    if(el) el.classList.add('is-ending');
-    player.pausedEnd=true;
+  function finishMemoryPlayer(message=''){
+    player.status='ended';
     stopPlayerTimer();
+    setKenPaused(true);
+    setMemoryStatus(message);
     updatePlayerCaption();
-    const ticket=player.generation;
-    player.timer=setTimeout(()=>{ if(player.generation===ticket) closeMemoryPlayer(); }, 1000);
+    syncMemoryPlayerUI();
+    $('#memory-again')?.focus();
   }
   function updatePlayerCaption(){
     const title=$('#memory-title'); const progress=$('#memory-progress'); const dots=$('#memory-dots');
@@ -756,11 +870,9 @@
     }
     if(progress) progress.textContent=player.ids.length?((player.index+1)+' / '+player.ids.length):'';
     if(dots){
-      dots.innerHTML=player.ids.map((_,i)=>'<button type="button" data-memory-index="'+i+'" aria-current="'+(i===player.index?'true':'false')+'"></button>').join('');
+      dots.innerHTML=player.ids.map((_,i)=>'<button type="button" data-memory-index="'+i+'" aria-label="第 '+(i+1)+' 张" aria-current="'+(i===player.index?'true':'false')+'"><span aria-hidden="true"></span></button>').join('');
     }
-    const ended=player.index>=player.ids.length-1 && player.pausedEnd;
-    const endBox=$('#memory-end');
-    if(endBox) endBox.hidden=!ended;
+    syncMemoryPlayerUI();
   }
   function showPlayerFrame(index, animate){
     const ids=player.ids;
@@ -777,7 +889,6 @@
     if(!incoming||!outgoing) return;
     const last=player.index>=ids.length-1;
     const ticket=player.generation;
-    player.pausedEnd=false;
     updatePlayerCaption();
     stopPlayerTimer();
     Promise.resolve(preloadPreview(next)).then(ready=>{
@@ -794,26 +905,27 @@
       if(animate || outgoing.classList.contains('is-in')) outgoing.classList.remove('is-in');
       if(player.index+1<ids.length) preloadPreview(ids[player.index+1]);
       if(player.index+2<ids.length) preloadPreview(ids[player.index+2]);
-      player.timer=setTimeout(()=>{
-        if(player.generation!==ticket || !player.open) return;
-        if(last) finishMemoryPlayer();
-        else showPlayerFrame(player.index+1, true);
-      }, HOLD_MS);
+      if(player.status==='paused') setKenPaused(true);
+      schedulePlayerAdvance(last, ticket, token, player.index);
     }).catch(()=>{
       if(token!==player.frameToken || player.generation!==ticket || !player.open) return;
       if(!last) showPlayerFrame(player.index+1, animate);
+      else{
+        finishMemoryPlayer('最后一张暂时无法显示');
+      }
     });
   }
-  async function startMemoryPlayer(opened){
+  async function startMemoryPlayer(opened, returnFocus=null){
     player.generation++;
     player.snapshot=opened.snapshot_id;
     player.sourceId=opened.source_group_id||'';
     player.title=opened.title||'';
     player.useB=false;
-    player.pausedEnd=false;
+    player.status='loading';
     player.frameToken=0;
     player.meta={};
     player.preloads=new Map();
+    player.returnFocus=returnFocus||document.activeElement;
     const seq=await api('/api/photos?recommendation_snapshot='+encodeURIComponent(opened.snapshot_id)+'&sequence=true&limit=20');
     let raw=opened.highlight_ids||seq.ids||opened.cover_asset_ids||[];
     const isDay=String(opened.kind||'').indexOf('day')>=0 || String(opened.source_group_id||opened.group_id||'').indexOf('day:')>=0;
@@ -873,14 +985,21 @@
     document.body.classList.add('is-memory-player');
     el.hidden=false; el.classList.add('is-on');
     el.classList.remove('is-ending');
+    el.focus();
+    syncMemoryPlayerUI();
     clearMemoryLayers();
     player.preloads=new Map();
     const first=preloadPreview(player.ids[0]).catch(()=>null);
     if(player.ids[1]) preloadPreview(player.ids[1]);
-    await Promise.all([playOverture(), first]);
+    const intro=player.introShown?Promise.resolve():playOverture();
+    player.introShown=true;
+    await Promise.all([intro, first]);
     if(!player.open) return;
     hideOverture();
+    player.status='playing';
+    setMemoryStatus('');
     showPlayerFrame(0, false);
+    focusMemoryControl();
   }
   async function openMemorySource(){
     const source=player.sourceId;
@@ -891,17 +1010,18 @@
   async function openCurrentMemoryPhoto(){
     const id=player.ids[player.index];
     if(!id || typeof openPhoto!=='function') return;
-    stopPlayerTimer();
-    player.pausedEnd=true;
-    updatePlayerCaption();
+    if(player.status==='playing') pauseMemoryPlayer({announce:false});
+    else if(player.status==='ended') player.status='paused';
+    setMemoryStatus('已暂停');
+    syncMemoryPlayerUI();
     state.homeSnapshotId=player.snapshot;
     await openPhoto(id, {q:'', filter:'all', person:'', directory:'', sort:'date_desc', date_from:'', date_to:'', place:'', recommendation_snapshot:player.snapshot});
   }
-  async function openGroup(groupId){
+  async function openGroup(groupId, options={}){
     rememberOpen(groupId);
     const opened=await api('/api/home/groups/open', {method:'POST', body:JSON.stringify({group_id:groupId})});
     if(opened.playable || String(groupId).startsWith('memory:')){
-      await startMemoryPlayer(opened);
+      await startMemoryPlayer(opened, options.returnFocus||null);
       return;
     }
     closeMemoryPlayer();
@@ -934,13 +1054,18 @@
       document.body.dataset.memoryKeys='1';
       document.addEventListener('keydown', e=>{
         if(!player.open) return;
+        if($('#detail-dialog')?.open) return;
+        if(e.key==='Tab'){ trapMemoryFocus(e); return; }
         if(e.key==='Escape'){ e.preventDefault(); closeMemoryPlayer(); return; }
-        if(document.getElementById('memory-player') && document.getElementById('memory-player').classList.contains('is-ending')) return;
         if(player.overtureActive){
           if(e.key==='ArrowRight' || e.key===' ' || e.key==='Enter'){ e.preventDefault(); hideOverture(); }
           return;
         }
-        if(e.key==='ArrowRight' || e.key===' '){ e.preventDefault(); showPlayerFrame(player.index+1, true); return; }
+        if(isTypingTarget(e.target)) return;
+        if((e.key===' ' || e.key==='Enter') && isInteractiveTarget(e.target)) return;
+        if(e.key===' ' && player.status!=='ended'){ e.preventDefault(); toggleMemoryPlayer(); return; }
+        if(player.status==='ended') return;
+        if(e.key==='ArrowRight'){ e.preventDefault(); showPlayerFrame(player.index+1, true); return; }
         if(e.key==='ArrowLeft'){ e.preventDefault(); showPlayerFrame(player.index-1, true); }
       });
     }
@@ -955,25 +1080,56 @@
         const open=e.target.closest('[data-home-open]');
         const swap=e.target.closest('[data-home-swap]');
         const hide=e.target.closest('[data-home-hide]');
+        const actionToggle=e.target.closest('[data-home-actions-toggle]');
         if(e.target.closest('#memory-close')){ e.preventDefault(); closeMemoryPlayer(); return; }
         if(player.overtureActive && e.target.closest('#memory-player')){ e.preventDefault(); hideOverture(); return; }
-        if(e.target.closest('#memory-prev')){ e.preventDefault(); if(player.open) showPlayerFrame(player.index-1, true); return; }
-        if(e.target.closest('#memory-next')){ e.preventDefault(); if(player.open) showPlayerFrame(player.index+1, true); return; }
-        if(e.target.closest('#memory-again')){ e.preventDefault(); if(player.open){ player.pausedEnd=false; showPlayerFrame(0, false);} return; }
+        if(e.target.closest('#memory-prev')){ e.preventDefault(); if(player.open){ if(player.status==='ended') player.status='paused'; showPlayerFrame(player.index-1, true);} return; }
+        if(e.target.closest('#memory-next')){ e.preventDefault(); if(player.open){ if(player.status==='ended') player.status='paused'; showPlayerFrame(player.index+1, true);} return; }
+        if(e.target.closest('#memory-toggle')){ e.preventDefault(); toggleMemoryPlayer(); return; }
+        if(e.target.closest('#memory-again')){ e.preventDefault(); if(player.open){ player.status='playing'; setMemoryStatus(''); showPlayerFrame(0, false);} return; }
         if(e.target.closest('#memory-all')){ e.preventDefault(); await openMemorySource(); return; }
+        if(e.target.closest('#memory-home')){ e.preventDefault(); closeMemoryPlayer(); return; }
         if(e.target.closest('#memory-open-photo')){ e.preventDefault(); if(player.open) await openCurrentMemoryPhoto(); return; }
         const dot=e.target.closest('#memory-dots [data-memory-index]');
-        if(dot){ e.preventDefault(); showPlayerFrame(Number(dot.dataset.memoryIndex), true); return; }
-        if(swap){ e.preventDefault(); e.stopPropagation(); const cat=swap.dataset.homeSwap; setCursor(cat, nextCursor(cat)+1); replaceSlot(cat); return; }
+        if(dot){ e.preventDefault(); if(player.status==='ended') player.status='paused'; showPlayerFrame(Number(dot.dataset.memoryIndex), true); return; }
+        if(actionToggle){
+          e.preventDefault(); e.stopPropagation();
+          const tools=actionToggle.closest('.home-card-tools');
+          const menu=tools&&tools.querySelector('.home-card-menu');
+          const opening=Boolean(menu&&menu.hidden);
+          $$('.home-card-menu').forEach(item=>item.hidden=true);
+          $$('[data-home-actions-toggle]').forEach(item=>item.setAttribute('aria-expanded','false'));
+          if(menu){ menu.hidden=!opening; actionToggle.setAttribute('aria-expanded',String(opening)); if(opening) menu.querySelector('button')?.focus(); }
+          return;
+        }
+        if(swap){ e.preventDefault(); e.stopPropagation(); const cat=swap.dataset.homeSwap; setCursor(cat, nextCursor(cat)+1); replaceSlot(cat); requestAnimationFrame(()=>document.querySelector('[data-home-slot="'+CSS.escape(cat)+'"] [data-home-actions-toggle]')?.focus()); return; }
         if(hide){ e.preventDefault(); e.stopPropagation(); const slotEl=hide.closest('[data-home-slot]'); const slot=slotEl&&slotEl.dataset.homeSlot; hideGroup(hide.dataset.homeHide); if(slot && (state.homeCategory||'all')==='all') replaceSlot(slot); else render(); toast('已暂时隐藏，30 天内不再出现'); return; }
         if(e.target.closest('#home-restore-hidden')){ restoreHidden(); render(); return; }
         if(e.target.closest('#home-retry')){ await loadHomeDiscovery({category:state.homeCategory}); return; }
         if(e.target.closest('#home-refresh-catalog')){ e.preventDefault(); await refreshCatalog(); return; }
         if(e.target.closest('#home-more')){ await loadHomeDiscovery({category:state.homeCategory, cursor:payload&&payload.next_cursor, append:true}); return; }
         if(e.target.closest('[data-view-all]')){ await setView('timeline'); return; }
-        if(open){ e.preventDefault(); await openGroup(open.dataset.homeOpen); }
+        if(!e.target.closest('.home-card-tools')){
+          $$('.home-card-menu').forEach(item=>item.hidden=true);
+          $$('[data-home-actions-toggle]').forEach(item=>item.setAttribute('aria-expanded','false'));
+        }
+        if(open){
+          e.preventDefault();
+          if(!open.hasAttribute('tabindex')) open.setAttribute('tabindex','-1');
+          open.focus({preventScroll:true});
+          await openGroup(open.dataset.homeOpen, {returnFocus:open});
+        }
       };
       document.addEventListener('click', typeof action==='function' ? action(onHomeClick) : onHomeClick);
+      document.addEventListener('keydown', e=>{
+        if(e.key!=='Escape') return;
+        const openMenu=document.querySelector('.home-card-menu:not([hidden])');
+        if(!openMenu) return;
+        e.preventDefault(); e.stopPropagation();
+        openMenu.hidden=true;
+        const toggle=openMenu.closest('.home-card-tools')?.querySelector('[data-home-actions-toggle]');
+        if(toggle){ toggle.setAttribute('aria-expanded','false'); toggle.focus(); }
+      });
     }
     const back=$('#home-group-back');
     if(back && !back.dataset.homeReady){

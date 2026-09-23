@@ -205,6 +205,8 @@
   .ot-home-ui .ot-home-batch .ot-home-button { padding-inline: 9px; }
 }
 @media (max-width: 420px) {
+  #home-query-host, .ot-home-ui { width: 100%; max-width: 100%; overflow: hidden; }
+  .ot-home-ui .ot-home-query { min-width: 0; max-width: 100%; }
   .ot-home-ui .ot-home-button { padding-inline: 11px; }
   .ot-home-ui .ot-home-query-left { gap: 2px; overflow-x: auto; overscroll-behavior-inline: contain; scrollbar-width: none; }
   .ot-home-ui .ot-home-query-left::-webkit-scrollbar { display: none; }

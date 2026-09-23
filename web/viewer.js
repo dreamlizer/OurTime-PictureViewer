@@ -257,6 +257,11 @@ function buildViewerToolbar(){
   setToolIcon('#viewer-info',iconSvg.info,'详细资料');
   setToolIcon('#viewer-play',iconSvg.play,'播放幻灯片');
   setToolIcon('#reveal-button',iconSvg.locate,'在资源管理器中定位');
+  const reveal=$('#reveal-button');
+  if(reveal){
+    reveal.classList.add('viewer-labeled-action');
+    reveal.insertAdjacentHTML('beforeend','<span class="viewer-action-label">定位原文件</span>');
+  }
 
   const delay=$('#slide-delay');
   if(delay){
@@ -286,7 +291,13 @@ function buildFaceStylePopover(){
     </div>
     <div class="face-style-group">
       <div class="face-style-group-title">样式</div>
-      <label class="face-style-field"><span>风格</span><select id="face-theme"><option value="classic">默认</option><option value="ivory">素笺</option><option value="tea">茶棕</option><option value="accent">暗朱</option></select></label>
+      <div class="face-theme-choices" role="radiogroup" aria-label="人名标签主题">
+        <button type="button" data-face-theme-choice="classic" aria-pressed="false"><i>名</i><span>默认</span></button>
+        <button type="button" data-face-theme-choice="ivory" aria-pressed="false"><i>笺</i><span>素笺</span></button>
+        <button type="button" data-face-theme-choice="tea" aria-pressed="false"><i>墨</i><span>茶棕</span></button>
+        <button type="button" data-face-theme-choice="accent" aria-pressed="false"><i>朱</i><span>暗朱</span></button>
+      </div>
+      <select id="face-theme" hidden aria-hidden="true" tabindex="-1"><option value="classic">默认</option><option value="ivory">素笺</option><option value="tea">茶棕</option><option value="accent">暗朱</option></select>
       <label class="face-style-field face-custom-control face-range-field"><span>字号</span><output id="face-font-size-value"></output><input id="face-font-size" type="range" min="10" max="22" step="1"></label>
       <label class="face-style-field face-custom-control"><span>字体</span><select id="face-font-family"><option value="sans">黑体 / 无衬线</option><option value="serif">宋体 / 衬线</option><option value="kai">楷体</option><option value="fangsong">仿宋</option><option value="other">其他…</option></select></label>
     </div>
@@ -310,6 +321,9 @@ function buildFaceStylePopover(){
   const bind=(id,event,fn)=>{const el=$(id);if(el)el.addEventListener(event,fn);};
   bind('#face-style-close','click',()=>toggleFaceStylePopover(false));
   bind('#face-theme','change',e=>applyFacePreset(e.target.value));
+  pop.querySelectorAll('[data-face-theme-choice]').forEach(button=>{
+    button.addEventListener('click',()=>applyFacePreset(button.dataset.faceThemeChoice));
+  });
   bind('#face-font-size','input',e=>updateFaceStyle({fontSize:Number(e.target.value)}));
   bind('#face-font-family','change',e=>{
     if(e.target.value==='other'){
@@ -845,6 +859,9 @@ function applyFaceStyle(){
 
   const themeSelect=$('#face-theme'),fontSize=$('#face-font-size'),family=$('#face-font-family'),position=$('#face-label-position'),marker=$('#face-unnamed-marker'),text=$('#face-text-color'),bg=$('#face-bg-color'),op=$('#face-bg-opacity'),radius=$('#face-radius'),shadow=$('#face-shadow');
   if(themeSelect)themeSelect.value=theme;
+  document.querySelectorAll('[data-face-theme-choice]').forEach(button=>{
+    button.setAttribute('aria-pressed',String(button.dataset.faceThemeChoice===theme));
+  });
   if(fontSize){
     fontSize.min=themeImages?'12':'10';
     fontSize.max=themeImages?'18':'22';
@@ -1015,6 +1032,12 @@ function closePhotoViewer(){
  hideSignatureInfo();
  const dialog=$('#detail-dialog');
  if(!dialog||!dialog.open)return;
+ const personDialog=$('#person-dialog');
+ const returning=personDialog?.dataset.photoReturn==='1'&&personDialog.open;
+ const body=returning?$('.person-body'):null;
+ const returnScroll=Number(personDialog?.dataset.photoReturnScroll||0);
+ if(personDialog)personDialog.inert=false;
+ if(body)requestAnimationFrame(()=>{if(personDialog.open)body.scrollTop=returnScroll;});
  clearTimeout(viewer.closingTimer);
  if(matchMedia('(prefers-reduced-motion: reduce)').matches){dialog.close();return;}
  dialog.classList.add('viewer-closing');

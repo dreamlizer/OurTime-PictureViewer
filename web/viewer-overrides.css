@@ -890,6 +890,42 @@
   box-shadow:0 5px 18px rgba(0,0,0,.13);
   backdrop-filter:blur(13px) saturate(1.1);
 }
+@media(min-width:901px){
+  #detail-dialog .viewer-tools{
+    width:102px;
+    min-width:102px;
+    align-items:flex-end;
+    overflow:visible;
+  }
+  #detail-dialog .viewer-tool-group{
+    width:44px;
+    align-items:center;
+  }
+  #detail-dialog .viewer-tool-actions{
+    width:102px;
+    align-items:flex-end;
+  }
+  #detail-dialog #reveal-button.viewer-labeled-action{
+    width:92px;
+    min-width:92px;
+    padding:0 10px;
+    display:flex;
+    align-items:center;
+    justify-content:flex-start;
+    gap:7px;
+  }
+  #detail-dialog #reveal-button.viewer-labeled-action svg{
+    flex:0 0 18px;
+    margin:0;
+  }
+  #detail-dialog #reveal-button .viewer-action-label{
+    display:block;
+    min-height:0;
+    color:inherit;
+    font:11px/1 var(--sans);
+    white-space:nowrap;
+  }
+}
 #detail-dialog .viewer-tools button,
 #detail-dialog .viewer-tools select{
   width:34px;
@@ -1366,6 +1402,66 @@
   font-weight:650;
   letter-spacing:.14em;
 }
+#detail-dialog .face-theme-choices{
+  display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:6px;
+  padding:4px 8px 9px;
+}
+#detail-dialog .face-theme-choices button{
+  min-width:0;
+  min-height:62px;
+  padding:6px 3px 5px;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  gap:4px;
+  border:1px solid var(--face-ui-line);
+  border-radius:10px;
+  background:rgba(255,255,255,.55);
+  color:var(--face-ui-muted);
+  font:10px/1.1 var(--sans);
+}
+#detail-dialog .face-theme-choices button i{
+  display:grid;
+  place-items:center;
+  width:28px;
+  height:28px;
+  border-radius:7px;
+  background:#20251f;
+  color:#f6f1e6;
+  font:normal 15px/1 var(--serif);
+}
+#detail-dialog .face-theme-choices button[data-face-theme-choice="ivory"] i{
+  border:1px solid #e7ded0;
+  border-radius:1px;
+  background:#fffaf0;
+  color:#6b3931;
+}
+#detail-dialog .face-theme-choices button[data-face-theme-choice="tea"] i{
+  border-radius:1px;
+  background:#7e624b;
+  color:#f7ead8;
+  font-family:"Ma Shan Zheng","LXGW WenKai GB Screen",serif;
+}
+#detail-dialog .face-theme-choices button[data-face-theme-choice="accent"] i{
+  border-radius:4px;
+  background:#6f302c;
+  color:#f4e4cb;
+  font-family:"ZCOOL XiaoWei","Noto Serif SC",serif;
+}
+#detail-dialog .face-theme-choices button:hover{
+  border-color:#a9b9ae;
+  background:#fff;
+  color:var(--face-ui-ink);
+}
+#detail-dialog .face-theme-choices button[aria-pressed="true"]{
+  border-color:var(--face-ui-accent);
+  background:var(--face-ui-accent-soft);
+  color:var(--face-ui-accent);
+  box-shadow:inset 0 0 0 1px rgba(80,111,92,.2);
+}
 #detail-dialog .face-style-field{
   position:relative;
   display:grid;
@@ -1665,17 +1761,36 @@
 }
 
 @media(max-width:900px){
-  #detail-dialog .viewer-tools{right:28px;width:40px;min-width:40px;gap:4px}
-  #detail-dialog .viewer-tool-group{padding:3px;border-radius:12px}
+  #detail-dialog .viewer-tools{
+    left:50%;
+    right:auto;
+    top:auto;
+    bottom:12px;
+    transform:translateX(-50%);
+    width:auto;
+    min-width:0;
+    max-width:calc(100vw - 24px);
+    max-height:none;
+    padding:0;
+    flex-direction:row;
+    align-items:center;
+    gap:4px;
+    overflow-x:auto;
+    overflow-y:hidden;
+    scrollbar-width:thin;
+    scroll-snap-type:x proximity;
+  }
+  #detail-dialog .viewer-tool-group{padding:3px;border-radius:12px;flex-direction:row;flex:0 0 auto;scroll-snap-align:center}
   #detail-dialog .viewer-tools button,#detail-dialog .viewer-tools select{width:32px;min-width:32px;height:32px;min-height:32px}
+  #detail-dialog .viewer-action-label{display:none!important}
   #detail-dialog #zoom-level{width:32px}
   #detail-dialog .viewer-arrow.left{left:46px}
   #detail-dialog .viewer-arrow.right{right:89px}
-  #detail-dialog:not(.hide-info) .viewer-tools{right:28px;opacity:.18;pointer-events:none}
+  #detail-dialog:not(.hide-info) .viewer-tools{left:50%;right:auto;opacity:.18;pointer-events:none}
   #detail-dialog:not(.hide-info) .face-style-popover,
-  #detail-dialog:not(.hide-info) .people-manage-popover{right:55px}
-  #detail-dialog .face-style-popover{right:55px;width:292px}
-  #detail-dialog .people-manage-popover{right:55px}
+  #detail-dialog:not(.hide-info) .people-manage-popover{right:12px}
+  #detail-dialog .face-style-popover{right:12px;bottom:64px;width:292px}
+  #detail-dialog .people-manage-popover{right:12px;bottom:64px}
 }
 /* Keep the left/right composition even for portrait photographs. */
 #detail-dialog[data-signature-mode="narrow"] .signature-v3{
@@ -1826,7 +1941,7 @@
 
 @media(max-width:979px){
   #detail-dialog .face-style-popover,
-  #detail-dialog .people-manage-popover{left:12px;right:58px;width:auto;top:auto;bottom:12px;transform:none}
+  #detail-dialog .people-manage-popover{left:12px;right:12px;width:auto;top:auto;bottom:64px;transform:none}
   .local-font-card{padding:16px}
   .local-font-preview{grid-template-columns:68px 1fr;gap:12px}
   #local-font-list{height:180px}

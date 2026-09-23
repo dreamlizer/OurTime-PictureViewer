@@ -14,8 +14,9 @@ from playwright.sync_api import sync_playwright
 from test_m1_frontend_browser import FETCH_HARNESS, ROOT, DATA, RUN, free_port, request, seed
 
 
-REPORT = ROOT / "validation" / "reports" / "visual-polish-v2-browser.json"
-SHOTS = ROOT / "validation" / "reports" / "visual-polish-v2"
+STAMP = time.strftime("%Y%m%d-%H%M%S")
+SHOTS = ROOT / "validation" / "reports" / "visual-polish-v2" / STAMP
+REPORT = SHOTS / "browser-summary.json"
 checks: list[str] = []
 
 
@@ -60,9 +61,12 @@ def main() -> int:
             page.on("pageerror", lambda error: errors.append(str(error)))
             page.add_init_script(FETCH_HARNESS)
             page.goto(url, wait_until="domcontentloaded")
+            page.wait_for_function("state.view==='home'")
+            page.locator("[data-view='timeline']").click()
+            page.wait_for_function("state.view==='timeline'")
             page.wait_for_function("document.querySelectorAll('#photo-grid [data-photo]').length===4")
-            page.screenshot(path=str(SHOTS / "desktop-home.png"), full_page=True)
-            result["screenshots"].append("validation/reports/visual-polish-v2/desktop-home.png")
+            page.screenshot(path=str(SHOTS / "desktop-all-photos.png"), full_page=True)
+            result["screenshots"].append(str(SHOTS / "desktop-all-photos.png"))
 
             page.evaluate("void openPhoto(1,{q:'',filter:'all',person:'',directory:'',sort:'date_desc'})")
             page.wait_for_function("window.__ourTimeApp.state.detail?.id===1 && document.querySelector('#detail-img').src")
@@ -96,10 +100,10 @@ def main() -> int:
             check(not page.locator("#detail-dialog").evaluate("el=>el.open"), "V03 快速反向后关闭不会被迟到结果重新打开")
 
             page.set_viewport_size({"width": 390, "height": 844})
-            page.screenshot(path=str(SHOTS / "narrow-home.png"), full_page=True)
-            result["screenshots"].append("validation/reports/visual-polish-v2/narrow-home.png")
+            page.screenshot(path=str(SHOTS / "narrow-all-photos.png"), full_page=True)
+            result["screenshots"].append(str(SHOTS / "narrow-all-photos.png"))
             overflow = page.evaluate("document.documentElement.scrollWidth > window.innerWidth")
-            check(not overflow, "V09 390px 首页没有横向溢出")
+            check(not overflow, "V09 390px 全部照片没有横向溢出")
             page.emulate_media(reduced_motion="reduce")
             page.set_viewport_size({"width": 1280, "height": 800})
             page.evaluate("void openPhoto(1,{q:'',filter:'all',person:'',directory:'',sort:'date_desc'})")
@@ -108,7 +112,7 @@ def main() -> int:
             page.wait_for_function("window.__ourTimeApp.state.detail?.id===2")
             check(page.evaluate("getComputedStyle(document.querySelector('#detail-img')).animationName") in ("none", ""), "V10 reduced-motion 保留准备后替换且取消装饰动画")
             page.screenshot(path=str(SHOTS / "viewer-reduced-motion.png"), full_page=True)
-            result["screenshots"].append("validation/reports/visual-polish-v2/viewer-reduced-motion.png")
+            result["screenshots"].append(str(SHOTS / "viewer-reduced-motion.png"))
             browser.close()
         check(not errors, "定向页面无 pageerror 或未处理 rejection")
         result["passed"] = True

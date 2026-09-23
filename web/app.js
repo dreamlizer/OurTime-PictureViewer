@@ -1140,7 +1140,7 @@ async function openPerson(id){
  id=Number(id);const session=entitySessions.open('person',id);entitySession.person=session;state.personId=id;hideNotice();setPersonSaveState();state.personFaces={generation:0,offset:0,loading:false};
  const mergeButton=$('#merge-person'),ignoreButton=$('#ignore-person');if(mergeButton)mergeButton.disabled=false;if(ignoreButton)ignoreButton.disabled=false;
  const p=await api('/api/people/'+id+'?limit=48');if(!entitySessions.current(session)||Number(state.personId)!==id)return false;
- state.personDetail=p;state.personFaces.offset=(p.faces||[]).length;$('#person-eyebrow').textContent=p.ignored?'路人':'熟悉的面孔';$('#person-title').textContent=personLabel(p);const count=p.face_count||(p.faces||[]).length;$('#person-help').hidden=true;$('#person-title').dataset.count=fmt(count);$('#person-name').value=p.ignored?'':((p.name&&p.name!=='待核对')?p.name:'');$('#person-alias').value=p.alias||'';draftRevision.person=0;if(!p.ignored&&p.confirmed&&p.name&&p.name!=='待核对')setPersonSaveState('已标记为：'+p.name);$('#ignore-person').textContent=p.ignored?'恢复到人物档案':'标为路人';
+ state.personDetail=p;state.personFaces.offset=(p.faces||[]).length;$('#person-eyebrow').textContent=p.ignored?'路人':'熟悉的面孔';$('#person-title').textContent=personLabel(p);const count=p.face_count||(p.faces||[]).length;const named=Boolean(!p.ignored&&isNamedPerson(p));$('#person-dialog').dataset.personMode=named?'named':(p.ignored?'ignored':'pending');$('#person-help').hidden=true;$('#person-title').dataset.count=fmt(count);$('#person-face-count').textContent=fmt(count)+' 张';const organize=$('#person-organize');if(organize){organize.open=!named;organize.querySelector('summary').textContent=p.ignored?'整理这位路人':'整理此人物';}const photosButton=$('#show-person-photos');if(photosButton){photosButton.textContent='查看相关照片 · '+fmt(count)+' 张';photosButton.className=(named?'primary':'secondary')+' person-photos-primary';}$('#person-name').value=p.ignored?'':((p.name&&p.name!=='待核对')?p.name:'');$('#person-alias').value=p.alias||'';draftRevision.person=0;if(!p.ignored&&p.confirmed&&p.name&&p.name!=='待核对')setPersonSaveState('已标记为：'+p.name);$('#ignore-person').textContent=p.ignored?'恢复到人物档案':'标为路人';
  await fillMergeTargets('',p.suggested_person_id,session);if(!entitySessions.current(session)||Number(state.personId)!==id)return false;
  renderPersonFaces(true);showDialog('#person-dialog');bindPersonFaceScroll();maybeLoadMorePersonFaces();return true;
 }
@@ -1155,7 +1155,7 @@ document.addEventListener('click',action(async e=>{
 $('#folders-up')&&$('#folders-up').addEventListener('click',action(async()=>{const slash=String.fromCharCode(92); const parent=(state.folderNav&&state.folderNav.parent)||''; await loadFolderBrowser(parent);}));
 $('#folders-scan-new')&&$('#folders-scan-new').addEventListener('click',action(async()=>{const path=state.folderPath;if(!path)throw new Error('先进入一个盘符或文件夹，再添加这里的照片');await openAddPhotos(path);toast('已选择当前文件夹，可以继续添加其他文件夹');}));
 document.addEventListener('change',action(async e=>{const box=e.target.closest('[data-folder-toggle]');if(!box)return;await toggleFolderInclusion(box.dataset.folderToggle, box.checked);}));
-$$('[data-view]').forEach(b=>b.addEventListener('click',action(()=>window.OurTimeContinuity?window.OurTimeContinuity.navigate(b.dataset.view):setView(b.dataset.view))));$$('[data-jump]').forEach(b=>b.addEventListener('click',action(()=>setView(b.dataset.jump))));['#add-folder','#empty-add'].forEach(s=>$(s).addEventListener('click',action(()=>openAddPhotos())));$$('[data-close]').forEach(b=>b.addEventListener('click',()=>$('#'+b.dataset.close).close()));
+$$('[data-view]').forEach(b=>b.addEventListener('click',action(()=>window.OurTimeContinuity?window.OurTimeContinuity.navigate(b.dataset.view):setView(b.dataset.view))));$$('[data-jump]').forEach(b=>b.addEventListener('click',action(()=>setView(b.dataset.jump))));['#add-folder','#empty-add'].forEach(s=>$(s).addEventListener('click',action(()=>openAddPhotos())));$$('[data-close]').forEach(b=>b.addEventListener('click',()=>{const top=$$('dialog[open]').at(-1);if(top&&top.id!==b.dataset.close)return;$('#'+b.dataset.close).close();}));
 
 async function findCachedPerson(id){
  id=Number(id);
@@ -1220,7 +1220,8 @@ async function openQuickName(id){
 document.addEventListener('click',action(async e=>{const quick=e.target.closest('[data-quick-name]');if(!quick)return;e.preventDefault();e.stopPropagation();await openQuickName(Number(quick.dataset.quickName));}));
 $('#quick-name-dialog')&&$('#quick-name-dialog').addEventListener('click',e=>{if(e.target===$('#quick-name-dialog'))$('#quick-name-dialog').close();});
 $('#quick-name-dialog')&&$('#quick-name-dialog').addEventListener('close',()=>{entitySessions.close('quickName');resetQuickMerge();});
-$('#person-dialog')&&$('#person-dialog').addEventListener('close',()=>entitySessions.close('person'));
+$('#person-dialog')&&$('#person-dialog').addEventListener('close',()=>{const dialog=$('#person-dialog');if(dialog){delete dialog.dataset.photoReturn;delete dialog.dataset.photoReturnScroll;dialog.inert=false;}entitySessions.close('person');});
+$('#person-dialog')&&$('#person-dialog').addEventListener('cancel',e=>{if($('#detail-dialog')?.open){e.preventDefault();closePhotoViewer();}});
 $('#detail-dialog')&&$('#detail-dialog').addEventListener('close',()=>entitySessions.close('photo'));
 $('#quick-merge-search')&&$('#quick-merge-search').addEventListener('input',()=>{clearTimeout(quickMergeTimer);quickMergeTimer=setTimeout(()=>loadQuickMergeTargets().catch(err=>toast(err.message||'人物列表读取失败',true)),250);});
 $('#quick-merge-submit')&&$('#quick-merge-submit').addEventListener('click',action(async()=>{const source=Number(state.quickNameId),session=entitySession.quickName,target=Number($('#quick-merge-target')?.value);const match=quickMergeTargets.find(p=>Number(p.id)===target);if(!source||!target||!match){toast('请先选择要合并到的人物',true);return;}const button=$('#quick-merge-submit');if(button.disabled)return;button.disabled=true;try{await mergePersonFromNaming(source,target,match,session);if(entitySessions.current(session)&&Number(state.quickNameId)===source)$('#quick-name-dialog').close();}catch(err){if(entitySessions.current(session))toast(err.message||'人物合并失败',true);}finally{if(entitySessions.current(session))button.disabled=false;}}));
@@ -1429,9 +1430,16 @@ document.addEventListener('click',action(async e=>{
  if(person)await openPerson(Number(person.dataset.person));
  const facePhoto=e.target.closest('[data-face-photo]');
  if(facePhoto){
-  const opened=await openPhoto(Number(facePhoto.dataset.facePhoto),{q:'',filter:'all',person:String(state.personId),directory:'',sort:'date_desc'});
-  if(opened)$('#person-dialog').close();
-  else showNotice('这张照片已不在当前有效范围，人物窗口已为你保留。',true);
+  const personDialog=$('#person-dialog');
+  const body=$('.person-body');
+  if(personDialog&&body)personDialog.dataset.photoReturnScroll=String(body.scrollTop||0);
+  if(personDialog){personDialog.dataset.photoReturn='1';personDialog.inert=true;}
+  try{
+   const opened=await openPhoto(Number(facePhoto.dataset.facePhoto),{q:'',filter:'all',person:String(state.personId),directory:'',sort:'date_desc'});
+   if(!opened)showNotice('这张照片已不在当前有效范围，人物窗口仍为你保留。',true);
+  }finally{
+   if(personDialog&&!$('#detail-dialog')?.open){personDialog.inert=false;delete personDialog.dataset.photoReturn;delete personDialog.dataset.photoReturnScroll;}
+  }
  }
  const split=e.target.closest('[data-split]');
  if(split){

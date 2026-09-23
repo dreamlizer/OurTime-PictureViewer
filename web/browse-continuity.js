@@ -81,11 +81,13 @@ function remember(item,push=false){
  }
  async function photosLoaded(){if(!changing&&!restoring)await ready();}
  async function restore(item){
+  const personDialog=document.querySelector('#person-dialog');
+  if(personDialog?.open&&(personDialog.dataset.photoReturn==='1'||document.querySelector('#detail-dialog')?.open))return false;
   if(!item||item.version!==1||!supported(item.view)||!item.values)return false;
   const token=++revision;restoring=true;pending=item;
   try{
-    document.documentElement.classList.add('is-restoring-browse');
-    document.querySelectorAll('dialog[open]').forEach(dialog=>dialog.close());
+   document.documentElement.classList.add('is-restoring-browse');
+    document.querySelectorAll('dialog[open]').forEach(dialog=>{if(dialog.id==='person-dialog'&&(dialog.dataset.photoReturn==='1'||document.querySelector('#detail-dialog')?.open))return;dialog.close();});
    await setView(item.view);if(token!==revision)return false;
    await restorePosition(item);if(token!==revision)return false;
    remember(snapshot());global.__ourTimeHomeSync?.();return true;
