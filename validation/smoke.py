@@ -171,7 +171,7 @@ def main():
         "fontFamily:'kai'",
         "backgroundOpacity:.5",
         "radius:10",
-        "paddingX:5",
+        "paddingX:3",
     )):
         fail("默认主题没有使用楷体、50% 底色、圆角和收窄后的左右留白")
     if (
@@ -197,17 +197,36 @@ def main():
        "FACE_LABEL_BASE_HEIGHT=56",
        "FACE_LABEL_FACE_RATIO=.4",
         "FACE_LABEL_MAX_SCALE=1.6",
-       "function faceLabelScaleForHeight(faceH){",
+       "FACE_LABEL_MIN_SCALE=1",
+       "FACE_LABEL_MIN_PHOTO_SCALE=.12",
+       "FACE_LABEL_REFERENCE_PHOTO_HEIGHT=900",
+       "function faceLabelScaleForHeight(faceH, imageHeight){",
+       "function isLatinDisplayName(text){",
         "btn.style.setProperty('--face-scale',scale.toFixed(3));",
     )):
-        fail("人名标签缺少随脸高度缩放的下限/上限合同")
+        fail("人名标签缺少随照片显示高度和脸高比例缩放的合同")
     if not all(value in viewer_overrides for value in (
         "--face-scale:1;",
-        "width:calc(38px * var(--face-scale, 1));",
-        "height:calc(56px * var(--face-scale, 1));",
+        "width:max-content;",
+        "height:max-content;",
+        "border-image-slice:var(--face-plate-slice);",
+        "--face-plate-corner:1.55em;",
+        "--face-plate-edge:0.42em;",
+        "--face-plate-pad-block:0.42em;",
+        "--face-plate-pad-inline:0.16em;",
+        "--face-plate-pad-block:0.16em;",
+        "--face-plate-pad-inline:0.42em;",
+        "--face-plate-slice:210 330 fill;",
+        "--face-plate-slice:170 310 fill;",
+        "--face-plate-slice:330 210 fill;",
+        "--face-plate-slice:310 180 fill;",
+        "/api/face-label-bg/7.png",
+        "/api/face-label-bg/8.png",
         "font-size:calc(var(--face-font-size) * var(--face-scale, 1));",
     )):
-        fail("人名底牌与字号没有锁定到同一 --face-scale")
+        fail("人名底牌没有随文字伸缩，或字号没有锁定到同一 --face-scale")
+    if "width:calc(38px * var(--face-scale, 1));" in viewer_overrides or "height:calc(56px * var(--face-scale, 1));" in viewer_overrides:
+        fail("素笺或茶棕底牌仍使用固定三档宽高")
     if (
         'id="quick-ignore-person"' not in html
         or "/api/people/'+id+'/ignore" not in app

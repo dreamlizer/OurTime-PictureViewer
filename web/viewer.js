@@ -56,7 +56,7 @@ const FACE_STYLE_PRESETS={
     backgroundColor:'#141812',
     backgroundOpacity:.5,
     radius:10,
-    paddingX:5,
+    paddingX:3,
     paddingY:5,
     shadow:true
   },
@@ -108,6 +108,9 @@ const FACE_LABEL_FACE_OVERLAP_LIMIT=.35;
 const FACE_LABEL_BASE_HEIGHT=56;
 const FACE_LABEL_FACE_RATIO=.4;
 const FACE_LABEL_MAX_SCALE=1.6;
+const FACE_LABEL_MIN_SCALE=1;
+const FACE_LABEL_MIN_PHOTO_SCALE=.12;
+const FACE_LABEL_REFERENCE_PHOTO_HEIGHT=900;
 const LEGACY_CLASSIC_FACE_STYLE={
   theme:'classic',
   fontSize:13,
@@ -257,11 +260,6 @@ function buildViewerToolbar(){
   setToolIcon('#viewer-info',iconSvg.info,'详细资料');
   setToolIcon('#viewer-play',iconSvg.play,'播放幻灯片');
   setToolIcon('#reveal-button',iconSvg.locate,'在资源管理器中定位');
-  const reveal=$('#reveal-button');
-  if(reveal){
-    reveal.classList.add('viewer-labeled-action');
-    reveal.insertAdjacentHTML('beforeend','<span class="viewer-action-label">定位原文件</span>');
-  }
 
   const delay=$('#slide-delay');
   if(delay){
@@ -303,6 +301,11 @@ function buildFaceStylePopover(){
     </div>
     <div class="face-style-group">
       <div class="face-style-group-title">布局</div>
+      <div class="face-dir-choices" role="radiogroup" aria-label="文字方向">
+        <button type="button" data-face-dir-choice="auto" aria-pressed="false">自动</button>
+        <button type="button" data-face-dir-choice="horizontal" aria-pressed="false">横排</button>
+        <button type="button" data-face-dir-choice="vertical" aria-pressed="false">竖排</button>
+      </div>
       <label class="face-style-field"><span>标签排版</span><select id="face-label-position"><option value="auto">智能排布（默认）</option><option value="manual" disabled>自定义排版</option><option value="left">偏左</option><option value="right">偏右</option><option value="top">偏上</option><option value="bottom">偏下</option></select></label>
       <label class="face-style-field"><span>待命名标记</span><select id="face-unnamed-marker"><option value="plus">默认加号</option><option value="pulse">呼吸绿点</option><option value="ring">静态绿环</option></select></label>
       <button type="button" id="face-label-reset-photo" class="face-label-reset-photo">清除本张自定义排版</button>
@@ -323,6 +326,9 @@ function buildFaceStylePopover(){
   bind('#face-theme','change',e=>applyFacePreset(e.target.value));
   pop.querySelectorAll('[data-face-theme-choice]').forEach(button=>{
     button.addEventListener('click',()=>applyFacePreset(button.dataset.faceThemeChoice));
+  });
+  pop.querySelectorAll('[data-face-dir-choice]').forEach(button=>{
+    button.addEventListener('click',()=>setFaceDirMode(button.dataset.faceDirChoice));
   });
   bind('#face-font-size','input',e=>updateFaceStyle({fontSize:Number(e.target.value)}));
   bind('#face-font-family','change',e=>{
@@ -583,7 +589,6 @@ function applyFacePreset(name){
   const valid=Object.prototype.hasOwnProperty.call(FACE_STYLE_PRESETS,name);
   const theme=valid?name:'classic';
   viewer.faceStyle={...FACE_STYLE_PRESETS[theme]};
-  if(FACE_LABEL_IMAGES[theme]){viewer.faceVertical=true; viewer.faceDirMode='vertical';}
   applyFaceStyle();
   saveViewerPrefs();
   if(state.detail)requestAnimationFrame(()=>renderFaceNames(state.detail));
@@ -695,8 +700,10 @@ function updateLocalFontPreview(){
   if(preview){
     preview.textContent=localFontPreviewText();
     preview.style.fontFamily=customFaceFontStack(family);
-    preview.style.writingMode=faceLabelsVertical()?'vertical-rl':'horizontal-tb';
-    preview.style.textOrientation=faceLabelsVertical()?'upright':'mixed';
+    const previewVertical=faceLabelVerticalFor(preview.textContent);
+    preview.style.writingMode=previewVertical?'vertical-rl':'horizontal-tb';
+    preview.style.textOrientation=previewVertical?'upright':'mixed';
+    preview.classList.toggle('is-horizontal', !previewVertical);
   }
   if($('#local-font-preview-name'))$('#local-font-preview-name').textContent=family||'等待选择字体';
   if($('#local-font-confirm'))$('#local-font-confirm').disabled=!family;
@@ -773,10 +780,18 @@ function applyFaceLabelProfile(element,name){
   element.dataset.faceLabelSize=profile.size;
   element.classList.toggle('long-name',profile.long);
 }
-function faceLabelScaleForHeight(faceH){
-  const height=Number(faceH);
+function faceLabelPhotoScale(imageHeight){
+  const height=Number(imageHeight);
   if(!(height>0))return 1;
-  return Math.min(FACE_LABEL_MAX_SCALE, Math.max(1, FACE_LABEL_FACE_RATIO*height/FACE_LABEL_BASE_HEIGHT));
+  return height/FACE_LABEL_REFERENCE_PHOTO_HEIGHT;
+}
+function faceLabelScaleForHeight(faceH, imageHeight){
+  const height=Number(faceH);
+  const photo=faceLabelPhotoScale(imageHeight);
+  const photoScale=Math.max(FACE_LABEL_MIN_PHOTO_SCALE, photo);
+  if(!(height>0))return FACE_LABEL_MIN_SCALE*photoScale;
+  const faceScale=Math.min(FACE_LABEL_MAX_SCALE, Math.max(FACE_LABEL_MIN_SCALE, FACE_LABEL_FACE_RATIO*height/FACE_LABEL_BASE_HEIGHT));
+  return faceScale*photoScale;
 }
 function isLatinDisplayName(text){
   const s=String(text||'').trim();
@@ -789,19 +804,33 @@ function faceDirMode(){
   const mode=viewer.faceDirMode||'auto';
   return (mode==='horizontal'||mode==='vertical'||mode==='auto')?mode:'auto';
 }
+function faceDirLabel(mode=faceDirMode()){
+  return mode==='auto'?'自动（中文竖排、英文横排）':mode==='horizontal'?'横排':'竖排';
+}
+function setFaceDirMode(mode){
+  const next=(mode==='horizontal'||mode==='vertical'||mode==='auto')?mode:'auto';
+  const changed=faceDirMode()!==next;
+  if(changed){
+    viewer.faceDirMode=next;
+    viewer.faceVertical=next!=='horizontal';
+    saveViewerPrefs();
+  }
+  updateToolVisuals();
+  if(changed)renderFaceNames(state.detail);
+  applyFaceStyle();
+}
 function faceLabelsVertical(){
-  if(Boolean(FACE_LABEL_IMAGES[viewer.faceStyle?.theme])) return true;
   const mode=faceDirMode();
   if(mode==='horizontal') return false;
   if(mode==='vertical') return true;
   return true;
 }
 function faceLabelVerticalFor(text){
-  if(Boolean(FACE_LABEL_IMAGES[viewer.faceStyle?.theme])) return true;
+  if(isLatinDisplayName(text)) return false;
   const mode=faceDirMode();
   if(mode==='horizontal') return false;
   if(mode==='vertical') return true;
-  return !isLatinDisplayName(text);
+  return true;
 }
 function faceLabelThemeReady(theme){
   if(!FACE_LABEL_IMAGES[theme])return Promise.resolve(true);
@@ -870,6 +899,12 @@ function applyFaceStyle(){
   syncFaceFontSelect(family,s,theme);
   if(position)position.value=currentFaceLabelMode();
   if(marker)marker.value=root.dataset.unnamedMarker;
+  const direction=faceDirMode();
+  pop?.querySelectorAll('[data-face-dir-choice]').forEach(button=>{
+    const selected=button.dataset.faceDirChoice===direction;
+    button.setAttribute('aria-pressed',String(selected));
+    button.title=selected?faceDirLabel(direction):'改为'+faceDirLabel(button.dataset.faceDirChoice);
+  });
   if(text)text.value=s.textColor;
   if(bg)bg.value=s.backgroundColor;
   if(op)op.value=String(Math.round(s.backgroundOpacity*100));
@@ -914,8 +949,10 @@ function applyFaceStyle(){
     preview.style.backgroundColor=themeImages?'':hexToRgba(s.backgroundColor,s.backgroundOpacity);
     preview.style.borderRadius=themeImages?'':s.radius>=999?'999px':`${s.radius}px`;
     preview.style.textShadow=themeImages?'':s.shadow?'0 1px 10px rgba(0,0,0,.65)':'none';
-    preview.style.writingMode=faceLabelsVertical()?'vertical-rl':'horizontal-tb';
-    preview.style.textOrientation=faceLabelsVertical()?'upright':'mixed';
+    const previewVertical=faceLabelVerticalFor(preview.textContent);
+    preview.style.writingMode=previewVertical?'vertical-rl':'horizontal-tb';
+    preview.style.textOrientation=previewVertical?'upright':'mixed';
+    preview.classList.toggle('is-horizontal', !previewVertical);
   }
   ensureFaceLabelThemeAvailable(theme);
 }
@@ -939,12 +976,10 @@ function toggleFaceStylePopover(force){
 function updateToolVisuals(){
   const dir=$('#toggle-face-dir');
   if(dir){
-    const fixedTheme=viewer.faceStyle?.theme;
-    const fixedVertical=Boolean(FACE_LABEL_IMAGES[fixedTheme]);
     const vertical=faceLabelsVertical();
     const mode=faceDirMode();
     dir.innerHTML=mode==='horizontal'?iconSvg.horizontal:iconSvg.vertical;
-    const next=fixedVertical?('竖排'):(mode==='auto'?'自动（中文竖排、英文横排）':mode==='horizontal'?'横排':'竖排');
+    const next=faceDirLabel(mode);
     dir.title=next;dir.setAttribute('aria-label',next); dir.dataset.dirMode=mode;
   }
   const play=$('#viewer-play');
@@ -1053,7 +1088,7 @@ function syncViewerTools(){
  pressTool('#viewer-info', !$('#detail-dialog').classList.contains('hide-info'));
  pressTool('#viewer-play', viewer.playing);
  const aliasBtn=$('#toggle-face-alias'); if(aliasBtn){ aliasBtn.disabled=viewer.faceNames===false; const am=faceAliasMode(); aliasBtn.title=am==='off'?'显示姓名和别名':am==='with'?'只显示别名':'只显示姓名'; aliasBtn.setAttribute('aria-label', aliasBtn.title); aliasBtn.dataset.aliasMode=am; }
- const dirBtn=$('#toggle-face-dir'); if(dirBtn) dirBtn.disabled=viewer.faceNames===false||Boolean(FACE_LABEL_IMAGES[viewer.faceStyle?.theme]);
+ const dirBtn=$('#toggle-face-dir'); if(dirBtn) dirBtn.disabled=viewer.faceNames===false;
  const styleBtn=$('#face-style-button');if(styleBtn)styleBtn.disabled=viewer.faceNames===false;
  updateToolVisuals();
 }
@@ -1866,16 +1901,21 @@ function layoutFaceNameButtons(layer, faces, alias){
   const preferredSide=sides[0];
   const faceRects=items.map(item=>({x:item.fx,y:item.fy,w:item.fw,h:item.fh}));
   const mode=currentFaceLabelMode();
-  const verticalHeights=items.filter(it=>it.named&&it.vertical).map(it=>it.fh).sort((a,b)=>a-b);
-  const middle=Math.floor(verticalHeights.length/2);
-  const typicalHeight=verticalHeights.length?(verticalHeights[middle]+verticalHeights[Math.floor((verticalHeights.length-1)/2)])/2:0;
-  const uniformScale=faceLabelScaleForHeight(typicalHeight);
+  const sourceHeights=items.filter(it=>it.named&&it.vertical).map(it=>{
+    const box=faceBox(it.face);
+    return box&&box.h?box.height/box.h*FACE_LABEL_REFERENCE_PHOTO_HEIGHT:0;
+  }).filter(height=>height>0).sort((a,b)=>a-b);
+  const middle=Math.floor(sourceHeights.length/2);
+  const typicalSourceHeight=sourceHeights.length?(sourceHeights[middle]+sourceHeights[Math.floor((sourceHeights.length-1)/2)])/2:0;
+  const uniformScale=faceLabelScaleForHeight(typicalSourceHeight, imgH);
   const geometries=buttons.map((btn,i)=>{
     const it=items[i];
     it.btn=btn;
     if(it.named){
       applyFaceLabelProfile(btn,it.label);
-      const scale=it.vertical?uniformScale:faceLabelScaleForHeight(it.fh);
+      const box=faceBox(it.face);
+      const sourceHeight=box&&box.h?box.height/box.h*FACE_LABEL_REFERENCE_PHOTO_HEIGHT:0;
+      const scale=it.vertical?uniformScale:faceLabelScaleForHeight(sourceHeight, imgH);
       btn.style.setProperty('--face-scale',scale.toFixed(3));
       btn.dataset.faceScale=scale.toFixed(3);
       btn.classList.toggle('is-horizontal', it.vertical===false);
@@ -2023,7 +2063,7 @@ function renderFaceNames(photo){
  const alias=faceAliasMode();
   const vertical=faceLabelsVertical();
  layer.hidden=!show;
- layer.classList.toggle('horizontal', faceDirMode()==='horizontal' && !Boolean(FACE_LABEL_IMAGES[viewer.faceStyle?.theme]));
+ layer.classList.toggle('horizontal', faceDirMode()==='horizontal');
   if(!show){layer.innerHTML='';syncViewerTools();updatePhotoPeoplePopover();return;}
   const faces=visibleFaces(photo);
   if(!$('#detail-img')?.naturalWidth || !layer.clientWidth){
@@ -2362,7 +2402,7 @@ faceLayer&&faceLayer.addEventListener('dblclick',e=>{
 });
 $('#toggle-face-names').addEventListener('click',()=>{viewer.faceNames=!viewer.faceNames;saveViewerPrefs();renderFaceNames(state.detail);});
 $('#toggle-face-alias').addEventListener('click',()=>{const order=['off','with','only']; const cur=faceAliasMode(); viewer.faceAliasMode=order[(order.indexOf(cur)+1)%3]; viewer.faceAlias=viewer.faceAliasMode!=='off'; saveViewerPrefs();renderFaceNames(state.detail);});
-$('#toggle-face-dir').addEventListener('click',()=>{const order=['auto','horizontal','vertical']; const cur=faceDirMode(); viewer.faceDirMode=order[(order.indexOf(cur)+1)%3]; viewer.faceVertical=viewer.faceDirMode!=='horizontal'; saveViewerPrefs();renderFaceNames(state.detail);if(!$('#face-style-popover')?.hidden)applyFaceStyle();});
+$('#toggle-face-dir').addEventListener('click',()=>{const order=['auto','horizontal','vertical']; setFaceDirMode(order[(order.indexOf(faceDirMode())+1)%3]);});
 $('#face-style-button')?.addEventListener('click',e=>{e.stopPropagation();toggleFaceStylePopover();});
 $('#photo-people-manage')?.addEventListener('click',e=>{e.stopPropagation();togglePhotoPeoplePopover();});
 document.addEventListener('click',e=>{

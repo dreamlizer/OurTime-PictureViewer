@@ -1452,9 +1452,11 @@ document.addEventListener('click',action(async e=>{
     if(created)appendPersonToLocalState(created);
    }
    if(!entitySessions.current(session)||Number(state.personId)!==sourceId)return;
-   toast('已移到新的待命名分组');
+   toast('已移出这张脸');
    await removePersonFaceLocally(faceId);
-   if(!remaining || !(state.personDetail&&state.personDetail.face_count))$('#person-dialog').close();
+   const batch=result&&result.batch&&result.batch.batch||[];
+   if(batch.length)openSplitBatch(sourceId,[faceId],batch);
+   else if(!remaining || !(state.personDetail&&state.personDetail.face_count))$('#person-dialog').close();
   }catch(err){if(entitySessions.current(session))throw err;}
  }
  const year=e.target.closest('[data-year]');
@@ -1471,6 +1473,35 @@ document.addEventListener('click',action(async e=>{
  if(e.target.id==='cancel-scan'){const job=state.status&&state.status.job;if(!job||job.status!=='paused')return;const button=e.target;button.disabled=true;try{await api('/api/scan/'+job.id+'/cancel',{method:'POST'});state.scanShowCompletedResult=false;toast('已取消这次扫描；已经添加的照片仍然保留');await refreshStatus();}finally{if(button.isConnected)button.disabled=false;}}
 }));
 document.addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&e.target.matches('[data-photo], [data-face-photo]')){e.preventDefault();e.target.click();}});
+
+function openSplitBatch(personId,seedIds,faces){
+ const dialog=$('#split-batch-dialog'),grid=$('#split-batch-faces');
+ if(!dialog||!grid)return;
+ dialog.dataset.personId=String(personId);
+ dialog.dataset.seedIds=seedIds.join(',');
+ grid.innerHTML=faces.map(face=>`<label><input type="checkbox" checked data-batch-face="${face.id}"><img src="/api/face/${face.id}" alt="待确认的人脸"><span>${esc((face.captured_at||'').slice(0,10)||'时间未记录')}</span></label>`).join('');
+ const confirm=$('#split-batch-confirm');if(confirm)confirm.disabled=false;
+ showDialog('#split-batch-dialog');
+}
+async function confirmSplitBatch(){
+ const dialog=$('#split-batch-dialog');if(!dialog)return;
+ const personId=Number(dialog.dataset.personId),seedIds=(dialog.dataset.seedIds||'').split(',').map(Number).filter(Boolean);
+ const ids=[...dialog.querySelectorAll('[data-batch-face]:checked')].map(input=>Number(input.dataset.batchFace));
+ const button=$('#split-batch-confirm');if(button)button.disabled=true;
+ try{
+  if(!ids.length){dialog.close();return;}
+  const result=await operationRequest('/api/people/'+personId+'/split-batch',{method:'POST',body:JSON.stringify({face_ids:ids,seed_face_ids:seedIds})});
+  dialog.close();
+  for(const id of ids)await removePersonFaceLocally(id);
+  const remaining=await refreshPersonInLocalState(personId);
+  if(result&&result.person_id&&state.view==='people'){const created=await fetchPersonById(result.person_id);if(created)appendPersonToLocalState(created);}
+  toast('已一起移出 '+ids.length+' 张');
+  if(!remaining||!(state.personDetail&&state.personDetail.face_count))$('#person-dialog').close();
+ }finally{if(button&&button.isConnected)button.disabled=false;}
+}
+$('#split-batch-cancel')&&$('#split-batch-cancel').addEventListener('click',()=>$('#split-batch-dialog').close());
+$('#split-batch-confirm')&&$('#split-batch-confirm').addEventListener('click',action(confirmSplitBatch));
+
 
 
 function bytes(n){return n>=1024*1024?(n/1024/1024).toFixed(1)+' MB':Math.round(n/1024)+' KB';}

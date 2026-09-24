@@ -1,4 +1,4 @@
-"""Live-browser checks: vertical nameplates share the median-face scale."""
+"""Live-browser checks: nameplates follow the displayed photo and their text."""
 import json
 import sqlite3
 from pathlib import Path
@@ -10,6 +10,7 @@ from validate_face_label_ivory import REPORT_DIR, URL, check, open_photo
 
 ROOT = Path(__file__).resolve().parents[1]
 REPORT = REPORT_DIR / "face-label-scale.json"
+REFERENCE_PHOTO_HEIGHT = 900
 
 
 def choose_mixed_size_photo():
@@ -32,7 +33,7 @@ def choose_mixed_size_photo():
                limit 1"""
         ).fetchone()
     if not row:
-        raise AssertionError("正式库没有找到前后排脸差足够明显的已命名合影")
+        raise AssertionError("formal library has no mixed-size named group photo")
     return row
 
 
@@ -40,8 +41,9 @@ def synthetic_scale_result(page):
     return page.evaluate(
         """() => {
           viewer.faceStyle={...FACE_STYLE_PRESETS.ivory};
-          applyFaceStyle();
+          viewer.faceDirMode='auto';
           viewer.faceVertical=true;
+          applyFaceStyle();
           viewer.faceLabelPosition='right';
           const layer=document.querySelector('#face-name-layer');
           layer.classList.remove('horizontal');
@@ -57,38 +59,55 @@ def synthetic_scale_result(page):
             person_id,name,ignored,
             bbox:[toSourceX(x),toSourceY(y),toSourceX(x+w),toSourceY(y+h),width,height]
           });
-          const small=makeFace(920001,'阿明',ox+imageRect.width*.18,oy+imageRect.height*.20,48,60);
-          const large=makeFace(920002,'阿强',ox+imageRect.width*.62,oy+imageRect.height*.18,180,280);
+          const small=makeFace(920001,'\u963f\u660e',ox+imageRect.width*.12,oy+imageRect.height*.18,48,60);
+          const large=makeFace(920002,'\u963f\u5f3a',ox+imageRect.width*.58,oy+imageRect.height*.16,180,280);
+          const latin=makeFace(920004,'Mark Zuckerberg',ox+imageRect.width*.18,oy+imageRect.height*.62,90,110);
           const unnamed=makeFace(920003,'',ox+imageRect.width*.42,oy+imageRect.height*.55,40,48,0);
           unnamed.name='';
-          layoutFaceNameButtons(layer,[small,large,unnamed],false);
+          layoutFaceNameButtons(layer,[small,large,latin,unnamed],false);
           const measure=personId=>{
             const btn=layer.querySelector('[data-face-person="'+personId+'"]');
             const rect=btn.getBoundingClientRect();
             const style=getComputedStyle(btn);
+            const plate=getComputedStyle(btn, '::before');
             const scale=Number(style.getPropertyValue('--face-scale')||btn.dataset.faceScale||1);
             return {
+              text:btn.textContent,
               scale,
               width:rect.width,
               height:rect.height,
               fontSize:parseFloat(style.fontSize),
               paddingLeft:parseFloat(style.paddingLeft),
               paddingRight:parseFloat(style.paddingRight),
-              unnamed:btn.classList.contains('unnamed')
+              paddingTop:parseFloat(style.paddingTop),
+              horizontal:btn.classList.contains('is-horizontal'),
+              writingMode:style.writingMode,
+              overflow:style.overflow,
+              unnamed:btn.classList.contains('unnamed'),
+              borderSlice:plate.borderImageSlice||'',
+              borderTop:parseFloat(plate.borderTopWidth)||0,
+              borderLeft:parseFloat(plate.borderLeftWidth)||0,
+              borderImage:(plate.borderImageSource||'') + ' ' + (plate.webkitBorderImage||''),
+              scrollWidth:btn.scrollWidth,
+              clientWidth:btn.clientWidth
             };
           };
+          const displayed=imageRect.height;
           return {
+            displayed,
             formula:{
-              small:faceLabelScaleForHeight(60),
-              start:faceLabelScaleForHeight(140),
-              cap:faceLabelScaleForHeight(280),
-              huge:faceLabelScaleForHeight(800)
+              small:faceLabelScaleForHeight(40*REFERENCE_PHOTO_HEIGHT/displayed, displayed),
+              cap:faceLabelScaleForHeight(280*REFERENCE_PHOTO_HEIGHT/displayed, displayed),
+              huge:faceLabelScaleForHeight(800*REFERENCE_PHOTO_HEIGHT/displayed, displayed),
+              tiny:faceLabelScaleForHeight(28, 220),
+              half:faceLabelScaleForHeight(140, 450)
             },
             small:measure(920001),
             large:measure(920002),
+            latin:measure(920004),
             unnamed:measure(920003)
           };
-        }"""
+        }""".replace("REFERENCE_PHOTO_HEIGHT", str(REFERENCE_PHOTO_HEIGHT))
     )
 
 
@@ -112,80 +131,102 @@ def main():
               const labels=[...layer.querySelectorAll('.face-name:not(.unnamed)')].map(btn=>{
                 const face=(state.detail.faces||[]).find(item=>String(item.person_id)===String(btn.dataset.facePerson));
                 const box=faceBox(face);
-                const faceH=box&&box.h?box.height/box.h*imageRect.height:0;
+                const sourceH=box&&box.h?box.height/box.h*FACE_LABEL_REFERENCE_PHOTO_HEIGHT:0;
                 const rect=btn.getBoundingClientRect();
-                const expected=faceLabelScaleForHeight(faceH);
+                const vertical=faceLabelVerticalFor(btn.textContent);
                 return {
                   name:btn.textContent,
-                  faceH,
-                  expected,
+                  sourceH,
+                  vertical,
+                  horizontal:btn.classList.contains('is-horizontal'),
                   scale:Number(btn.dataset.faceScale||1),
                   width:rect.width,
                   height:rect.height,
                   fontSize:parseFloat(getComputedStyle(btn).fontSize)
                 };
               });
-              labels.sort((a,b)=>a.faceH-b.faceH);
-              const mid=Math.floor(labels.length/2);
-              const expected=faceLabelScaleForHeight((labels[mid].faceH+labels[Math.floor((labels.length-1)/2)].faceH)/2);
-              return labels.map(item=>({...item,expected}));
+              const verticals=labels.filter(item=>item.vertical);
+              const heights=verticals.map(item=>item.sourceH).filter(height=>height>0).sort((a,b)=>a-b);
+              const mid=Math.floor(heights.length/2);
+              const typical=heights.length?(heights[mid]+heights[Math.floor((heights.length-1)/2)])/2:0;
+              const uniform=faceLabelScaleForHeight(typical, imageRect.height);
+              return {
+                imageHeight:imageRect.height,
+                uniform,
+                labels:labels.map(item=>({
+                  ...item,
+                  expected:item.vertical?uniform:faceLabelScaleForHeight(item.sourceH, imageRect.height)
+                }))
+              };
             }"""
         )
         screenshot = REPORT_DIR / "face-label-scale.png"
         page.locator("#photo-mat").screenshot(path=str(screenshot))
         evidence["screenshot"] = str(screenshot)
-        evidence["real"] = {"asset_id": asset_id, "small_frac": small_frac, "large_frac": large_frac, "named_count": named_count, "labels": real}
+        evidence["real"] = {"asset_id": asset_id, "small_frac": small_frac, "large_frac": large_frac, "named_count": named_count, **real}
         synthetic = synthetic_scale_result(page)
         evidence["synthetic"] = synthetic
-        check(synthetic["formula"]["small"] == 1, "小于 140px 的脸保持当前标签尺寸", checks)
-        check(abs(synthetic["formula"]["start"] - 1) < 1e-6, "140px 的脸正好开始放大", checks)
-        check(abs(synthetic["formula"]["cap"] - 1.6) < 1e-6, "224px 及以上封顶 1.6 倍", checks)
-        check(synthetic["formula"]["huge"] == 1.6, "特写不会超过 1.6 倍", checks)
+        photo = synthetic["displayed"] / REFERENCE_PHOTO_HEIGHT
+        check(abs(synthetic["formula"]["small"] - photo) < 0.03, "a small face stays at the 1x floor before the photo scale", checks)
+        check(abs(synthetic["formula"]["cap"] - 1.6 * photo) < 0.03, "large face caps face scale at 1.6 before photo scale", checks)
+        check(abs(synthetic["formula"]["huge"] - 1.6 * photo) < 0.03, "close-up face still caps at 1.6 times photo scale", checks)
+        check(abs(synthetic["formula"]["tiny"] - 0.12) < 0.03, "a small face on a much smaller photo follows the photo, down to the 0.12 floor", checks)
+        check(abs(synthetic["formula"]["half"] - (450 / REFERENCE_PHOTO_HEIGHT)) < 0.03, "an ordinary face follows the displayed photo height", checks)
+        shared = synthetic["small"]["scale"]
+        photo = synthetic["displayed"] / REFERENCE_PHOTO_HEIGHT
+        raw_small = max(1, 0.4 * 40 / 56)
+        raw_large = min(1.6, 0.4 * 280 / 56)
+        expected_shared = min(1.6, max(1, (raw_small + raw_large) / 2)) * max(0.12, photo)
         check(
-            abs(synthetic["small"]["scale"] - 170/140) < 0.02
-            and abs(synthetic["small"]["width"] - 38*170/140) <= 1
-            and abs(synthetic["small"]["height"] - 56*170/140) <= 1,
-            "小脸标签使用整图中位脸高 170px 的倍率",
+            abs(shared - synthetic["large"]["scale"]) < 0.02
+            and abs(shared - expected_shared) < 0.04,
+            "vertical labels in one photo share the median face scale",
             checks,
         )
         check(
-            abs(synthetic["large"]["scale"] - 170/140) < 0.02
-            and abs(synthetic["large"]["width"] - 38*170/140) <= 1
-            and abs(synthetic["large"]["height"] - 56*170/140) <= 1,
-            "大脸标签与同图小脸统一倍率且宽高一起变",
-            checks,
-        )
-        small_font = synthetic["small"]["fontSize"]
-        large_font = synthetic["large"]["fontSize"]
-        check(
-            small_font > 0 and abs(large_font / small_font - 1) < 0.08,
-            "字号与底牌使用同一倍率",
+            synthetic["small"]["width"] > 20
+            and synthetic["large"]["width"] > 20
+            and abs(synthetic["large"]["width"] / synthetic["small"]["width"] - 1) < 0.18
+            and abs(synthetic["large"]["fontSize"] / synthetic["small"]["fontSize"] - 1) < 0.08
+            and synthetic["small"]["borderTop"] > synthetic["small"]["fontSize"] * 0.45
+            and synthetic["small"]["borderLeft"] > synthetic["small"]["fontSize"] * 0.08
+            and abs(synthetic["large"]["borderTop"] / synthetic["small"]["borderTop"] - synthetic["large"]["fontSize"] / synthetic["small"]["fontSize"]) < 0.08,
+            "vertical plates and type share one scale and grow with their text",
             checks,
         )
         check(
-            abs(synthetic["large"]["paddingLeft"] / max(synthetic["small"]["paddingLeft"], 0.01) - 1) < 0.12,
-            "底牌内边距与字号同步放大",
+            synthetic["latin"]["horizontal"] is True
+            and synthetic["latin"]["writingMode"].startswith("horizontal")
+            and synthetic["latin"]["width"] >= synthetic["latin"]["height"]
+            and synthetic["latin"]["width"] > synthetic["latin"]["fontSize"] * 8
+            and synthetic["latin"]["scrollWidth"] <= synthetic["latin"]["clientWidth"] + 1
+            and "fill" in str(synthetic["latin"]["borderSlice"])
+            and "%" not in str(synthetic["latin"]["borderSlice"])
+            and synthetic["latin"]["borderLeft"] > synthetic["latin"]["fontSize"] * 0.45
+            and synthetic["latin"]["borderTop"] > synthetic["latin"]["fontSize"] * 0.08
+            and "1.png" in synthetic["latin"]["borderImage"],
+            "a long Latin name stays horizontal and its plate contains the text",
             checks,
         )
         check(
             synthetic["unnamed"]["unnamed"] is True
             and synthetic["unnamed"]["width"] <= 26
             and synthetic["unnamed"]["height"] <= 26,
-            "未命名标记不随脸放大",
+            "unnamed markers do not scale with the face",
             checks,
         )
 
-        check(len(real) >= 2, "真实合影至少有两个已命名标签", checks)
-        check(all(abs(item["scale"] - item["expected"]) < 0.02 for item in real), "真实合影的缩放系数按脸高计算", checks)
-        check(all(item["scale"] >= 0.999 for item in real), "真实合影没有小于当前尺寸的标签", checks)
-        check(all(item["scale"] <= 1.601 for item in real), "真实合影没有超过 1.6 倍的标签", checks)
-        check(len({round(item["scale"], 3) for item in real}) == 1, "真实合影的竖版标签倍率一致", checks)
-
-        check(not errors, "大图没有页面脚本错误", checks)
+        labels = real["labels"]
+        check(len(labels) >= 2, "real group photo has at least two named labels", checks)
+        check(all(abs(item["scale"] - item["expected"]) < 0.02 for item in labels), "real labels use face height times displayed photo height", checks)
+        check(all(item["scale"] <= item["expected"] + 0.02 for item in labels), "real labels do not exceed the calculated scale", checks)
+        vertical_scales = {round(item["scale"], 3) for item in labels if item["vertical"]}
+        check(len(vertical_scales) <= 1, "real vertical labels share one scale", checks)
+        check(not errors, "photo viewer has no page script errors", checks)
         browser.close()
 
     REPORT.write_text(json.dumps({"checks": checks, "evidence": evidence}, ensure_ascii=False, indent=2), encoding="utf-8")
-    print("REPORT", REPORT, flush=True)
+    print("REPORT", REPORT, "checks", len(checks), "failed", 0, flush=True)
 
 
 if __name__ == "__main__":

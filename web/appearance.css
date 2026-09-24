@@ -1096,3 +1096,11 @@ dialog.dialog-open { opacity: 1; transform: none; transition: opacity 140ms ease
 .maintain-menu[open] .maintain-panel {
   opacity: 1; transform: none; pointer-events: auto;
 }
+
+.split-batch-dialog { width: min(720px, calc(100vw - 32px)); z-index: 30; }
+.split-batch-dialog h2 { margin: 4px 0 8px; font-size: 22px; }
+.split-batch-faces { display: grid; grid-template-columns: repeat(auto-fill,minmax(92px,1fr)); gap: 12px; max-height: min(420px,52vh); margin: 18px 0; overflow: auto; }
+.split-batch-faces label { display: grid; gap: 6px; min-width: 0; font-size: 12px; }
+.split-batch-faces img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 8px; background: #e8eee9; }
+.split-batch-faces input { justify-self: start; }
+.split-batch-actions { display: flex; justify-content: flex-end; gap: 10px; }

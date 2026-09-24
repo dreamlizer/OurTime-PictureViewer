@@ -66,6 +66,7 @@ from map_area_service import (
     normalize_map_area,
     select_map_area_rows,
 )
+from face_split_batch import suggest_split_batch
 from ourtime_config import (
     APP_NAME,
     APP_VERSION,
@@ -3179,17 +3180,62 @@ def undo_operation(operation_id:str,body:UndoRequest):
     with operation_lock(operation_id):
         return undo_operation_locked(operation_id,body)
 
+def undo_face_split_batch(conn, row, undo, dry_run):
+    source_id = int(undo['source_person_id'])
+    created_id = int(undo['created_person_id'])
+    conflicts = []
+    created = conn.execute('SELECT cover_face_id,name,confirmed FROM people WHERE id=?', (created_id,)).fetchone()
+    if not created:
+        conflicts.append('移出后的新人物已不存在')
+    elif created['cover_face_id'] is not None or created['name'] or int(created['confirmed'] or 0):
+        conflicts.append('移出后的新人物已有后续整理')
+    for face in undo['faces']:
+        current = conn.execute(
+            'SELECT person_id,reviewed,ignored FROM faces WHERE id=?', (int(face['id']),)
+        ).fetchone()
+        if (
+            not current or int(current['person_id']) != created_id
+            or int(current['reviewed'] or 0) or int(current['ignored'] or 0)
+        ):
+            conflicts.append(f"人脸 {int(face['id'])} 已在移出后改变")
+    preview = {
+        'operation_id': row['operation_id'], 'dry_run': bool(dry_run),
+        'can_undo': not conflicts, 'conflicts': conflicts,
+        'faces': len(undo['faces']), 'source_id': source_id, 'target_id': created_id,
+    }
+    if dry_run:
+        return preview
+    if conflicts:
+        raise ApiProblem(409, '移出后的对象已变化，未执行撤销', 'undo_conflict', operation_id=row['operation_id'], conflicts=conflicts)
+    for face in undo['faces']:
+        conn.execute(
+            'UPDATE faces SET person_id=?,reviewed=?,ignored=? WHERE id=?',
+            (source_id, int(face['reviewed'] or 0), int(face['ignored'] or 0), int(face['id'])),
+        )
+    conn.execute('DELETE FROM people WHERE id=?', (created_id,))
+    result = json.loads(row['result_json'] or '{}')
+    result.update({'undone': True, 'undo_faces': len(undo['faces'])})
+    return finish_operation(conn, row['operation_id'], result, status='undone', state_committed=True, undo=undo)
+
+
 def undo_operation_locked(operation_id,body):
     with db() as c:
         row=c.execute(
             'SELECT * FROM operations WHERE operation_id=?',(operation_id,)
         ).fetchone()
         if not row:raise ApiProblem(404,'操作不存在','not_found')
-        if row['kind']!='person_merge' or not row['state_committed'] or not row['undo_json']:
+        if row['kind'] not in {'person_merge','face_split_batch'} or not row['state_committed'] or not row['undo_json']:
             raise ApiProblem(409,'这个操作不能撤销','state_conflict',operation_id=operation_id)
         if row['status']=='undone':
             return operation_receipt(row)
         undo=json.loads(row['undo_json'])
+        if row['kind']=='face_split_batch':
+            receipt=undo_face_split_batch(c,row,undo,body.dry_run)
+            if body.dry_run:
+                return receipt
+            if receipt.get('status')=='undone':
+                invalidate_face_index()
+                return receipt
         source=undo['source']
         source_id=int(source['id'])
         target_id=int(undo['target_id'])
@@ -3276,28 +3322,180 @@ def split_face(fid:int,request:Request):
     with operation_lock(operation_id):
         return split_face_locked(fid,operation_id)
 
-def split_face_locked(fid,operation_id):
+def _face_vectors(conn, face_ids):
+    vectors = []
+    for face_id in face_ids:
+        row = conn.execute('SELECT embedding FROM faces WHERE id=?', (int(face_id),)).fetchone()
+        if not row or row['embedding'] is None:
+            raise ApiProblem(422, '缺少可用于比对的人脸', 'invalid_request')
+        vectors.append(row['embedding'])
+    return vectors
+
+
+def _split_candidates(conn, person_id, excluded_face_ids):
+    excluded = {int(face_id) for face_id in excluded_face_ids}
+    rows = conn.execute(
+        '''SELECT f.id,f.embedding,coalesce(a.manual_date,a.captured_at) AS captured_at
+           FROM faces f JOIN assets a ON a.id=f.asset_id
+           WHERE f.person_id=? AND ''' + ACTIVE_ASSET + '''
+           ORDER BY f.id''',
+        (int(person_id),),
+    ).fetchall()
+    return [
+        {'id': int(row['id']), 'embedding': row['embedding'], 'captured_at': row['captured_at']}
+        for row in rows if int(row['id']) not in excluded and row['embedding'] is not None
+    ]
+
+
+def build_split_batch_preview(conn, person_id, seed_face_ids):
+    person = conn.execute(
+        'SELECT id,cover_face_id FROM people WHERE id=?', (int(person_id),)
+    ).fetchone()
+    if not person:
+        raise ApiProblem(404, '人物不存在', 'not_found')
+    seeds = [int(face_id) for face_id in seed_face_ids]
+    cover = int(person['cover_face_id'] or 0)
+    if cover <= 0 or cover in seeds:
+        return {'batch': [], 'loose': [], 'reason': 'no_reliable_cover'}
+    placeholders = ','.join('?' for _ in seeds)
+    seed_rows = conn.execute(
+        f'''SELECT coalesce(a.manual_date,a.captured_at) AS captured_at
+            FROM faces f JOIN assets a ON a.id=f.asset_id
+            WHERE f.id IN ({placeholders})''',
+        seeds,
+    ).fetchall()
+    result = suggest_split_batch(
+        _face_vectors(conn, seeds),
+        _face_vectors(conn, [cover]),
+        _split_candidates(conn, person_id, seeds),
+        seed_times=[row['captured_at'] for row in seed_rows],
+    )
+    def public(item):
+        return {
+            'id': int(item['id']),
+            'seed_score': round(float(item['seed_score']), 4),
+            'positive_score': round(float(item['positive_score']), 4),
+            'captured_at': item.get('captured_at'),
+        }
+    return {
+        'batch': [public(item) for item in result['batch']],
+        'loose': [public(item) for item in result['loose']],
+        'reason': result['reason'],
+    }
+
+
+def split_face_locked(fid, operation_id):
     with db() as c:
-        operation_id,existing=prepare_operation(
-            c,'face_split',operation_id,{'face_id':fid}
+        operation_id, existing = prepare_operation(
+            c, 'face_split', operation_id, {'face_id': fid}
         )
-        if existing:return existing
-        row=c.execute('SELECT person_id,ignored,reviewed FROM faces WHERE id=?',(fid,)).fetchone()
-        if not row: raise ApiProblem(404,'人脸不存在','not_found',operation_id=operation_id)
-        pid=c.execute('INSERT INTO people DEFAULT VALUES').lastrowid
-        c.execute('UPDATE faces SET person_id=?,reviewed=0,ignored=0 WHERE id=?',(pid,fid))
-        c.execute('UPDATE people SET cover_face_id=NULL WHERE id=? AND cover_face_id=?',(row['person_id'],fid))
-        c.execute('INSERT INTO edits(created_at,target,before_json,after_json) VALUES (?,?,?,?)',(
-            now(),f'face:{fid}',
-            json.dumps({'person_id':row['person_id'],'ignored':row['ignored'],'reviewed':row['reviewed']}),
-            json.dumps({'person_id':pid,'ignored':0,'reviewed':0}),
-        ))
-        receipt=finish_operation(
-            c,operation_id,{'person_id':pid},status='committed',
-            state_committed=True,
+        if existing:
+            return existing
+        row = c.execute(
+            'SELECT person_id,ignored,reviewed FROM faces WHERE id=?', (fid,)
+        ).fetchone()
+        if not row:
+            raise ApiProblem(404, '人脸不存在', 'not_found', operation_id=operation_id)
+        source_id = int(row['person_id'])
+        pid = c.execute('INSERT INTO people DEFAULT VALUES').lastrowid
+        c.execute(
+            'UPDATE faces SET person_id=?,reviewed=0,ignored=0 WHERE id=?', (pid, fid)
+        )
+        c.execute(
+            'UPDATE people SET cover_face_id=NULL WHERE id=? AND cover_face_id=?',
+            (source_id, fid),
+        )
+        c.execute(
+            'INSERT INTO edits(created_at,target,before_json,after_json) VALUES (?,?,?,?)',
+            (
+                now(), f'face:{fid}',
+                json.dumps({'person_id': source_id, 'ignored': row['ignored'], 'reviewed': row['reviewed']}),
+                json.dumps({'person_id': pid, 'ignored': 0, 'reviewed': 0}),
+            ),
+        )
+        preview = build_split_batch_preview(c, source_id, [fid])
+        receipt = finish_operation(
+            c, operation_id,
+            {'person_id': pid, 'source_person_id': source_id, 'batch': preview},
+            status='committed', state_committed=True,
         )
     invalidate_face_index()
     return receipt
+
+
+class FaceSplitBatchRequest(BaseModel):
+    face_ids: list[PositiveId] = Field(min_length=1, max_length=24)
+    seed_face_ids: list[PositiveId] = Field(min_length=1, max_length=12)
+
+
+@app.post('/api/people/{pid}/split-batch')
+def split_face_batch(pid: int, body: FaceSplitBatchRequest, request: Request):
+    if pid <= 0:
+        raise ApiProblem(422, '人物编号必须为正整数', 'invalid_request')
+    operation_id = operation_id_from(None, request)
+    with operation_lock(operation_id):
+        return split_face_batch_locked(pid, body, operation_id)
+
+
+def split_face_batch_locked(pid, body, operation_id):
+    face_ids = list(dict.fromkeys(int(face_id) for face_id in body.face_ids))
+    seed_ids = list(dict.fromkeys(int(face_id) for face_id in body.seed_face_ids))
+    with db() as c:
+        operation_id, existing = prepare_operation(
+            c, 'face_split_batch', operation_id,
+            {'person_id': pid, 'face_ids': face_ids, 'seed_face_ids': seed_ids},
+        )
+        if existing:
+            return existing
+        person = c.execute('SELECT id FROM people WHERE id=?', (pid,)).fetchone()
+        if not person:
+            raise ApiProblem(404, '人物不存在', 'not_found', operation_id=operation_id)
+        allowed = {
+            int(item['id'])
+            for item in build_split_batch_preview(c, pid, seed_ids)['batch']
+        }
+        if not face_ids or any(face_id not in allowed for face_id in face_ids):
+            raise ApiProblem(409, '这批人脸已变化，请重新确认', 'state_conflict', operation_id=operation_id)
+        placeholders = ','.join('?' for _ in face_ids)
+        before = c.execute(
+            f'SELECT id,person_id,reviewed,ignored FROM faces WHERE id IN ({placeholders}) ORDER BY id',
+            face_ids,
+        ).fetchall()
+        if len(before) != len(face_ids) or any(int(row['person_id']) != pid for row in before):
+            raise ApiProblem(409, '这批人脸已变化，请重新确认', 'state_conflict', operation_id=operation_id)
+        created = c.execute('INSERT INTO people DEFAULT VALUES').lastrowid
+        c.execute(
+            f'UPDATE faces SET person_id=?,reviewed=0,ignored=0 WHERE id IN ({placeholders})',
+            (created, *face_ids),
+        )
+        c.execute(
+            f'UPDATE people SET cover_face_id=NULL WHERE id=? AND cover_face_id IN ({placeholders})',
+            (pid, *face_ids),
+        )
+        moved = [
+            {
+                'id': int(row['id']), 'person_id': int(row['person_id']),
+                'reviewed': int(row['reviewed'] or 0), 'ignored': int(row['ignored'] or 0),
+            }
+            for row in before
+        ]
+        c.execute(
+            'INSERT INTO edits(created_at,target,before_json,after_json) VALUES (?,?,?,?)',
+            (
+                now(), f'person:{pid}:split-batch',
+                json.dumps({'faces': moved}, ensure_ascii=False),
+                json.dumps({'person_id': created, 'face_ids': face_ids}, ensure_ascii=False),
+            ),
+        )
+        undo = {'source_person_id': pid, 'created_person_id': created, 'faces': moved}
+        receipt = finish_operation(
+            c, operation_id,
+            {'person_id': created, 'source_person_id': pid, 'moved_faces': len(moved)},
+            status='committed', state_committed=True, undo=undo,
+        )
+    invalidate_face_index()
+    return receipt
+
 
 class IgnoreRequest(BaseModel):
     ignored:bool=True
