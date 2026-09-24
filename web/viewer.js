@@ -66,7 +66,7 @@ const FACE_STYLE_PRESETS={
     fontFamily:'kai',
     textColor:'#5a2f28',
     backgroundColor:'#ffffff',
-    backgroundOpacity:.76,
+    backgroundOpacity:.92,
     radius:0,
     paddingX:0,
     paddingY:0,

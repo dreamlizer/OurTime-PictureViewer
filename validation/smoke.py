@@ -210,12 +210,12 @@ def main():
         "width:max-content;",
         "height:max-content;",
         "border-image-slice:var(--face-plate-slice);",
-        "--face-plate-corner:1.55em;",
-        "--face-plate-edge:0.42em;",
-        "--face-plate-pad-block:0.42em;",
-        "--face-plate-pad-inline:0.16em;",
-        "--face-plate-pad-block:0.16em;",
-        "--face-plate-pad-inline:0.42em;",
+        "--face-plate-corner:calc(8px * var(--face-scale, 1));",
+        "--face-plate-edge:calc(5px * var(--face-scale, 1));",
+        "--face-plate-pad-block:calc(9px * var(--face-scale, 1));",
+        "--face-plate-pad-inline:calc(6px * var(--face-scale, 1));",
+        "--face-plate-pad-block:calc(6px * var(--face-scale, 1));",
+        "--face-plate-pad-inline:calc(10px * var(--face-scale, 1));",
         "--face-plate-slice:210 330 fill;",
         "--face-plate-slice:170 310 fill;",
         "--face-plate-slice:330 210 fill;",
@@ -225,6 +225,13 @@ def main():
         "font-size:calc(var(--face-font-size) * var(--face-scale, 1));",
     )):
         fail("人名底牌没有随文字伸缩，或字号没有锁定到同一 --face-scale")
+    if not all(value in viewer_overrides for value in (
+        "linear-gradient(155deg,rgba(255,253,245,.98)",
+        "linear-gradient(165deg,rgba(151,116,84,.98)",
+        "border-image-source:var(--face-label-image);",
+        "#detail-dialog[data-face-theme=\"tea\"] .face-name:not(.unnamed)::after",
+    )):
+        fail("素笺或茶棕缺少稳定可见的 CSS 底牌、细框和角花层")
     if "width:calc(38px * var(--face-scale, 1));" in viewer_overrides or "height:calc(56px * var(--face-scale, 1));" in viewer_overrides:
         fail("素笺或茶棕底牌仍使用固定三档宽高")
     if (
