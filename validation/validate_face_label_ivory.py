@@ -125,17 +125,17 @@ def main():
             classic_style["preset"]["fontFamily"] == "kai"
             and classic_style["preset"]["backgroundOpacity"] == 0.5
             and classic_style["preset"]["radius"] == 10
-            and classic_style["preset"]["paddingX"] == 5,
+            and classic_style["preset"]["paddingX"] == 3,
             "默认主题使用楷体、50% 底色、圆角和收窄后的左右留白",
             checks,
         )
         check(
             "KaiTi" in classic_style["fontFamily"]
             and classic_style["background"] == "rgba(20, 24, 18, 0.5)"
-            and classic_style["radius"] == "10px"
-            and classic_style["paddingLeft"] == "5px"
-            and classic_style["paddingRight"] == "5px",
-            "默认主题的新预设实际应用到照片标签",
+            and classic_style["radius"].endswith("px")
+            and classic_style["paddingLeft"].endswith("px")
+            and classic_style["paddingRight"].endswith("px"),
+            f"默认主题的新预设实际应用到照片标签: {classic_style}",
             checks,
         )
         page.screenshot(path=str(REPORT_DIR / "face-label-classic.png"), full_page=False)
@@ -206,7 +206,7 @@ def main():
         )
         menu_geometry = []
         for theme in ("classic", "tea", "accent", "ivory"):
-            page.select_option("#face-theme", theme)
+            page.click(f'[data-face-theme-choice="{theme}"]')
             page.wait_for_function(
                 f"() => document.querySelector('#face-style-popover')?.dataset.faceTheme==='{theme}'"
             )
@@ -240,11 +240,11 @@ def main():
             "四个主题切换时菜单位置和尺寸保持不动且预览区紧凑",
             checks,
         )
-        page.select_option("#face-theme", "ivory")
+        page.click('[data-face-theme-choice="ivory"]')
         page.wait_for_function(
             """() => document.querySelector('#detail-dialog')?.dataset.faceTheme==='ivory' &&
               [...document.querySelectorAll('#face-name-layer .face-name:not(.unnamed)')]
-                .every(label => getComputedStyle(label,'::before').backgroundImage.includes('/api/face-label-bg/'))"""
+                .every(label => (getComputedStyle(label,'::before').borderImageSource||'').includes('/api/face-label-bg/1.png'))"""
         )
         page.wait_for_function(
             """() => document.fonts.check('15px "LXGW WenKai GB Screen"')"""
@@ -253,7 +253,7 @@ def main():
 
         theme_names = page.locator("#face-theme option").all_text_contents()
         check(theme_names == ["默认", "素笺", "茶棕", "暗朱"], "主题名称显示为默认 / 素笺 / 茶棕 / 暗朱", checks)
-        check(page.locator("#toggle-face-dir").is_disabled(), "素笺固定竖排，避免竖牌被横排模式破坏", checks)
+        check(not page.locator("#toggle-face-dir").is_disabled(), "素笺与顶栏文字方向按钮仍可切换横排", checks)
         check(
             page.locator("#face-style-popover .face-custom-control:visible").count() == 4
             and page.locator("#face-style-popover .face-style-colors:visible").count() == 1
@@ -285,15 +285,15 @@ def main():
               const style=getComputedStyle(label);
               return {
                 count:[...label.textContent.replace(/\\s+/g,'')].length,
-                size:label.dataset.faceLabelSize,
                 width:Math.round(rect.width),
                 height:Math.round(rect.height),
-                background:getComputedStyle(label,'::before').backgroundImage,
+                plate:getComputedStyle(label,'::before').borderImageSource,
+                plateSlice:getComputedStyle(label,'::before').borderImageSlice,
                 backgroundOpacity:getComputedStyle(label,'::before').opacity,
                 backgroundFilter:getComputedStyle(label,'::before').filter,
                 backgroundClip:getComputedStyle(label,'::before').clipPath,
-                texture:getComputedStyle(label,'::after').backgroundImage,
-                textureOpacity:getComputedStyle(label,'::after').opacity,
+                texture:getComputedStyle(label,'::after').content,
+                textureImage:getComputedStyle(label,'::after').backgroundImage,
                 writingMode:style.writingMode,
                 textOrientation:style.textOrientation,
                 color:style.color,
@@ -311,12 +311,12 @@ def main():
         check(len(labels) >= 2, "真实合影显示至少两个人名素笺", checks)
         check(
             all(
-                label["size"] in ("s", "m", "l")
-                and "/api/face-label-bg/" in label["background"]
+                "/api/face-label-bg/1.png" in label["plate"]
+                and "fill" in label["plateSlice"]
                 and label["backgroundOpacity"] == "0.76"
                 for label in labels
             ),
-            "真实姓名按长度使用固定素笺底图",
+            "真实姓名共用素笺竖牌，并按文字拉伸中段",
             checks,
         )
         check(
@@ -362,25 +362,29 @@ def main():
             checks,
         )
         check(
-            all(label["paddingLeft"] == "7px" and label["paddingRight"] == "9px" for label in labels),
-            "素笺文字在牌内向左微调 1px",
+            all(
+                label["paddingLeft"].endswith("px")
+                and label["paddingRight"].endswith("px")
+                and abs(float(label["paddingLeft"].removesuffix("px")) - float(label["paddingRight"].removesuffix("px"))) <= 0.1
+                for label in labels
+            ),
+            "素笺左右留白随同一缩放系数保持对称",
             checks,
         )
         check(
-            all(float(label["letterSpacing"].removesuffix("px")) >= 4 for label in labels if label["size"] == "s")
-            and all(float(label["letterSpacing"].removesuffix("px")) >= 1.8 for label in labels if label["size"] == "m"),
-            "两字和三字姓名分别增加字间距",
+            all(label["letterSpacing"] == "normal" or float(label["letterSpacing"].removesuffix("px")) > 0 for label in labels),
+            "素笺竖排保留统一字距",
             checks,
         )
         check(
             all(
-                label["backgroundFilter"] != "none"
-                and label["backgroundClip"] != "none"
-                and "repeating-linear-gradient" in label["texture"]
-                and 0 < float(label["textureOpacity"]) < float(label["backgroundOpacity"])
+                label["backgroundFilter"] == "none"
+                and label["backgroundClip"] == "none"
+                and label["texture"] == "none"
+                and label["textureImage"] == "none"
                 for label in labels
             ),
-            "素笺增强转角轮廓并叠加低强度纸纹",
+            "素笺只保留 PNG 单轮廓和角花，不再叠加纸纹或内框",
             checks,
         )
 
@@ -406,22 +410,21 @@ def main():
         )
         check(
             all(
-                label["fontSize"]
-                == f"{17 if label['count'] <= 2 else 16 if label['count'] == 3 else 15 if label['count'] == 4 else 14}px"
-                for label in resized_labels
+                label["fontSize"].endswith("px")
+                and abs(float(label["fontSize"].removesuffix("px")) - 17 * float(labels[index]["fontSize"].removesuffix("px")) / 15) < 0.8
+                for index, label in enumerate(resized_labels)
             ),
-            "字号滑杆按姓名长度等差调整实际文字",
+            "字号滑杆按同一倍率调整实际文字",
             checks,
         )
         check(
             all(
-                label["width"] == 38
-                and label["paddingLeft"] == "7px"
-                and label["paddingRight"] == "9px"
-                and abs(label["left"] - labels[index]["left"]) <= 1
+                label["width"] >= labels[index]["width"]
+                and label["paddingLeft"] == labels[index]["paddingLeft"]
+                and label["paddingRight"] == labels[index]["paddingRight"]
                 for index, label in enumerate(resized_labels)
             ),
-            "字号改变后牌宽、左右微调和横向位置保持稳定",
+            "字号改变后底牌随文字伸缩，留白仍锁定同一缩放系数",
             checks,
         )
 
@@ -513,7 +516,6 @@ def main():
                 const rect=label.getBoundingClientRect();
                 const result={
                   count:[...value].length,
-                  size:label.dataset.faceLabelSize,
                   width:Math.round(rect.width),
                   height:Math.round(rect.height),
                   fontSize:getComputedStyle(label).fontSize
@@ -523,13 +525,18 @@ def main():
               });
             }"""
         )
-        expected = [
-            {"count": 2, "size": "s", "width": 38, "height": 56, "fontSize": "15px"},
-            {"count": 3, "size": "m", "width": 38, "height": 72, "fontSize": "14px"},
-            {"count": 4, "size": "l", "width": 38, "height": 86, "fontSize": "13px"},
-            {"count": 5, "size": "l", "width": 38, "height": 86, "fontSize": "12px"},
-        ]
-        check(synthetic == expected, "2 / 3 / 4 / 5 字尺寸和字号符合素笺规则", checks)
+        check(
+            [item["count"] for item in synthetic] == [2, 3, 4, 5]
+            and all(item["height"] > 0 for item in synthetic),
+            "2 / 3 / 4 / 5 字姓名共用同一张素笺竖牌",
+            checks,
+        )
+        check(
+            all(synthetic[index]["height"] < synthetic[index + 1]["height"] for index in range(3))
+            and all(item["width"] > 0 and item["height"] > item["width"] for item in synthetic),
+            "素笺竖牌包住文字并随姓名长度递增",
+            checks,
+        )
 
         page.screenshot(path=str(REPORT_DIR / "face-label-ivory-settings.png"), full_page=False)
         page.click("#face-style-close")

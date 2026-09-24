@@ -76,7 +76,7 @@ class AnnotatedExportFixTests(unittest.TestCase):
                 "mat_height": 610,
             },
             "dialog_attrs": {"data-face-theme": "ivory"},
-            "dialog_style": '--face-label-s-image:url("/api/face-label-bg/1.png")',
+            "dialog_style": '--face-label-image:url("/api/face-label-bg/1.png")',
             "mat_html": """
               <figure id="photo-mat" style="position:relative;width:800px;height:610px">
                 <img id="detail-img" style="width:800px;height:500px">

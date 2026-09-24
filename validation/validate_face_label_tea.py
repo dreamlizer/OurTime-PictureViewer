@@ -22,7 +22,7 @@ SOURCE_DIR = ROOT / "data" / "人名标签"
 
 def image_evidence():
     evidence = []
-    for filename in ("4.png", "5.png", "6.png"):
+    for filename in ("4.png",):
         with Image.open(SOURCE_DIR / filename).convert("RGBA") as image:
             alpha = image.getchannel("A")
             bbox = alpha.getbbox()
@@ -45,16 +45,11 @@ def main():
 
     images = image_evidence()
     check(
-        [item["effective_height"] for item in images] == [1681, 1887, 2028],
-        "茶棕 4 / 5 / 6.png 的非透明牌体高度由短到长",
+        images[0]["effective_height"] == 1681 and images[0]["alpha_extrema"] == [0, 255],
+        "茶棕竖牌 4.png 保留完整透明通道",
         checks,
     )
-    check(
-        all(item["alpha_extrema"] == [0, 255] for item in images),
-        "茶棕三张底牌都保留完整透明通道",
-        checks,
-    )
-    for filename in ("4.png", "5.png", "6.png"):
+    for filename in ("4.png",):
         status, content_type, byte_count = request_status(f"/api/face-label-bg/{filename}")
         check(
             status == 200 and content_type == "image/png" and byte_count > 0,
@@ -72,7 +67,7 @@ def main():
         page.wait_for_function(
             """() => document.querySelector('#detail-dialog')?.dataset.faceTheme==='tea' &&
               [...document.querySelectorAll('#face-name-layer .face-name:not(.unnamed)')]
-                .every(label => getComputedStyle(label,'::before').backgroundImage.includes('/api/face-label-bg/'))"""
+                .every(label => (getComputedStyle(label,'::before').borderImageSource||'').includes('/api/face-label-bg/4.png'))"""
         )
         page.wait_for_function("""() => document.fonts.check('16px "Ma Shan Zheng"')""")
         page.wait_for_timeout(250)
@@ -80,7 +75,7 @@ def main():
         if page.locator("#face-style-popover").is_hidden():
             page.click("#face-style-button")
         check(page.locator("#face-theme").input_value() == "tea", "第三主题显示并选中茶棕", checks)
-        check(page.locator("#toggle-face-dir").is_disabled(), "茶棕固定竖排，避免底牌被横排破坏", checks)
+        check(not page.locator("#toggle-face-dir").is_disabled(), "茶棕与顶栏文字方向按钮仍可切换横排", checks)
         check(
             not page.locator("#face-font-size").is_disabled()
             and not page.locator("#face-bg-opacity").is_disabled()
@@ -120,11 +115,11 @@ def main():
               const after=getComputedStyle(label,'::after');
               return {
                 count:[...label.textContent.replace(/\\s+/g,'')].length,
-                size:label.dataset.faceLabelSize,
                 width:Math.round(rect.width),
                 height:Math.round(rect.height),
                 left:rect.left,
-                background:plate.backgroundImage,
+                plate:plate.borderImageSource,
+                plateSlice:plate.borderImageSlice,
                 backgroundOpacity:plate.opacity,
                 backgroundFilter:plate.filter,
                 backgroundClip:plate.clipPath,
@@ -142,15 +137,18 @@ def main():
             })"""
         )
         check(len(labels) >= 2, "真实合影显示至少两个人名茶棕标签", checks)
-        expected_file = {"s": "4.png", "m": "5.png", "l": "6.png"}
         check(
-            all(expected_file[label["size"]] in label["background"] for label in labels),
-            "茶棕按 S / M / L 固定使用 4 / 5 / 6.png",
+            all(
+                "/api/face-label-bg/4.png" in label["plate"]
+                and "fill" in label["plateSlice"]
+                for label in labels
+            ),
+            "茶棕姓名共用竖牌，并按文字拉伸中段",
             checks,
         )
         check(
-            all(label["backgroundOpacity"] == "0.85" for label in labels),
-            "茶棕默认底牌透明度为 85%",
+            all(label["backgroundOpacity"] == "0.66" for label in labels),
+            "茶棕默认底牌透明度降为 66%",
             checks,
         )
         check(
@@ -172,18 +170,22 @@ def main():
                 and label["afterContent"] == "none"
                 for label in labels
             ),
-            "茶棕完整保留 PNG 自带双线与纹理，不叠加 CSS 装饰",
+            "茶棕完整保留 PNG 单轮廓与复古角花，不叠加第二层 CSS 内框",
             checks,
         )
         check(
-            all(label["paddingLeft"] == "7px" and label["paddingRight"] == "9px" for label in labels),
-            "茶棕文字在牌内保持向左 1px 的光学居中",
+            all(
+                label["paddingLeft"].endswith("px")
+                and label["paddingRight"].endswith("px")
+                and abs(float(label["paddingLeft"].removesuffix("px")) - float(label["paddingRight"].removesuffix("px"))) <= 0.1
+                for label in labels
+            ),
+            "茶棕左右留白随同一缩放系数保持对称",
             checks,
         )
         check(
-            all(float(label["letterSpacing"].removesuffix("px")) >= 4 for label in labels if label["size"] == "s")
-            and all(float(label["letterSpacing"].removesuffix("px")) >= 1.8 for label in labels if label["size"] == "m"),
-            "茶棕沿用两字和三字姓名的成熟字距",
+            all(label["letterSpacing"] == "normal" or float(label["letterSpacing"].removesuffix("px")) > 0 for label in labels),
+            "茶棕竖排保留统一字距",
             checks,
         )
 
@@ -200,31 +202,26 @@ def main():
                 const rect=label.getBoundingClientRect();
                 const result={
                   count:[...value].length,
-                  size:label.dataset.faceLabelSize,
                   width:Math.round(rect.width),
                   height:Math.round(rect.height),
                   fontSize:getComputedStyle(label).fontSize,
-                  background:getComputedStyle(label,'::before').backgroundImage
+                  plate:(getComputedStyle(label,'::before').borderImageSource||'')
                 };
                 label.remove();
                 return result;
               });
             }"""
         )
-        expected = [
-            {"count": 2, "size": "s", "width": 38, "height": 56, "fontSize": "16px", "file": "4.png"},
-            {"count": 3, "size": "m", "width": 38, "height": 72, "fontSize": "15px", "file": "5.png"},
-            {"count": 4, "size": "l", "width": 38, "height": 86, "fontSize": "14px", "file": "6.png"},
-            {"count": 5, "size": "l", "width": 38, "height": 86, "fontSize": "13px", "file": "6.png"},
-        ]
         check(
-            all(
-                {key: item[key] for key in ("count", "size", "width", "height", "fontSize")}
-                == {key: wanted[key] for key in ("count", "size", "width", "height", "fontSize")}
-                and wanted["file"] in item["background"]
-                for item, wanted in zip(synthetic, expected)
-            ),
-            "茶棕 2 / 3 / 4 / 5 字尺寸、字号和底牌映射正确",
+            [item["count"] for item in synthetic] == [2, 3, 4, 5]
+            and all("/api/face-label-bg/4.png" in item["plate"] for item in synthetic),
+            "茶棕 2 / 3 / 4 / 5 字姓名共用同一张竖牌",
+            checks,
+        )
+        check(
+            all(synthetic[index]["height"] < synthetic[index + 1]["height"] for index in range(3))
+            and all(item["width"] > 0 and item["height"] > item["width"] for item in synthetic),
+            "茶棕竖牌包住文字并随姓名长度递增",
             checks,
         )
 
@@ -280,13 +277,8 @@ def main():
             }))"""
         )
         check(
-            all(
-                item["width"] == 38
-                and item["fontSize"] == f"{17 if item['count'] <= 2 else 16 if item['count'] == 3 else 15 if item['count'] == 4 else 14}px"
-                and item["opacity"] == "0.6"
-                for item in adjusted
-            ),
-            "茶棕调节字号和透明度时牌宽与居中基准保持稳定",
+            all(item["width"] > 0 and item["opacity"] == "0.6" for item in adjusted),
+            "茶棕调节字号和透明度时底牌继续包住文字并实时变淡",
             checks,
         )
 
@@ -319,7 +311,7 @@ def main():
         page.wait_for_function("typeof viewer === 'object'")
         check(
             page.evaluate(
-                "() => viewer.faceStyle.theme==='tea' && viewer.faceStyle.backgroundOpacity===0.85 && viewer.faceStyle.fontFamily==='ma-shan-zheng'"
+                "() => viewer.faceStyle.theme==='tea' && viewer.faceStyle.backgroundOpacity===0.66 && viewer.faceStyle.fontFamily==='ma-shan-zheng'"
             ),
             "茶棕选择、默认字体和透明度在刷新后继续保留",
             checks,
@@ -374,7 +366,7 @@ def main():
         "asset_id": asset_id,
         "real_name_lengths": sorted(name_lengths),
         "image_evidence": images,
-        "mapping": {"s": "4.png", "m": "5.png", "l": "6.png"},
+        "plate": "4.png",
         "labels": labels,
         "synthetic_sizes": synthetic,
         "checks": checks,

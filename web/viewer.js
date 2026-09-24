@@ -15,17 +15,9 @@ let signatureStyleIndex=0;
 let signaturePaletteSrc='';
 let signatureLayouts=null;
 const signatureInfo={sections:[],text:'',openTimer:null,closeTimer:null,copyTimer:null};
-const FACE_LABEL_IMAGES={
-  ivory:{
-    s:'/api/face-label-bg/1.png',
-    m:'/api/face-label-bg/2.png',
-    l:'/api/face-label-bg/3.png'
-  },
-  tea:{
-    s:'/api/face-label-bg/4.png',
-    m:'/api/face-label-bg/5.png',
-    l:'/api/face-label-bg/6.png'
-  }
+const FACE_LABEL_PLATES={
+  ivory:'/api/face-label-bg/1.png',
+  tea:'/api/face-label-bg/4.png'
 };
 const faceLabelThemeReadiness=new Map();
 const TEA_FACE_FONT_OPTIONS=[
@@ -66,7 +58,7 @@ const FACE_STYLE_PRESETS={
     fontFamily:'kai',
     textColor:'#5a2f28',
     backgroundColor:'#ffffff',
-    backgroundOpacity:.92,
+    backgroundOpacity:.76,
     radius:0,
     paddingX:0,
     paddingY:0,
@@ -78,7 +70,7 @@ const FACE_STYLE_PRESETS={
     fontFamily:'ma-shan-zheng',
     textColor:'#f7ead8',
     backgroundColor:'#7e624b',
-    backgroundOpacity:.85,
+    backgroundOpacity:.66,
     radius:0,
     paddingX:0,
     paddingY:0,
@@ -772,12 +764,11 @@ function confirmLocalFont(){
 function faceLabelProfile(name){
   const normalized=String(name||'').replace(/\s+/g,'');
   const count=[...normalized].length;
-  return {count,size:count<=2?'s':count===3?'m':'l',long:count>=5};
+  return {count,long:count>=5};
 }
 function applyFaceLabelProfile(element,name){
   if(!element)return;
   const profile=faceLabelProfile(name);
-  element.dataset.faceLabelSize=profile.size;
   element.classList.toggle('long-name',profile.long);
 }
 function faceLabelPhotoScale(imageHeight){
@@ -833,19 +824,19 @@ function faceLabelVerticalFor(text){
   return true;
 }
 function faceLabelThemeReady(theme){
-  if(!FACE_LABEL_IMAGES[theme])return Promise.resolve(true);
+  if(!FACE_LABEL_PLATES[theme])return Promise.resolve(true);
   if(faceLabelThemeReadiness.has(theme))return faceLabelThemeReadiness.get(theme);
-  const promise=Promise.all(Object.values(FACE_LABEL_IMAGES[theme]).map(src=>new Promise(resolve=>{
+  const promise=new Promise(resolve=>{
     const image=new Image();
     image.onload=()=>resolve(true);
     image.onerror=()=>resolve(false);
-    image.src=src;
-  }))).then(results=>results.every(Boolean));
+    image.src=FACE_LABEL_PLATES[theme];
+  });
   faceLabelThemeReadiness.set(theme,promise);
   return promise;
 }
 function ensureFaceLabelThemeAvailable(theme){
-  if(!FACE_LABEL_IMAGES[theme])return;
+  if(!FACE_LABEL_PLATES[theme])return;
   faceLabelThemeReady(theme).then(ready=>{
     if(ready||viewer.faceStyle?.theme!==theme)return;
     console.warn(`人名标签主题 ${theme} 的底图缺失，已恢复默认样式`);
@@ -881,10 +872,8 @@ function applyFaceStyle(){
   root.style.setProperty('--face-padding-x',`${s.paddingX}px`);
   root.style.setProperty('--face-padding-y',`${s.paddingY}px`);
   root.style.setProperty('--face-shadow',s.shadow?'0 1px 10px rgba(0,0,0,.65)':'none');
-  const themeImages=FACE_LABEL_IMAGES[theme];
-  if(themeImages){
-    Object.entries(themeImages).forEach(([size,url])=>root.style.setProperty(`--face-label-${size}-image`,`url("${url}")`));
-  }
+  const themePlate=FACE_LABEL_PLATES[theme];
+  if(themePlate)root.style.setProperty('--face-label-image',`url("${themePlate}")`);
 
   const themeSelect=$('#face-theme'),fontSize=$('#face-font-size'),family=$('#face-font-family'),position=$('#face-label-position'),marker=$('#face-unnamed-marker'),text=$('#face-text-color'),bg=$('#face-bg-color'),op=$('#face-bg-opacity'),radius=$('#face-radius'),shadow=$('#face-shadow');
   if(themeSelect)themeSelect.value=theme;
@@ -892,8 +881,8 @@ function applyFaceStyle(){
     button.setAttribute('aria-pressed',String(button.dataset.faceThemeChoice===theme));
   });
   if(fontSize){
-    fontSize.min=themeImages?'12':'10';
-    fontSize.max=themeImages?'18':'22';
+    fontSize.min=themePlate?'12':'10';
+    fontSize.max=themePlate?'18':'22';
     fontSize.value=String(s.fontSize);
   }
   syncFaceFontSelect(family,s,theme);
@@ -910,7 +899,7 @@ function applyFaceStyle(){
   if(op)op.value=String(Math.round(s.backgroundOpacity*100));
   if(radius)radius.value=String(s.radius);
   if(shadow)shadow.checked=!!s.shadow;
-  const imageTheme=Boolean(themeImages);
+  const imageTheme=Boolean(themePlate);
   const lockedControls=new Set([text,bg,radius,shadow]);
   [fontSize,family,text,bg,op,radius,shadow].forEach(control=>{
     if(!control)return;
@@ -943,12 +932,12 @@ function applyFaceStyle(){
     const currentFaces=typeof state!=='undefined'?namedFaces(state.detail):[];
     preview.textContent=currentFaces[0]?.name||'示例姓名';
     applyFaceLabelProfile(preview,preview.textContent);
-    preview.style.fontSize=themeImages?'':`${s.fontSize}px`;
-    preview.style.fontFamily=themeImages?'':faceFontStack(s.fontFamily,s.customFontFamily);
-    preview.style.color=themeImages?'':s.textColor;
-    preview.style.backgroundColor=themeImages?'':hexToRgba(s.backgroundColor,s.backgroundOpacity);
-    preview.style.borderRadius=themeImages?'':s.radius>=999?'999px':`${s.radius}px`;
-    preview.style.textShadow=themeImages?'':s.shadow?'0 1px 10px rgba(0,0,0,.65)':'none';
+    preview.style.fontSize=themePlate?'':`${s.fontSize}px`;
+    preview.style.fontFamily=themePlate?'':faceFontStack(s.fontFamily,s.customFontFamily);
+    preview.style.color=themePlate?'':s.textColor;
+    preview.style.backgroundColor=themePlate?'':hexToRgba(s.backgroundColor,s.backgroundOpacity);
+    preview.style.borderRadius=themePlate?'':s.radius>=999?'999px':`${s.radius}px`;
+    preview.style.textShadow=themePlate?'':s.shadow?'0 1px 10px rgba(0,0,0,.65)':'none';
     const previewVertical=faceLabelVerticalFor(preview.textContent);
     preview.style.writingMode=previewVertical?'vertical-rl':'horizontal-tb';
     preview.style.textOrientation=previewVertical?'upright':'mixed';

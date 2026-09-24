@@ -226,12 +226,19 @@ def main():
     )):
         fail("人名底牌没有随文字伸缩，或字号没有锁定到同一 --face-scale")
     if not all(value in viewer_overrides for value in (
-        "linear-gradient(155deg,rgba(255,253,245,.98)",
-        "linear-gradient(165deg,rgba(151,116,84,.98)",
+        "background:rgba(250,244,229,.72)",
+        "background:rgba(72,48,35,.58)",
         "border-image-source:var(--face-label-image);",
-        "#detail-dialog[data-face-theme=\"tea\"] .face-name:not(.unnamed)::after",
+        "PNG owns the single outline and decorative corners",
     )):
-        fail("素笺或茶棕缺少稳定可见的 CSS 底牌、细框和角花层")
+        fail("素笺或茶棕缺少单线 PNG 角花和轻量可读底牌")
+    if (
+        '#detail-dialog[data-face-theme="ivory"] .face-name:not(.unnamed)::after'
+        in viewer_overrides
+        or '#detail-dialog[data-face-theme="tea"] .face-name:not(.unnamed)::after'
+        in viewer_overrides
+    ):
+        fail("素笺或茶棕又叠出了第二层内框")
     if "width:calc(38px * var(--face-scale, 1));" in viewer_overrides or "height:calc(56px * var(--face-scale, 1));" in viewer_overrides:
         fail("素笺或茶棕底牌仍使用固定三档宽高")
     if (
@@ -355,15 +362,18 @@ def main():
     ok("地点总览与单张位置页共用矩形框选、完整选集预览和安全提交")
     if not all(path in viewer for path in (
         "/api/face-label-bg/1.png",
+        "/api/face-label-bg/4.png",
+    )):
+        fail("素笺或茶棕主题没有固定到各自的一张竖牌")
+    if any(path in viewer for path in (
         "/api/face-label-bg/2.png",
         "/api/face-label-bg/3.png",
-        "/api/face-label-bg/4.png",
         "/api/face-label-bg/5.png",
         "/api/face-label-bg/6.png",
     )):
-        fail("素笺或茶棕主题没有固定映射对应 PNG")
-    if "faceLabelProfile" not in viewer or "[...normalized].length" not in viewer:
-        fail("素笺主题缺少按 Unicode 字符数选择 S/M/L 的规则")
+        fail("素笺或茶棕仍按姓名长度准备多张底板")
+    if "FACE_LABEL_PLATES" not in viewer or "dataset.faceLabelSize" in viewer:
+        fail("素笺或茶棕仍保留按姓名长度分档的底板选择")
     if not all(value in viewer for value in (
         "fontFamily:'ma-shan-zheng'",
         "TEA_FACE_FONT_OPTIONS",
