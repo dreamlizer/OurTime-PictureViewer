@@ -1,7 +1,7 @@
 /* Shared named-label appearance. Live buttons and the preview span use the same rules. */
 #detail-dialog .face-name:not(.unnamed),
 #detail-dialog #face-style-preview-label,
-#detail-dialog #local-font-preview-label{
+#local-font-dialog #local-font-preview-label{
   --face-scale:1;
   position:relative;
   display:inline-grid;
@@ -30,7 +30,7 @@
 #detail-dialog .face-name:not(.unnamed){position:absolute}
 #detail-dialog .face-name.is-horizontal:not(.unnamed),
 #detail-dialog #face-style-preview-label.is-horizontal,
-#detail-dialog #local-font-preview-label.is-horizontal{
+#local-font-dialog #local-font-preview-label.is-horizontal{
   writing-mode:horizontal-tb;
   text-orientation:mixed;
   letter-spacing:.04em;
@@ -176,6 +176,18 @@
 }
 #detail-dialog[data-face-theme-effective="classic"] .face-name:not(.unnamed)::before,
 #detail-dialog[data-face-theme-effective="classic"] #face-style-preview-label::before{content:none}
+#detail-dialog[data-face-theme-effective="classic"][data-face-theme="ivory"] #local-font-preview-label,
+#detail-dialog[data-face-theme-effective="classic"][data-face-theme="tea"] #local-font-preview-label,
+#local-font-dialog[data-face-theme-effective="classic"] #local-font-preview-label{
+  background:var(--face-bg-rgba);
+  color:var(--face-text-color);
+  font-family:var(--face-font-family);
+  border:1px solid transparent;
+  border-radius:calc(var(--face-radius) * var(--face-scale));
+  box-shadow:0 1px 2px rgba(0,0,0,.08);
+  padding:calc(var(--face-padding-y) * var(--face-scale)) calc(var(--face-padding-x) * var(--face-scale));
+}
+#local-font-dialog[data-face-theme-effective="classic"] #local-font-preview-label::before{content:none}
 #detail-dialog .face-name-tip{
   position:absolute;
   z-index:8;

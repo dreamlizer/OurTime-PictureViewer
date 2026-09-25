@@ -15,7 +15,7 @@ let signatureStyleIndex=0;
 let signaturePaletteSrc='';
 let signatureLayouts=null;
 const signatureInfo={sections:[],text:'',openTimer:null,closeTimer:null,copyTimer:null};
-const FACE_LABEL_PLATES={
+const FACE_LABEL_PLATES=faceLabels.PLATES||{
   ivory:{vertical:'/api/face-label-bg/1.png',horizontal:'/api/face-label-bg/7.png'},
   tea:{vertical:'/api/face-label-bg/4.png',horizontal:'/api/face-label-bg/8.png'}
 };
@@ -41,7 +41,7 @@ const GENERAL_FACE_FONT_OPTIONS=[
   {value:'fangsong',label:'仿宋'},
   {value:'other',label:'其他…'}
 ];
-const FACE_STYLE_PRESETS={
+const FACE_STYLE_PRESETS=faceLabels.PRESETS||{
   classic:{
     theme:'classic',
     fontSize:13,
@@ -149,7 +149,7 @@ const viewer={
   faceDirMode:initialFaceDirMode(),
   faceAlias:Boolean(normalizedViewerPrefs.faceAlias),
   faceVertical:Boolean(normalizedViewerPrefs.faceVertical),
-  faceLabelPosition:FACE_LABEL_POSITIONS.has(storedViewerPrefs.faceLabelPosition)?storedViewerPrefs.faceLabelPosition:'auto',
+  faceLabelPosition:normalizedViewerPrefs.faceLabelPosition||'auto',
   faceUnnamedMarker:normalizedViewerPrefs.faceUnnamedMarker||'plus',
   faceStyle:initialFaceStyle(),
   faceThemeProbe:0,
@@ -167,7 +167,7 @@ function saveViewerPrefs(){
       faceLabelPosition:viewer.faceLabelPosition,
       faceUnnamedMarker:viewer.faceUnnamedMarker,
       faceStyle:viewer.faceStyle,
-      slideDelay:Number($('#slide-delay')?.value||storedViewerPrefs.slideDelay||5)
+      slideDelay:Number($('#slide-delay')?.value||normalizedViewerPrefs.slideDelay||5)
     };
     const normalized=migratedViewerPrefs(current);
     localStorage.setItem(VIEWER_PREFS_KEY,JSON.stringify({
@@ -252,7 +252,7 @@ function buildViewerToolbar(){
 
   const delay=$('#slide-delay');
   if(delay){
-    const saved=Number(storedViewerPrefs.slideDelay);
+    const saved=Number(normalizedViewerPrefs.slideDelay);
     if([3,5,10].includes(saved))delay.value=String(saved);
     delay.title='幻灯片切换间隔';
   }
@@ -345,19 +345,28 @@ function buildFaceStylePopover(){
   buildLocalFontDialog();
   applyFaceStyle();
 }
-function faceHasUsableName(face){
-  const name=String(face?.name||'').trim();
-  const alias=String(face?.alias||'').trim();
-  return !face?.ignored&&(Boolean(alias)||(Boolean(name)&&!['待核对','命名','路人'].includes(name)));
+function faceLabelIdentity(face){
+  const stateInfo=faceLabelState(face);
+  const personId=Number(face?.person_id);
+  return {
+    state:stateInfo,
+    personKey:Number.isFinite(personId)?`person:${personId}`:`face:${Number(face?.id)||stateInfo.faceId||'unknown'}`
+  };
 }
-function photoPeopleSummary(){
+function faceHasUsableName(face){
+  return faceLabelState(face).isNamed;
+}
+function photoPeopleSummary(photo=state.detail){
   const unique=new Map();
-  for(const face of state.detail?.faces||[])if(!unique.has(Number(face.person_id)))unique.set(Number(face.person_id),face);
+  for(const face of photo?.faces||[]){
+    const item=faceLabelIdentity(face);
+    if(!unique.has(item.personKey))unique.set(item.personKey,item.state);
+  }
   const values=[...unique.values()];
   return {
-    named:values.filter(faceHasUsableName).length,
-    pending:values.filter(face=>!face.ignored&&!faceHasUsableName(face)).length,
-    passerby:values.filter(face=>Boolean(face.ignored)).length
+    named:values.filter(item=>item.kind==='named').length,
+    pending:values.filter(item=>item.kind==='pending').length,
+    passerby:values.filter(item=>item.kind==='passerby').length
   };
 }
 function buildPhotoPeoplePopover(){
@@ -418,8 +427,7 @@ function setCurrentPeopleIgnored(personIds,ignored){
   if(state.detail){renderFaceNames(state.detail);if(typeof renderOpenPhotoPeople==='function')renderOpenPhotoPeople();}
 }
 function faceKind(face){
-  if(Boolean(face?.ignored))return 'passerby';
-  return faceHasUsableName(face)?'named':'pending';
+  return faceLabelState(face).kind;
 }
 function buildPhotoPeopleHud(){
   if($('#photo-people-hud'))return;
@@ -668,8 +676,8 @@ function buildLocalFontDialog(){
   $('#local-font-confirm').addEventListener('click',confirmLocalFont);
 }
 function localFontPreviewText(){
-  const currentFaces=typeof state!=='undefined'?namedFaces(state.detail):[];
-  return currentFaces[0]?.name||'示例姓名';
+  const sample=typeof state!=='undefined'?namedFaces(state.detail).map(face=>faceLabelState(face)).find(item=>item.displayText&&item.displayText!=='+'):null;
+  return sample?.displayText||'示例姓名';
 }
 function updateLocalFontPreview(){
   const family=localFontPicker.selected;
@@ -867,22 +875,41 @@ function restoreFaceAppearanceDefaults(){
   syncFaceLabelResetButton();
   if(viewer.faceNames!==false&&state.detail)renderFaceNames(state.detail);
 }
+function faceStyleForTheme(theme){
+  const preset=FACE_STYLE_PRESETS[theme]||DEFAULT_FACE_STYLE;
+  return {...preset};
+}
+function activeFaceTheme(){
+  const requested=viewer.faceStyle?.theme||'classic';
+  const effective=faceLabelEffectiveThemes.get(requested)||requested;
+  return {requested,effective};
+}
 function applyFaceStyle(){
   const root=$('#detail-dialog')||document.documentElement;
-  const s=viewer.faceStyle||DEFAULT_FACE_STYLE;
-  const theme=Object.prototype.hasOwnProperty.call(FACE_STYLE_PRESETS,s.theme)?s.theme:'classic';
-  if(theme==='tea'&&!TEA_FACE_FONT_KEYS.has(s.fontFamily)){
+  const requested=Object.prototype.hasOwnProperty.call(FACE_STYLE_PRESETS,viewer.faceStyle?.theme)?viewer.faceStyle.theme:'classic';
+  const effective=faceLabelEffectiveThemes.get(requested)||requested;
+  const source=effective===requested?(viewer.faceStyle||DEFAULT_FACE_STYLE):faceStyleForTheme('classic');
+  const s={...source,theme:requested};
+  if(effective==='tea'&&!TEA_FACE_FONT_KEYS.has(s.fontFamily)){
     s.fontFamily=FACE_STYLE_PRESETS.tea.fontFamily;
     delete s.customFontFamily;
   }
-  if(theme==='accent'&&!ACCENT_FACE_FONT_KEYS.has(s.fontFamily)){
+  if(effective==='accent'&&!ACCENT_FACE_FONT_KEYS.has(s.fontFamily)){
     s.fontFamily=FACE_STYLE_PRESETS.accent.fontFamily;
     delete s.customFontFamily;
   }
-  root.dataset.faceTheme=theme;
+  root.dataset.faceTheme=effective;
+  root.dataset.faceThemeRequested=requested;
+  const fontDialog=$('#local-font-dialog');
+  if(fontDialog){
+    fontDialog.dataset.faceTheme=effective;
+    fontDialog.dataset.faceThemeRequested=requested;
+    fontDialog.dataset.faceThemeEffective=effective;
+  }
   root.dataset.unnamedMarker=FACE_UNNAMED_MARKERS.has(viewer.faceUnnamedMarker)?viewer.faceUnnamedMarker:'plus';
+  root.dataset.faceThemeEffective=effective;
   const pop=$('#face-style-popover');
-  if(pop)pop.dataset.faceTheme=theme;
+  if(pop)pop.dataset.faceTheme=effective;
   root.style.setProperty('--face-font-size',`${s.fontSize}px`);
   root.style.setProperty('--face-font-family',faceFontStack(s.fontFamily,s.customFontFamily));
   root.style.setProperty('--face-text-color',s.textColor);
@@ -893,7 +920,7 @@ function applyFaceStyle(){
   root.style.setProperty('--face-padding-x',`${s.paddingX}px`);
   root.style.setProperty('--face-padding-y',`${s.paddingY}px`);
   root.style.setProperty('--face-shadow',s.shadow?'0 1px 10px rgba(0,0,0,.65)':'none');
-  const themePlate=FACE_LABEL_PLATES[theme];
+  const themePlate=FACE_LABEL_PLATES[effective];
   if(themePlate){
     root.style.setProperty('--face-label-image-vertical',`url("${themePlate.vertical}")`);
     root.style.setProperty('--face-label-image-horizontal',`url("${themePlate.horizontal}")`);
@@ -954,7 +981,7 @@ function applyFaceStyle(){
         :family.disabled?'由当前主题固定':'可选择本机其他字体';
   }
   if($('#face-style-preview-caption')){
-    const themeName={classic:'默认',ivory:'素笺',tea:'茶棕',accent:'暗朱'}[theme]||'默认';
+    const themeName={classic:'默认',ivory:'素笺',tea:'茶棕',accent:'暗朱'}[effective]||'默认';
     const rawFont=(family&&family.selectedOptions&&family.selectedOptions[0]?family.selectedOptions[0].textContent:'')||'';
     const fontName=rawFont.replace(/（默认）/g,'').split('·')[0].trim();
     $('#face-style-preview-caption').textContent=themeName+(fontName?' · '+fontName:'')+' · 基础比例预览；照片中随显示尺寸缩放';
@@ -971,6 +998,12 @@ function applyFaceStyle(){
     preview.style.borderRadius='';
     preview.style.textShadow='';
     const previewVertical=faceLabelVerticalFor(preview.textContent);
+    const localPreview=$('#local-font-preview-label');
+    if(localPreview){
+      localPreview.textContent=localFontPreviewText();
+      localPreview.style.fontFamily=localFontPicker.selected?customFaceFontStack(localFontPicker.selected):'';
+      localPreview.classList.toggle('is-horizontal', !faceLabelVerticalFor(localPreview.textContent));
+    }
     preview.dataset.faceDirection=previewVertical?'vertical':'horizontal';
     preview.classList.toggle('is-horizontal', !previewVertical);
   }

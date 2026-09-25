@@ -73,6 +73,7 @@ class FaceLabelModelTests(unittest.TestCase):
             "Anne-Marie": [False, False, False],
             "José": [False, False, False],
             "陈宁 / Alex": [True, False, True],
+            "Alex / Alex Chen": [False, False, False],
         }
         for text, expected in samples.items():
             actual = [
@@ -80,6 +81,19 @@ class FaceLabelModelTests(unittest.TestCase):
                 for mode in ("auto", "horizontal", "vertical")
             ]
             self.assertEqual(actual, expected, text)
+
+    def test_combined_latin_name_and_alias_stays_horizontal(self):
+        face = {"name": "Alex", "alias": "Alex Chen"}
+        state = run_js(f"api.resolveFaceLabelState({json.dumps(face, ensure_ascii=False)}, 'with')")
+        self.assertEqual(state["displayText"], "Alex / Alex Chen")
+        actual = [
+            run_js(
+                f"api.faceLabelVerticalFor({json.dumps(state['displayText'], ensure_ascii=False)}, "
+                f"{json.dumps(mode)}, {json.dumps(face, ensure_ascii=False)})"
+            )
+            for mode in ("auto", "horizontal", "vertical")
+        ]
+        self.assertEqual(actual, [False, False, False])
 
     def test_preference_migration_is_idempotent_and_prefers_new_fields(self):
         raw = {
