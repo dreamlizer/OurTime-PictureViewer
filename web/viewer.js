@@ -15,13 +15,13 @@ let signatureStyleIndex=0;
 let signaturePaletteSrc='';
 let signatureLayouts=null;
 const signatureInfo={sections:[],text:'',openTimer:null,closeTimer:null,copyTimer:null};
+const faceLabels=window.OurTimeFaceLabels||{};
 const FACE_LABEL_PLATES=faceLabels.PLATES||{
   ivory:{vertical:'/api/face-label-bg/1.png',horizontal:'/api/face-label-bg/7.png'},
   tea:{vertical:'/api/face-label-bg/4.png',horizontal:'/api/face-label-bg/8.png'}
 };
 const faceLabelThemeReadiness=new Map();
 const faceLabelEffectiveThemes=new Map();
-const faceLabels=window.OurTimeFaceLabels||{};
 const TEA_FACE_FONT_OPTIONS=[
   {value:'ma-shan-zheng',label:'Ma Shan Zheng（默认）'},
   {value:'long-cang',label:'Long Cang · 龙藏体'},
@@ -347,10 +347,11 @@ function buildFaceStylePopover(){
 }
 function faceLabelIdentity(face){
   const stateInfo=faceLabelState(face);
-  const personId=Number(face?.person_id);
+  const rawPersonId=face?.person_id;
+  const personId=rawPersonId==null||rawPersonId===''?NaN:Number(rawPersonId);
   return {
     state:stateInfo,
-    personKey:Number.isFinite(personId)?`person:${personId}`:`face:${Number(face?.id)||stateInfo.faceId||'unknown'}`
+    personKey:Number.isInteger(personId)&&personId>0?('person:'+personId):('face:'+(Number(face?.id)||stateInfo.faceId||'unknown'))
   };
 }
 function faceHasUsableName(face){
@@ -471,9 +472,12 @@ function setFaceKindHighlight(kind){
 }
 function updatePhotoPeoplePopover(){
   const summary=photoPeopleSummary();
-  $('#photo-named-count').textContent=String(summary.named);
-  $('#photo-pending-count').textContent=String(summary.pending);
-  $('#photo-passerby-count').textContent=String(summary.passerby);
+  const namedCount=$('#photo-named-count');
+  const pendingCount=$('#photo-pending-count');
+  const passerbyCount=$('#photo-passerby-count');
+  if(namedCount)namedCount.textContent=String(summary.named);
+  if(pendingCount)pendingCount.textContent=String(summary.pending);
+  if(passerbyCount)passerbyCount.textContent=String(summary.passerby);
   if($('#hud-named-count'))$('#hud-named-count').textContent=String(summary.named);
   if($('#hud-pending-count'))$('#hud-pending-count').textContent=String(summary.pending);
   if($('#hud-passerby-count'))$('#hud-passerby-count').textContent=String(summary.passerby);
@@ -486,7 +490,8 @@ function updatePhotoPeoplePopover(){
   const start=$('#photo-passersby-start');
   if(start){start.disabled=!summary.pending;start.textContent=summary.pending?`将剩余 ${summary.pending} 位设为路人`:'没有待命名人物';}
   const batch=viewer.lastPasserbyBatch;
-  $('#photo-passersby-undo').hidden=!(batch&&batch.assetId===Number(state.detail?.id)&&batch.personIds.length);
+  const undo=$('#photo-passersby-undo');
+  if(undo)undo.hidden=!(batch&&batch.assetId===Number(state.detail?.id)&&batch.personIds.length);
 }
 function togglePhotoPeoplePopover(force){
   const pop=$('#photo-people-popover'),btn=$('#photo-people-manage');if(!pop)return;
@@ -679,6 +684,25 @@ function localFontPreviewText(){
   const sample=typeof state!=='undefined'?namedFaces(state.detail).map(face=>faceLabelState(face)).find(item=>item.displayText&&item.displayText!=='+'):null;
   return sample?.displayText||'示例姓名';
 }
+function syncLocalFontPreviewAppearance(){
+  const dialog=$('#local-font-dialog');
+  const root=$('#detail-dialog');
+  if(!dialog||!root)return;
+  ['faceTheme','faceThemeRequested','faceThemeEffective','unnamedMarker'].forEach(name=>{
+    if(root.dataset[name]!=null)dialog.dataset[name]=root.dataset[name];
+  });
+  [...root.style].filter(name=>name.startsWith('--face-')).forEach(name=>{
+    dialog.style.setProperty(name, root.style.getPropertyValue(name));
+  });
+}
+function publishFaceLabelTheme(requested, effective, status=null){
+  const root=$('#detail-dialog')||document.documentElement;
+  root.dataset.faceThemeEffective=effective;
+  if(status?.complete||requested===effective)clearFaceLabelFallbackNote();
+  else noteFaceLabelFallback(requested, status?.missing||[]);
+  syncLocalFontPreviewAppearance();
+  if(state.detail)renderFaceNames(state.detail);
+}
 function updateLocalFontPreview(){
   const family=localFontPicker.selected;
   const preview=$('#local-font-preview-label');
@@ -688,6 +712,7 @@ function updateLocalFontPreview(){
     const previewVertical=faceLabelVerticalFor(preview.textContent);
     preview.classList.toggle('is-horizontal', !previewVertical);
   }
+  syncLocalFontPreviewAppearance();
   if($('#local-font-preview-name'))$('#local-font-preview-name').textContent=family||'等待选择字体';
   if($('#local-font-confirm'))$('#local-font-confirm').disabled=!family;
 }
@@ -850,20 +875,16 @@ function ensureFaceLabelThemeAvailable(theme){
   const request=++viewer.faceThemeProbe;
   if(!FACE_LABEL_PLATES[theme]){
     faceLabelEffectiveThemes.set(theme,theme);
-    const root=$('#detail-dialog')||document.documentElement;
-    root.dataset.faceThemeEffective=theme;
-    clearFaceLabelFallbackNote();
+    publishFaceLabelTheme(theme, theme);
     return;
   }
   faceLabelThemeStatus(theme).then(status=>{
     if(request!==viewer.faceThemeProbe||viewer.faceStyle?.theme!==theme)return;
     const effective=status.complete?theme:'classic';
+    const previous=faceLabelEffectiveThemes.get(theme)||theme;
     faceLabelEffectiveThemes.set(theme,effective);
-    const root=$('#detail-dialog')||document.documentElement;
-    root.dataset.faceThemeEffective=effective;
-    if(status.complete)clearFaceLabelFallbackNote();
-    else noteFaceLabelFallback(theme,status.missing);
-    if(state.detail)renderFaceNames(state.detail);
+    if(previous!==effective)applyFaceStyle();
+    else publishFaceLabelTheme(theme, effective, status);
   });
 }
 function restoreFaceAppearanceDefaults(){
@@ -900,12 +921,6 @@ function applyFaceStyle(){
   }
   root.dataset.faceTheme=effective;
   root.dataset.faceThemeRequested=requested;
-  const fontDialog=$('#local-font-dialog');
-  if(fontDialog){
-    fontDialog.dataset.faceTheme=effective;
-    fontDialog.dataset.faceThemeRequested=requested;
-    fontDialog.dataset.faceThemeEffective=effective;
-  }
   root.dataset.unnamedMarker=FACE_UNNAMED_MARKERS.has(viewer.faceUnnamedMarker)?viewer.faceUnnamedMarker:'plus';
   root.dataset.faceThemeEffective=effective;
   const pop=$('#face-style-popover');
@@ -931,20 +946,22 @@ function applyFaceStyle(){
     root.style.removeProperty('--face-label-image-horizontal');
   }
 
+  syncLocalFontPreviewAppearance();
+
   const themeSelect=$('#face-theme'),fontSize=$('#face-font-size'),family=$('#face-font-family'),position=$('#face-label-position'),marker=$('#face-unnamed-marker'),text=$('#face-text-color'),bg=$('#face-bg-color'),op=$('#face-bg-opacity'),radius=$('#face-radius'),shadow=$('#face-shadow');
-  if(themeSelect)themeSelect.value=theme;
+  if(themeSelect)themeSelect.value=requested;
   document.querySelectorAll('[data-face-theme-choice]').forEach(button=>{
-    const requested=button.dataset.faceThemeChoice===theme;
-    const effective=faceLabelEffectiveThemes.get(theme)||theme;
-    button.setAttribute('aria-pressed',String(requested));
-    button.dataset.faceThemeState=requested?(effective===theme?'active':'fallback'):'idle';
+    const selected=button.dataset.faceThemeChoice===requested;
+    const shown=faceLabelEffectiveThemes.get(requested)||requested;
+    button.setAttribute('aria-pressed',String(selected));
+    button.dataset.faceThemeState=selected?(shown===requested?'active':'fallback'):'idle';
   });
   if(fontSize){
     fontSize.min=themePlate?'12':'10';
     fontSize.max=themePlate?'18':'22';
     fontSize.value=String(s.fontSize);
   }
-  syncFaceFontSelect(family,s,theme);
+  syncFaceFontSelect(family,s,effective);
   if(position)position.value=currentFaceLabelMode();
   if(marker)marker.value=root.dataset.unnamedMarker;
   const direction=faceDirMode();
@@ -962,7 +979,7 @@ function applyFaceStyle(){
   const lockedControls=new Set([text,bg,radius,shadow]);
   [fontSize,family,text,bg,op,radius,shadow].forEach(control=>{
     if(!control)return;
-    control.disabled=imageTheme&&(lockedControls.has(control)||(control===family&&theme!=='tea'));
+    control.disabled=imageTheme&&(lockedControls.has(control)||(control===family&&effective!=='tea'));
   });
   if(pop){
     [fontSize,family,op,radius].forEach(control=>{
@@ -974,9 +991,9 @@ function applyFaceStyle(){
   if($('#face-font-size-value'))$('#face-font-size-value').textContent=`${s.fontSize}px`;
   if($('#face-bg-opacity-value'))$('#face-bg-opacity-value').textContent=`${Math.round(s.backgroundOpacity*100)}%`;
   if(family){
-    family.title=theme==='tea'
+    family.title=effective==='tea'
       ?'茶棕主题：三款本地毛笔字体'
-      :theme==='accent'
+      :effective==='accent'
         ?'暗朱主题：三款本地题签字体'
         :family.disabled?'由当前主题固定':'可选择本机其他字体';
   }
@@ -1007,7 +1024,7 @@ function applyFaceStyle(){
     preview.dataset.faceDirection=previewVertical?'vertical':'horizontal';
     preview.classList.toggle('is-horizontal', !previewVertical);
   }
-  ensureFaceLabelThemeAvailable(theme);
+  ensureFaceLabelThemeAvailable(requested);
 }
 function hexToRgba(hex,alpha){
   const h=String(hex||'#000000').replace('#','');
@@ -1042,7 +1059,7 @@ function updateToolVisuals(){
   }
 }
 
-function currentBrowseContext(){const mapFilter=state.placeMapFilter;return {q:state.q,filter:mapFilter?'all':(state.homeSnapshotId?'all':state.view),person:state.person,directory:state.directory,sort:state.sort,date_from:state.dateFrom||'',date_to:state.dateTo||'',place:state.place||'',...(state.homeSnapshotId?{recommendation_snapshot:state.homeSnapshotId}:{}),...(mapFilter?{map_cell:mapFilter.cell,map_lat_bucket:mapFilter.lat_bucket,map_lng_bucket:mapFilter.lng_bucket,...('map_west' in mapFilter?{map_west:mapFilter.map_west,map_south:mapFilter.map_south,map_east:mapFilter.map_east,map_north:mapFilter.map_north}:{})}:{}),max_id:state.maxId};}
+function currentBrowseContext(){const mapFilter=state.placeMapFilter;const viewFilter=(state.view==='home'&&!state.homeSnapshotId)?'all':state.view;return {q:state.q,filter:mapFilter?'all':(state.homeSnapshotId?'all':viewFilter),person:state.person,directory:state.directory,sort:state.sort,date_from:state.dateFrom||'',date_to:state.dateTo||'',place:state.place||'',...(state.homeSnapshotId?{recommendation_snapshot:state.homeSnapshotId}:{}),...(mapFilter?{map_cell:mapFilter.cell,map_lat_bucket:mapFilter.lat_bucket,map_lng_bucket:mapFilter.lng_bucket,...('map_west' in mapFilter?{map_west:mapFilter.map_west,map_south:mapFilter.map_south,map_east:mapFilter.map_east,map_north:mapFilter.map_north}:{})}:{}),max_id:state.maxId};}
 function browseContextKey(context={}){
  const filter=String(context.filter||'all');
  return JSON.stringify({q:String(context.q||''),filter:filter==='all'?'timeline':filter,person:String(context.person||''),directory:String(context.directory||''),sort:String(context.sort||'date_desc'),date_from:String(context.date_from||''),date_to:String(context.date_to||''),place:String(context.place||''),map_cell:Number(context.map_cell||0),map_lat_bucket:Number(context.map_lat_bucket||0),map_lng_bucket:Number(context.map_lng_bucket||0),map_west:Number(context.map_west||0),map_south:Number(context.map_south||0),map_east:Number(context.map_east||0),map_north:Number(context.map_north||0),nearby:Number(context.nearby||0),radius_m:Number(context.radius_m||0),max_id:Number(context.max_id||0),recommendation_snapshot:String(context.recommendation_snapshot||'')});
