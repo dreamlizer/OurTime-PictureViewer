@@ -374,6 +374,8 @@ def main():
         fail("素笺或茶棕仍按姓名长度准备多张底板")
     if "FACE_LABEL_PLATES" not in viewer or "dataset.faceLabelSize" in viewer:
         fail("素笺或茶棕仍保留按姓名长度分档的底板选择")
+    if 'FACE_LABEL_FILES = {"1.png", "4.png", "7.png", "8.png"}' not in (ROOT / "ourtime_config.py").read_text(encoding="utf-8"):
+        fail("人名底牌白名单没有收成现役的四张图")
     if not all(value in viewer for value in (
         "fontFamily:'ma-shan-zheng'",
         "TEA_FACE_FONT_OPTIONS",

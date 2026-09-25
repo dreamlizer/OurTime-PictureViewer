@@ -13,7 +13,7 @@ from pathlib import Path
 APP_NAME = "拾光相册"
 APP_VERSION = "0.3"
 BASE = Path(__file__).resolve().parent
-FACE_LABEL_FILES = {f"{i}.png" for i in range(1, 10)}
+FACE_LABEL_FILES = {"1.png", "4.png", "7.png", "8.png"}
 
 
 def _load_json(path: Path) -> dict:
