@@ -188,20 +188,3 @@
   padding:calc(var(--face-padding-y) * var(--face-scale)) calc(var(--face-padding-x) * var(--face-scale));
 }
 #local-font-dialog[data-face-theme-effective="classic"] #local-font-preview-label::before{content:none}
-#detail-dialog .face-name-tip{
-  position:absolute;
-  z-index:8;
-  max-width:min(280px, calc(100% - 16px));
-  padding:6px 8px;
-  border:1px solid rgba(255,255,255,.35);
-  border-radius:8px;
-  background:rgba(20,24,18,.92);
-  color:#f6f1e6;
-  font:400 14px/1.35 "Microsoft YaHei UI","Microsoft YaHei",sans-serif;
-  letter-spacing:0;
-  writing-mode:horizontal-tb;
-  white-space:normal;
-  overflow-wrap:anywhere;
-  pointer-events:none;
-  box-shadow:0 6px 16px rgba(0,0,0,.18);
-}

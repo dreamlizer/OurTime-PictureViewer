@@ -284,6 +284,18 @@ def main():
         '/passersby`,',
     )) or "@app.post('/api/photos/{aid}/passersby')" not in backend:
         fail("照片人物缺少上下标签位置、悬停指向、单张纠错或批量路人能力")
+    if "showFaceNameTip" in viewer or "face-name-tip" in viewer or "face-name-tip" in face_labels:
+        fail("悬停重复人名提示不得回归")
+    if "#detail-dialog .face-action-popover{" not in viewer_overrides or "#face-action-edit-name" not in viewer:
+        fail("单张纠错卡样式或修改姓名铅笔缺失")
+    if not all(token in viewer for token in (
+        "function clearFaceNames()",
+        "clearFaceNames()",
+        "if(!wasOpen){",
+    )):
+        fail("切换/打开/关闭照片缺少清理人名标签层")
+    if viewer.count("clearFaceNames()") < 3:
+        fail("人名标签清理未覆盖打开、换图和关闭路径")
     if not all(value in home_ui for value in (
         'const filterButton',
         "filterButton('group', '合影人数')",

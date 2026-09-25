@@ -1111,6 +1111,7 @@ function clearViewerImage(){
  if(img){img.removeAttribute('src');img.hidden=true;img.style.width='';img.style.height='';}
  if(signature){signature.hidden=true;signature.replaceChildren();}
  if(faces){faces.hidden=true;faces.replaceChildren();}
+ clearFaceNames();
  const favorite=$('#photo-favorite');if(favorite)favorite.hidden=true;
  const placeMap=$('#photo-place-map');if(placeMap)placeMap.hidden=true;
 }
@@ -2202,34 +2203,20 @@ function showFaceGuide(button){
   const dot=guide.querySelector('circle');dot.setAttribute('cx',end.x.toFixed(1));dot.setAttribute('cy',end.y.toFixed(1));
   layer.querySelectorAll('.face-name.is-linked').forEach(item=>item.classList.remove('is-linked'));
   button.classList.add('is-linked');layer.classList.add('is-linking');
-  showFaceNameTip(button, layer);
-}
-function showFaceNameTip(button, layer){
-  const face=faceForLabel(button);
-  const stateInfo=face?faceLabelState(face):null;
-  let tip=layer.querySelector('.face-name-tip');
-  if(!stateInfo || !stateInfo.isNamed){if(tip)tip.remove();return;}
-  if(!tip){
-    tip=document.createElement('span');
-    tip.className='face-name-tip';
-    tip.setAttribute('role','tooltip');
-    layer.appendChild(tip);
-  }
-  tip.textContent=stateInfo.displayText;
-  const layerRect=layer.getBoundingClientRect(), labelRect=button.getBoundingClientRect();
-  const left=Math.max(8, Math.min(layer.clientWidth-220, labelRect.left-layerRect.left));
-  const top=Math.max(8, labelRect.top-layerRect.top-36);
-  tip.style.left=Math.round(left)+'px';
-  tip.style.top=Math.round(top)+'px';
-  button.removeAttribute('title');
-
 }
 function hideFaceGuide(force=false){
   if(!force&&viewer.faceAction)return;
   const layer=$('#face-name-layer');if(!layer)return;
   layer.classList.remove('is-linking');layer.querySelectorAll('.face-name.is-linked').forEach(item=>item.classList.remove('is-linked'));
-  const tip=layer.querySelector('.face-name-tip');
-  if(tip)tip.remove();
+}
+function clearFaceNames(){
+  faceLabelDrag=null;
+  const layer=$('#face-name-layer');
+  if(!layer)return;
+  layer.classList.remove('is-linking');
+  layer.querySelectorAll('.face-name.is-linked').forEach(item=>item.classList.remove('is-linked'));
+  layer.replaceChildren();
+  layer.hidden=true;
 }
 function renderFaceNames(photo){
  const layer=$('#face-name-layer'); if(!layer)return;
@@ -2297,6 +2284,7 @@ async function displayPhoto(id){
   viewer.fit=true;
   detailImage.classList.remove('viewer-photo-arriving','viewer-photo-forward','viewer-photo-backward');
   if(changing)void detailImage.offsetWidth;
+  clearFaceNames();
   detailImage.src=url;
   detailImage.hidden=false;
   if(changing){
@@ -2342,7 +2330,7 @@ async function loadViewerSequence(id,nextContext,generation){
 }
 async function openPhoto(id,context=null){
  const wasOpen=$('#detail-dialog').open;
- if(!wasOpen){viewer.returnScroll=scrollY;viewer.openedPhotoId=null;viewer.openedAbsolute=null;viewer.openedContext=null;viewer.openedWaterfallGeneration=null;viewer.exit=null;if(!seedViewerFromThumb(id))clearViewerImage();}
+ if(!wasOpen){viewer.returnScroll=scrollY;viewer.openedPhotoId=null;viewer.openedAbsolute=null;viewer.openedContext=null;viewer.openedWaterfallGeneration=null;viewer.exit=null;clearFaceNames();if(!seedViewerFromThumb(id))clearViewerImage();}
  stopSlides();
  const alreadyOpen=wasOpen;
  const generation=++viewer.generation;
@@ -2592,7 +2580,7 @@ $('#viewer-info').addEventListener('click',toggleInfo);
 $('#close-info').addEventListener('click',toggleInfo);
 $('#viewer-play').addEventListener('click',()=>{if(viewer.playing){stopSlides();syncViewerTools();return;}const current=Number.isFinite(viewer.absolute)?viewer.absolute:(viewer.offset||0)+(viewer.target||0);if(current>=(viewer.total||viewer.ids.length)-1){viewerMessage('已经是最后一张，请先返回前面的照片。');return;}viewer.playing=true;syncViewerTools();scheduleSlide();});
 $('#slide-delay').addEventListener('change',()=>{saveViewerPrefs();if(viewer.timer)scheduleSlide();});
-$('#detail-dialog').addEventListener('close',()=>{clearFaceLabelEditTimer();viewer.exit={photoId:Number(state.detail?.id)||0,absolute:Number(viewer.absolute),context:viewer.context?{...viewer.context}:null,fallbackScroll:viewer.returnScroll,openedPhotoId:Number(viewer.openedPhotoId)||0,openedAbsolute:Number(viewer.openedAbsolute),openedContext:viewer.openedContext?{...viewer.openedContext}:null,waterfallGeneration:viewer.openedWaterfallGeneration};clearTimeout(viewer.closingTimer);viewer.closingTimer=null;$('#detail-dialog').classList.remove('viewer-closing');stopSlides();toggleFaceStylePopover(false);togglePhotoPeoplePopover(false);closeFaceActionPopover();viewer.lastPasserbyBatch=null;viewer.generation++;viewer.presentation++;viewer.queued=null;viewer.goal=null;viewer.sequencePromise=null;renderPhoto.ticket++;if(viewer.loaderCancel)viewer.loaderCancel();setViewerLoading(false);if(document.fullscreenElement)document.exitFullscreen().catch(()=>{});});
+$('#detail-dialog').addEventListener('close',()=>{clearFaceLabelEditTimer();viewer.exit={photoId:Number(state.detail?.id)||0,absolute:Number(viewer.absolute),context:viewer.context?{...viewer.context}:null,fallbackScroll:viewer.returnScroll,openedPhotoId:Number(viewer.openedPhotoId)||0,openedAbsolute:Number(viewer.openedAbsolute),openedContext:viewer.openedContext?{...viewer.openedContext}:null,waterfallGeneration:viewer.openedWaterfallGeneration};clearTimeout(viewer.closingTimer);viewer.closingTimer=null;$('#detail-dialog').classList.remove('viewer-closing');stopSlides();toggleFaceStylePopover(false);togglePhotoPeoplePopover(false);closeFaceActionPopover();clearFaceNames();viewer.lastPasserbyBatch=null;viewer.generation++;viewer.presentation++;viewer.queued=null;viewer.goal=null;viewer.sequencePromise=null;renderPhoto.ticket++;if(viewer.loaderCancel)viewer.loaderCancel();setViewerLoading(false);if(document.fullscreenElement)document.exitFullscreen().catch(()=>{});});
 $('#detail-dialog').addEventListener('cancel',e=>{e.preventDefault();closePhotoViewer();});
 document.addEventListener('visibilitychange',()=>{if(document.hidden)stopSlides();});
 document.addEventListener('keydown',action(async e=>{
