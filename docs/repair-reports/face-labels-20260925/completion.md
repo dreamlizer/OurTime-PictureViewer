@@ -1,5 +1,7 @@
 # Face label completion report, 2026-09-25
 
+> 同日后续（2026-09-25 晚）：本分支随后已合并进 master 并推送（至 68381fe），正式后端已重启加载至 0c74ffe（PID 22352）。下文 A 节的 “not pushed / production PID 28992 unchanged” 是正午时点记录，自此过期。当前状态以 AGENTS「当前状态」及 `docs/OurTime_FaceLabels_Reacceptance_aba6c88.md`、`docs/OurTime_FaceLabels_Acceptance_0c74ffe.md` 为准。
+
 ## A. Result
 
 P0 through P4 were carried through in the isolated worktree. The shared label model, four themes, direction, preference migration, preview/live component, and export path are present. The final isolated browser run passed, including four-theme PNG/JPEG export and unchanged source hashes.

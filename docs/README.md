@@ -11,3 +11,4 @@
 ## 在册任务
 
 - [设计与体验优化任务卡（2026-09-22）](设计与体验优化任务卡-20260922.md)：T1–T5 核心实施已完成，穷举验收仍有未覆盖项。实施范围与验收用例见任务卡；实际结果、证据与剩余边界以 [收口报告](repair-reports/DESIGN-EXPERIENCE-20260922.md) 为准。
+- [人名标签修复任务卡（2026-09-25）](OurTime_FaceLabels_Repair_TaskCard_2026-09-25.md)：FL-20260925，已合并推送到 master。复验链为 Acceptance_9ba5fe6 → [Reacceptance_aba6c88](OurTime_FaceLabels_Reacceptance_aba6c88.md)（未通过）→ [Acceptance_0c74ffe](OurTime_FaceLabels_Acceptance_0c74ffe.md)（四项主修复通过，留两个收尾项）；最新提交 68381fe 尚无复验记录，整卡未宣布全部完成。收口材料另见 `repair-reports/face-labels-20260925/`。
