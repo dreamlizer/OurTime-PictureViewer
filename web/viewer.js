@@ -864,8 +864,16 @@ function noteFaceLabelFallback(theme,missing){
   const status=$('#face-style-status');
   if(!status)return;
   const names={ivory:'素笺',tea:'茶棕'};
+  const label=names[theme]||'这个主题';
   status.hidden=false;
-  status.textContent=(names[theme]||theme)+'底板暂不可用，当前临时显示默认外观；选择已保留。';
+  status.replaceChildren();
+  status.append(document.createTextNode(label+'底板暂不可用，正在显示默认外观。字号、字体和外观暂时不能调整；方向和排版仍可使用。原来的选择已保留。'));
+  const retry=document.createElement('button');
+  retry.type='button';
+  retry.className='face-style-fallback-retry';
+  retry.textContent='再试一次';
+  retry.addEventListener('click',()=>ensureFaceLabelThemeAvailable(theme));
+  status.append(retry);
 }
 function clearFaceLabelFallbackNote(){
   const status=$('#face-style-status');
@@ -888,6 +896,7 @@ function ensureFaceLabelThemeAvailable(theme){
   });
 }
 function restoreFaceAppearanceDefaults(){
+  if(faceAppearanceLocked()){applyFaceStyle();return;}
   const defaults=faceLabels.appearanceDefaults?faceLabels.appearanceDefaults():{faceStyle:{...DEFAULT_FACE_STYLE},faceUnnamedMarker:'plus'};
   viewer.faceStyle={...defaults.faceStyle};
   viewer.faceUnnamedMarker=defaults.faceUnnamedMarker||'plus';
@@ -904,6 +913,10 @@ function activeFaceTheme(){
   const requested=viewer.faceStyle?.theme||'classic';
   const effective=faceLabelEffectiveThemes.get(requested)||requested;
   return {requested,effective};
+}
+function faceAppearanceLocked(){
+  const theme=activeFaceTheme();
+  return theme.effective!==theme.requested;
 }
 function applyFaceStyle(){
   const root=$('#detail-dialog')||document.documentElement;
@@ -976,22 +989,37 @@ function applyFaceStyle(){
   if(radius)radius.value=String(s.radius);
   if(shadow)shadow.checked=!!s.shadow;
   const imageTheme=Boolean(themePlate);
+  const appearanceLocked=effective!==requested;
+  const appearanceLockTitle='底板暂不可用，当前显示默认外观，这项暂不能调整';
   const lockedControls=new Set([text,bg,radius,shadow]);
   [fontSize,family,text,bg,op,radius,shadow].forEach(control=>{
     if(!control)return;
-    control.disabled=imageTheme&&(lockedControls.has(control)||(control===family&&effective!=='tea'));
+    const themeLocked=imageTheme&&(lockedControls.has(control)||(control===family&&effective!=='tea'));
+    control.disabled=appearanceLocked||themeLocked;
+    if(control!==family){
+      if(appearanceLocked)control.title=appearanceLockTitle;
+      else control.removeAttribute('title');
+    }
   });
+  const resetAppearance=$('#face-style-reset');
+  if(resetAppearance){
+    resetAppearance.disabled=appearanceLocked;
+    if(appearanceLocked)resetAppearance.title=appearanceLockTitle;
+    else resetAppearance.removeAttribute('title');
+  }
   if(pop){
     [fontSize,family,op,radius].forEach(control=>{
       control?.closest('label')?.classList.toggle('is-disabled',Boolean(control.disabled));
     });
-    pop.querySelector('.face-style-colors')?.classList.toggle('is-disabled',imageTheme);
-    pop.querySelector('.face-shadow-row')?.classList.toggle('is-disabled',imageTheme);
+    pop.querySelector('.face-style-colors')?.classList.toggle('is-disabled',appearanceLocked||imageTheme);
+    pop.querySelector('.face-shadow-row')?.classList.toggle('is-disabled',appearanceLocked||imageTheme);
   }
   if($('#face-font-size-value'))$('#face-font-size-value').textContent=`${s.fontSize}px`;
   if($('#face-bg-opacity-value'))$('#face-bg-opacity-value').textContent=`${Math.round(s.backgroundOpacity*100)}%`;
   if(family){
-    family.title=effective==='tea'
+    family.title=appearanceLocked
+      ?appearanceLockTitle
+      :effective==='tea'
       ?'茶棕主题：三款本地毛笔字体'
       :effective==='accent'
         ?'暗朱主题：三款本地题签字体'
@@ -1033,6 +1061,7 @@ function hexToRgba(hex,alpha){
   return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${alpha})`;
 }
 function updateFaceStyle(patch){
+  if(faceAppearanceLocked()){applyFaceStyle();return;}
   viewer.faceStyle={...viewer.faceStyle,...patch};applyFaceStyle();saveViewerPrefs();
   if(state.detail)requestAnimationFrame(()=>renderFaceNames(state.detail));
 }
@@ -1349,7 +1378,11 @@ function renderSignature(a,file){
  const hasMemory=Boolean(shownDate||place);
  const hasCapture=Boolean(camera||exposure.length);
  const hasFile=basics.length>0;
- const timeKindMarkup=shownDate&&timeKind!=='拍摄时间'?`<small id="signature-primary-kind">${esc(timeKind)}</small>`:'';
+ const supplemented=timeKind==='补录时间';
+ const visibleKind=supplemented?'':timeKind;
+ const timeKindMarkup=shownDate&&visibleKind&&visibleKind!=='拍摄时间'?`<small id="signature-primary-kind">${esc(visibleKind)}</small>`:'';
+ const dateEditable=Boolean(shownDate)&&(timeKind==='文件时间参考'||supplemented);
+ const dateEditMarkup=dateEditable?`<button type="button" class="signature-date-edit" aria-label="修改时间">✎</button>`:'';
  const exposureMarkup=exposure.map(value=>`<span class="signature-exposure-token">${esc(value)}</span>`).join('');
  const fileMarkup=[[dimensions,'dimensions'],[format,'format-token'],[fileSize,'size-token']].filter(([value])=>value).map(([value,kind])=>`<span class="signature-file-token signature-${kind}">${esc(value)}</span>`).join('');
  const placeMarkup=place?`<span id="signature-place" class="signature-place" title="${esc(place)}">${esc(place)}</span>`:'';
@@ -1359,7 +1392,7 @@ function renderSignature(a,file){
    <span class="signature-seal-v3" aria-hidden="true">拾</span>
     <div id="signature-primary" class="signature-memory"${hasMemory?'':' hidden'}>
      <div class="signature-memory-main">
-      <strong id="signature-primary-value" class="signature-date"${shownDate?'':' hidden'}>${dateMarkup}</strong>
+      <strong id="signature-primary-value" class="signature-date"${shownDate?'':' hidden'}>${dateMarkup}${dateEditMarkup}</strong>
       ${timeKindMarkup}
      </div>
     ${placeMarkup}
@@ -1375,9 +1408,10 @@ function renderSignature(a,file){
   </button>`;
  signature.hidden=false;
  signature.removeAttribute('title');
+ signature.classList.toggle('can-edit-file-date',dateEditable);
  setSignatureInfo(a,file,{rawDate,timeKind,place,camera,exposure,dimensions,format,fileSize,filename,tags});
  const cameraLine=camera?`<strong class="caption-camera" title="${esc(camera)}">${esc(camera)}</strong>`:'';
- const dateLine=shownDate?`<span class="caption-date">${dateMarkup}${timeKindMarkup}</span>`:'';
+ const dateLine=shownDate?`<span class="caption-date">${dateMarkup}${dateEditMarkup}${timeKindMarkup}</span>`:'';
  const placeLine=place?`<span class="caption-place" title="${esc(place)}">${esc(place)}</span>`:'';
  const memoryLine=`<div class="caption-memory">${dateLine}${placeLine}</div>`;
  const exposureLine=exposure.length?`<div class="caption-exposure">${exposureMarkup}</div>`:'';
@@ -1437,11 +1471,11 @@ function setSignatureInfo(photo,file,values){
  if(/^[A-Za-z]:$/.test(directory))directory+='\\';
  if(split===0&&path.startsWith('/'))directory='/';
  const size=finite(file?.size);
- const capture=[
-  [timeKind,rawDate.replace('T',' ')],
+const capture=[
+  [timeKind==='补录时间'?'时间':timeKind,rawDate.replace('T',' ')],
   ['相机',camera],
   ['参数',exposure.join(' · ')]
- ];
+];
  const gps=[
   latitude===null?'':`${Math.abs(latitude).toFixed(6)}°${latitude<0?'S':'N'}`,
   longitude===null?'':`${Math.abs(longitude).toFixed(6)}°${longitude<0?'W':'E'}`,
@@ -1595,12 +1629,57 @@ function updateSignaturePalette(){
  $('#photo-mat').style.setProperty('--signature-tone',`rgb(${rgb.join(',')})`);
 }
 $('#photo-signature').addEventListener('click',event=>{
+ const edit=event.target.closest('.signature-date-edit');
+ if(edit){event.preventDefault();event.stopPropagation();beginFileDateEdit(state.detail);return;}
+ if(event.target.closest('.signature-date-input'))return;
  if(!event.target.closest('.signature-switch'))return;
  event.stopPropagation();
  signatureStyleIndex=(signatureStyleIndex+1)%SIGNATURE_STYLES.length;
  applySignatureStyle();
  updateZoom();
 });
+function fileDateValue(photo){
+ const raw=String(photo?.effective_date||'').trim();
+ const match=raw.match(/^(\d{4}-\d{2}-\d{2})/);
+ return match?match[1]:'';
+}
+function beginFileDateEdit(photo){
+ const signature=$('#photo-signature');
+ const date=signature?.querySelector('#signature-primary-value, .caption-date');
+ if(!signature||!date||date.querySelector('.signature-date-input')||signature.dataset.dateSaving==='true')return;
+ const input=document.createElement('input');
+ input.type='date';
+ input.className='signature-date-input';
+ input.value=fileDateValue(photo);
+ input.setAttribute('aria-label','输入拍摄日期');
+ let closed=false;
+ const finish=async save=>{
+  if(closed||!date.contains(input))return;
+  closed=true;
+  input.remove();
+  if(!save)return;
+  const value=input.value;
+  if(!value||value===fileDateValue(photo))return;
+  signature.dataset.dateSaving='true';
+  try{
+   const receipt=await editPhotoMetadata({ids:[Number(photo.id)],manual_date:value,manual_precision:'日'});
+   viewerMessage(photoEditMessage(receipt));
+   await openPhoto(Number(photo.id),viewer.context);
+  }catch(error){
+   viewerMessage(error.message||'日期没有保存');
+   renderSignature(state.detail,viewer.file||state.detail?.files?.[0]);
+  }finally{
+   delete signature.dataset.dateSaving;
+  }
+ };
+ input.addEventListener('keydown',event=>{
+  if(event.key==='Enter'){event.preventDefault();void finish(true);}
+  else if(event.key==='Escape'){event.preventDefault();event.stopPropagation();void finish(false);}
+ });
+ input.addEventListener('blur',()=>void finish(true));
+ date.append(input);
+ input.focus();
+}
 function faceLabelState(face, aliasMode=faceAliasMode()){
   return faceLabels.resolveFaceLabelState
     ? faceLabels.resolveFaceLabelState(face, aliasMode)

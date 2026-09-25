@@ -97,6 +97,8 @@
     const clone=mat.cloneNode(true);
     freezeTree(mat,clone);
     clone.querySelectorAll('.viewer-photo-close,.photo-favorite,.photo-place-map,.photo-export-control,.face-hover-guide,.face-hover-box,.face-name-tip,.signature-switch').forEach(node=>node.remove());
+    clone.querySelectorAll('.signature-date-edit,.signature-date-input').forEach(node=>node.remove());
+    clone.querySelectorAll('#face-name-layer .face-name.unnamed,#face-name-layer .face-name.passerby').forEach(node=>node.remove());
     clone.querySelectorAll('#photo-people-hud,.photo-people-hud,#photo-people-popover,.people-manage-popover,.face-action-popover,.face-style-popover').forEach(node=>node.remove());
     clone.querySelectorAll('.is-linked,.is-linking').forEach(node=>node.classList.remove('is-linked','is-linking'));
     clone.querySelector('#detail-img')?.classList.remove('viewer-photo-arriving','viewer-photo-forward','viewer-photo-backward');

@@ -37,7 +37,7 @@
 }
 #detail-dialog[data-face-theme="classic"] .face-name:not(.unnamed),
 #detail-dialog[data-face-theme="classic"] #face-style-preview-label,
-#detail-dialog[data-face-theme="classic"] #local-font-preview-label{
+#local-font-dialog[data-face-theme="classic"] #local-font-preview-label{
   background:var(--face-bg-rgba);
   border-color:transparent;
   box-shadow:0 1px 2px rgba(0,0,0,.08);
@@ -48,8 +48,8 @@
 #detail-dialog[data-face-theme="tea"] .face-name:not(.unnamed),
 #detail-dialog[data-face-theme="ivory"] #face-style-preview-label,
 #detail-dialog[data-face-theme="tea"] #face-style-preview-label,
-#detail-dialog[data-face-theme="ivory"] #local-font-preview-label,
-#detail-dialog[data-face-theme="tea"] #local-font-preview-label{
+#local-font-dialog[data-face-theme="ivory"] #local-font-preview-label,
+#local-font-dialog[data-face-theme="tea"] #local-font-preview-label{
   --face-plate-corner:calc(8px * var(--face-scale, 1));
   --face-plate-edge:calc(5px * var(--face-scale, 1));
   --face-plate-pad-block:calc(9px * var(--face-scale, 1));
@@ -69,14 +69,14 @@
 }
 #detail-dialog[data-face-theme="ivory"] .face-name:not(.unnamed),
 #detail-dialog[data-face-theme="ivory"] #face-style-preview-label,
-#detail-dialog[data-face-theme="ivory"] #local-font-preview-label{
+#local-font-dialog[data-face-theme="ivory"] #local-font-preview-label{
   color:#5a2f28;
   font-family:"LXGW WenKai GB Screen","STKaiti","Kaiti SC","KaiTi",serif;
   --face-label-image:url("/api/face-label-bg/1.png");
 }
 #detail-dialog[data-face-theme="tea"] .face-name:not(.unnamed),
 #detail-dialog[data-face-theme="tea"] #face-style-preview-label,
-#detail-dialog[data-face-theme="tea"] #local-font-preview-label{
+#local-font-dialog[data-face-theme="tea"] #local-font-preview-label{
   color:#f7ead8;
   font-family:var(--face-font-family);
   --face-plate-slice:170 310 fill;
@@ -86,8 +86,8 @@
 #detail-dialog[data-face-theme="tea"] .face-name:not(.unnamed)::before,
 #detail-dialog[data-face-theme="ivory"] #face-style-preview-label::before,
 #detail-dialog[data-face-theme="tea"] #face-style-preview-label::before,
-#detail-dialog[data-face-theme="ivory"] #local-font-preview-label::before,
-#detail-dialog[data-face-theme="tea"] #local-font-preview-label::before{
+#local-font-dialog[data-face-theme="ivory"] #local-font-preview-label::before,
+#local-font-dialog[data-face-theme="tea"] #local-font-preview-label::before{
   content:"";
   position:absolute;
   inset:0;
@@ -105,16 +105,16 @@
 }
 #detail-dialog[data-face-theme="ivory"] .face-name:not(.unnamed)::before,
 #detail-dialog[data-face-theme="ivory"] #face-style-preview-label::before,
-#detail-dialog[data-face-theme="ivory"] #local-font-preview-label::before{background:rgba(250,244,229,.72)}
+#local-font-dialog[data-face-theme="ivory"] #local-font-preview-label::before{background:rgba(250,244,229,.72)}
 #detail-dialog[data-face-theme="tea"] .face-name:not(.unnamed)::before,
 #detail-dialog[data-face-theme="tea"] #face-style-preview-label::before,
-#detail-dialog[data-face-theme="tea"] #local-font-preview-label::before{background:rgba(72,48,35,.58)}
+#local-font-dialog[data-face-theme="tea"] #local-font-preview-label::before{background:rgba(72,48,35,.58)}
 #detail-dialog[data-face-theme="ivory"] .face-name.is-horizontal:not(.unnamed),
 #detail-dialog[data-face-theme="tea"] .face-name.is-horizontal:not(.unnamed),
 #detail-dialog[data-face-theme="ivory"] #face-style-preview-label.is-horizontal,
 #detail-dialog[data-face-theme="tea"] #face-style-preview-label.is-horizontal,
-#detail-dialog[data-face-theme="ivory"] #local-font-preview-label.is-horizontal,
-#detail-dialog[data-face-theme="tea"] #local-font-preview-label.is-horizontal{
+#local-font-dialog[data-face-theme="ivory"] #local-font-preview-label.is-horizontal,
+#local-font-dialog[data-face-theme="tea"] #local-font-preview-label.is-horizontal{
   letter-spacing:.02em;
   --face-plate-corner:calc(5px * var(--face-scale, 1));
   --face-plate-edge:calc(8px * var(--face-scale, 1));
@@ -124,19 +124,19 @@
 }
 #detail-dialog[data-face-theme="ivory"] .face-name.is-horizontal:not(.unnamed),
 #detail-dialog[data-face-theme="ivory"] #face-style-preview-label.is-horizontal,
-#detail-dialog[data-face-theme="ivory"] #local-font-preview-label.is-horizontal{
+#local-font-dialog[data-face-theme="ivory"] #local-font-preview-label.is-horizontal{
   --face-label-image:url("/api/face-label-bg/7.png");
   --face-plate-slice:330 210 fill;
 }
 #detail-dialog[data-face-theme="tea"] .face-name.is-horizontal:not(.unnamed),
 #detail-dialog[data-face-theme="tea"] #face-style-preview-label.is-horizontal,
-#detail-dialog[data-face-theme="tea"] #local-font-preview-label.is-horizontal{
+#local-font-dialog[data-face-theme="tea"] #local-font-preview-label.is-horizontal{
   --face-label-image:url("/api/face-label-bg/8.png");
   --face-plate-slice:310 180 fill;
 }
 #detail-dialog[data-face-theme="accent"] .face-name:not(.unnamed),
 #detail-dialog[data-face-theme="accent"] #face-style-preview-label,
-#detail-dialog[data-face-theme="accent"] #local-font-preview-label{
+#local-font-dialog[data-face-theme="accent"] #local-font-preview-label{
   background:
     repeating-linear-gradient(105deg,rgba(255,244,219,.04) 0 1px,transparent 1px 6px),
     linear-gradient(180deg,rgba(255,238,207,.035),rgba(40,9,7,.055)),
@@ -154,7 +154,7 @@
 }
 #detail-dialog[data-face-theme="accent"] .face-name.is-horizontal:not(.unnamed),
 #detail-dialog[data-face-theme="accent"] #face-style-preview-label.is-horizontal,
-#detail-dialog[data-face-theme="accent"] #local-font-preview-label.is-horizontal{
+#local-font-dialog[data-face-theme="accent"] #local-font-preview-label.is-horizontal{
   letter-spacing:.045em;
   padding-block:calc(6px * var(--face-scale));
   padding-inline:calc(10px * var(--face-scale));
@@ -176,8 +176,8 @@
 }
 #detail-dialog[data-face-theme-effective="classic"] .face-name:not(.unnamed)::before,
 #detail-dialog[data-face-theme-effective="classic"] #face-style-preview-label::before{content:none}
-#detail-dialog[data-face-theme-effective="classic"][data-face-theme="ivory"] #local-font-preview-label,
-#detail-dialog[data-face-theme-effective="classic"][data-face-theme="tea"] #local-font-preview-label,
+#local-font-dialog[data-face-theme-effective="classic"][data-face-theme="ivory"] #local-font-preview-label,
+#local-font-dialog[data-face-theme-effective="classic"][data-face-theme="tea"] #local-font-preview-label,
 #local-font-dialog[data-face-theme-effective="classic"] #local-font-preview-label{
   background:var(--face-bg-rgba);
   color:var(--face-text-color);
