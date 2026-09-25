@@ -90,6 +90,8 @@ def main():
     viewer = read(WEB / "viewer.js")
     appearance = read(WEB / "appearance.css")
     viewer_overrides = read(WEB / "viewer-overrides.css")
+    face_labels = read(WEB / "face-labels.css")
+    viewer_overrides = viewer_overrides + "\n" + face_labels
     map_area = read(WEB / "map-area-editor.js")
     map_area_css = read(WEB / "map-area-editor.css")
     home_ui = read(WEB / "home-query-ui.js")

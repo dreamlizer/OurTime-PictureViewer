@@ -16,10 +16,12 @@ let signaturePaletteSrc='';
 let signatureLayouts=null;
 const signatureInfo={sections:[],text:'',openTimer:null,closeTimer:null,copyTimer:null};
 const FACE_LABEL_PLATES={
-  ivory:'/api/face-label-bg/1.png',
-  tea:'/api/face-label-bg/4.png'
+  ivory:{vertical:'/api/face-label-bg/1.png',horizontal:'/api/face-label-bg/7.png'},
+  tea:{vertical:'/api/face-label-bg/4.png',horizontal:'/api/face-label-bg/8.png'}
 };
 const faceLabelThemeReadiness=new Map();
+const faceLabelEffectiveThemes=new Map();
+const faceLabels=window.OurTimeFaceLabels||{};
 const TEA_FACE_FONT_OPTIONS=[
   {value:'ma-shan-zheng',label:'Ma Shan Zheng（默认）'},
   {value:'long-cang',label:'Long Cang · 龙藏体'},
@@ -124,31 +126,12 @@ function readViewerPrefs(){
 const storedViewerPrefs=readViewerPrefs();
 // Start legacy installations in Chinese-first auto mode once; subsequent
 // explicit direction choices remain persistent and independent of positions.
-function initialFaceDirMode(){
-  return storedViewerPrefs.faceDirectionVersion===1 && ['auto','horizontal','vertical'].includes(storedViewerPrefs.faceDirMode)
-    ? storedViewerPrefs.faceDirMode : 'auto';
+function migratedViewerPrefs(raw=storedViewerPrefs){
+  return faceLabels.normalizeViewerPrefs?faceLabels.normalizeViewerPrefs(raw):raw;
 }
-const LEGACY_FACE_THEMES=new Set(['ink','paper','cinnabar']);
-function initialFaceStyle(){
-  const stored=storedViewerPrefs.faceStyle;
-  if(!stored)return {...DEFAULT_FACE_STYLE};
-  if(stored.theme==='outline')return {...FACE_STYLE_PRESETS.tea};
-  if(LEGACY_FACE_THEMES.has(stored.theme))return {...DEFAULT_FACE_STYLE};
-  if(stored.theme==='classic'&&Object.entries(LEGACY_CLASSIC_FACE_STYLE).every(([key,value])=>stored[key]===value)){
-    return {...DEFAULT_FACE_STYLE};
-  }
-  const theme=Object.prototype.hasOwnProperty.call(FACE_STYLE_PRESETS,stored.theme)?stored.theme:'classic';
-  const style={...FACE_STYLE_PRESETS[theme],...stored,theme};
-  if(theme==='tea'&&!TEA_FACE_FONT_KEYS.has(style.fontFamily)){
-    style.fontFamily=FACE_STYLE_PRESETS.tea.fontFamily;
-    delete style.customFontFamily;
-  }
-  if(theme==='accent'&&!ACCENT_FACE_FONT_KEYS.has(style.fontFamily)){
-    style.fontFamily=FACE_STYLE_PRESETS.accent.fontFamily;
-    delete style.customFontFamily;
-  }
-  return style;
-}
+const normalizedViewerPrefs=migratedViewerPrefs();
+function initialFaceDirMode(){ return normalizedViewerPrefs.faceDirMode||'auto'; }
+function initialFaceStyle(){ return {...(normalizedViewerPrefs.faceStyle||DEFAULT_FACE_STYLE)}; }
 function viewerCaptureEntityWrite(kind,id,payload,revision){
   return window.__ourTimeApp.captureEntityWrite(kind,id,payload,revision);
 }
@@ -161,18 +144,20 @@ const viewer={
   timer:null,playing:false,scale:1,fit:true,loader:null,loaderCancel:null,presentation:0,loadingToken:0,drafts:new Map(),window:200,
   returnScroll:undefined,openedPhotoId:null,openedAbsolute:null,openedContext:null,openedWaterfallGeneration:null,exit:null,
   sequencePromise:null,loadingTimer:null,transitionDirection:0,closingTimer:null,
-  faceNames:storedViewerPrefs.faceNames!==false,
-  faceAliasMode: (storedViewerPrefs.faceAliasMode==='with'||storedViewerPrefs.faceAliasMode==='only')?storedViewerPrefs.faceAliasMode:(storedViewerPrefs.faceAlias===true?'with':'off'),
+  faceNames:normalizedViewerPrefs.faceNames!==false,
+  faceAliasMode:normalizedViewerPrefs.faceAliasMode||'off',
   faceDirMode:initialFaceDirMode(),
-  faceAlias:storedViewerPrefs.faceAlias===true,
-  faceVertical:initialFaceDirMode()!=='horizontal',
+  faceAlias:Boolean(normalizedViewerPrefs.faceAlias),
+  faceVertical:Boolean(normalizedViewerPrefs.faceVertical),
   faceLabelPosition:FACE_LABEL_POSITIONS.has(storedViewerPrefs.faceLabelPosition)?storedViewerPrefs.faceLabelPosition:'auto',
-  faceUnnamedMarker:FACE_UNNAMED_MARKERS.has(storedViewerPrefs.faceUnnamedMarker)?storedViewerPrefs.faceUnnamedMarker:'plus',
-  faceStyle:initialFaceStyle()
+  faceUnnamedMarker:normalizedViewerPrefs.faceUnnamedMarker||'plus',
+  faceStyle:initialFaceStyle(),
+  faceThemeProbe:0,
+  faceRenderGeneration:0
 };
 function saveViewerPrefs(){
   try{
-    localStorage.setItem(VIEWER_PREFS_KEY,JSON.stringify({
+    const current={
       faceNames:viewer.faceNames!==false,
       faceAliasMode:viewer.faceAliasMode||'off',
       faceDirMode:viewer.faceDirMode||'auto',
@@ -183,16 +168,28 @@ function saveViewerPrefs(){
       faceUnnamedMarker:viewer.faceUnnamedMarker,
       faceStyle:viewer.faceStyle,
       slideDelay:Number($('#slide-delay')?.value||storedViewerPrefs.slideDelay||5)
+    };
+    const normalized=migratedViewerPrefs(current);
+    localStorage.setItem(VIEWER_PREFS_KEY,JSON.stringify({
+      ...current,
+      faceAliasMode:normalized.faceAliasMode,
+      faceDirMode:normalized.faceDirMode,
+      faceStyle:normalized.faceStyle,
+      faceUnnamedMarker:normalized.faceUnnamedMarker
     }));
-  }catch(e){}
+  }catch(e){viewer.preferenceWarning='外观设置暂时无法保存，刷新后可能恢复';}
 }
-function injectViewerOverrideCss(){
-  if(document.querySelector('link[data-viewer-overrides]'))return;
+function injectViewerStylesheet(href, key){
+  if(document.querySelector('link[data-viewer-style="'+key+'"]'))return;
   const link=document.createElement('link');
   link.rel='stylesheet';
-  link.href='/viewer-overrides.css';
-  link.dataset.viewerOverrides='true';
+  link.href=href;
+  link.dataset.viewerStyle=key;
   document.head.appendChild(link);
+}
+function injectViewerOverrideCss(){
+  injectViewerStylesheet('/viewer-overrides.css','overrides');
+  injectViewerStylesheet('/face-labels.css','face-labels');
 }
 injectViewerOverrideCss();
 
@@ -277,7 +274,7 @@ function buildFaceStylePopover(){
     </div>
     <div class="face-style-preview">
       <span id="face-style-preview-label">示例姓名</span>
-      <small id="face-style-preview-caption">默认 · 实际比例</small>
+          <small id="face-style-preview-caption">基础比例预览；照片中随显示尺寸缩放</small>
     </div>
     <div class="face-style-group">
       <div class="face-style-group-title">样式</div>
@@ -310,7 +307,8 @@ function buildFaceStylePopover(){
       <label class="face-style-field face-custom-control"><span>圆角</span><select id="face-radius"><option value="0">直角</option><option value="4">微圆角</option><option value="10">圆角</option><option value="999">胶囊</option></select></label>
       <label class="face-style-field face-shadow-row"><input id="face-shadow" type="checkbox"><span>文字阴影</span><small>亮背景下更清楚</small></label>
     </div>
-    <button type="button" id="face-style-reset" class="face-style-reset">恢复默认</button>`;
+    <button type="button" id="face-style-reset" class="face-style-reset">恢复外观默认</button>
+    <p id="face-style-status" class="muted" role="status" hidden></p>`;
   body.appendChild(pop);
 
   const bind=(id,event,fn)=>{const el=$(id);if(el)el.addEventListener(event,fn);};
@@ -343,12 +341,7 @@ function buildFaceStylePopover(){
   bind('#face-bg-opacity','input',e=>updateFaceStyle({backgroundOpacity:Number(e.target.value)/100}));
   bind('#face-radius','change',e=>updateFaceStyle({radius:Number(e.target.value)}));
   bind('#face-shadow','change',e=>updateFaceStyle({shadow:e.target.checked}));
-  bind('#face-style-reset','click',()=>{
-    viewer.faceStyle={...DEFAULT_FACE_STYLE};
-    viewer.faceUnnamedMarker='plus';
-    applyFaceStyle();
-    syncFaceLabelResetButton();
-  });
+  bind('#face-style-reset','click',()=>restoreFaceAppearanceDefaults());
   buildLocalFontDialog();
   applyFaceStyle();
 }
@@ -590,17 +583,9 @@ function customFaceFontStack(family){
   return clean?`${JSON.stringify(clean)},"Microsoft YaHei UI","Microsoft YaHei",sans-serif`:faceFontStack('kai');
 }
 function faceFontStack(kind,customFamily){
+  if(faceLabels.fontStack)return faceLabels.fontStack(kind,customFamily||viewer.faceStyle?.customFontFamily);
   if(kind==='custom')return customFaceFontStack(customFamily||viewer.faceStyle?.customFontFamily);
-  if(kind==='ma-shan-zheng')return '"Ma Shan Zheng","LXGW WenKai GB Screen","STKaiti","KaiTi",serif';
-  if(kind==='long-cang')return '"Long Cang","LXGW WenKai GB Screen","STKaiti","KaiTi",serif';
-  if(kind==='liu-jian-mao-cao')return '"Liu Jian Mao Cao","LXGW WenKai GB Screen","STKaiti","KaiTi",serif';
-  if(kind==='zcool-xiaowei')return '"ZCOOL XiaoWei","Noto Serif SC","STSong","SimSun",serif';
-  if(kind==='noto-serif-sc')return '"Noto Serif SC","Source Han Serif SC","STSong","SimSun",serif';
-  if(kind==='zhi-mang-xing')return '"Zhi Mang Xing","LXGW WenKai GB Screen","STKaiti","KaiTi",serif';
-  if(kind==='sans')return '"Microsoft YaHei UI","Microsoft YaHei","PingFang SC","Noto Sans CJK SC",sans-serif';
-  if(kind==='kai')return '"LXGW WenKai","STKaiti","Kaiti SC","KaiTi",serif';
-  if(kind==='fangsong')return '"FangSong","STFangsong","FangSong_GB2312","Songti SC","STSong","SimSun",serif';
-  return '"Iowan Old Style","Palatino Linotype","STSong","SimSun",serif';
+  return '"LXGW WenKai GB Screen","STKaiti","Kaiti SC","KaiTi",serif';
 }
 function setFaceFontOptions(select,options,key){
   if(!select||select.dataset.optionSet===key)return;
@@ -693,8 +678,6 @@ function updateLocalFontPreview(){
     preview.textContent=localFontPreviewText();
     preview.style.fontFamily=customFaceFontStack(family);
     const previewVertical=faceLabelVerticalFor(preview.textContent);
-    preview.style.writingMode=previewVertical?'vertical-rl':'horizontal-tb';
-    preview.style.textOrientation=previewVertical?'upright':'mixed';
     preview.classList.toggle('is-horizontal', !previewVertical);
   }
   if($('#local-font-preview-name'))$('#local-font-preview-name').textContent=family||'等待选择字体';
@@ -785,11 +768,7 @@ function faceLabelScaleForHeight(faceH, imageHeight){
   return faceScale*photoScale;
 }
 function isLatinDisplayName(text){
-  const s=String(text||'').trim();
-  const letters=(s.match(/[A-Za-z]/g)||[]).length;
-  if(letters<2) return false;
-  if(/[㐀-鿿豈-﫿぀-ヿ]/.test(s)) return false;
-  return true;
+  return faceLabels.isLatinDisplayName ? faceLabels.isLatinDisplayName(text) : false;
 }
 function faceDirMode(){
   const mode=viewer.faceDirMode||'auto';
@@ -817,34 +796,76 @@ function faceLabelsVertical(){
   return true;
 }
 function faceLabelVerticalFor(text){
-  if(isLatinDisplayName(text)) return false;
-  const mode=faceDirMode();
-  if(mode==='horizontal') return false;
-  if(mode==='vertical') return true;
-  return true;
+  return faceLabels.faceLabelVerticalFor
+    ? faceLabels.faceLabelVerticalFor(text, faceDirMode())
+    : faceDirMode()!=='horizontal' && !isLatinDisplayName(text);
 }
-function faceLabelThemeReady(theme){
-  if(!FACE_LABEL_PLATES[theme])return Promise.resolve(true);
-  if(faceLabelThemeReadiness.has(theme))return faceLabelThemeReadiness.get(theme);
+function faceLabelPlateUrls(theme){
+  const plates=FACE_LABEL_PLATES[theme];
+  return plates?[plates.vertical,plates.horizontal]:[];
+}
+function faceLabelResourceReady(url, force=false){
+  const cached=faceLabelThemeReadiness.get(url);
+  if(!force && cached)return cached;
+  if(cached)faceLabelThemeReadiness.delete(url);
   const promise=new Promise(resolve=>{
     const image=new Image();
-    image.onload=()=>resolve(true);
-    image.onerror=()=>resolve(false);
-    image.src=FACE_LABEL_PLATES[theme];
+    const finish=ok=>{
+      if(!ok)faceLabelThemeReadiness.delete(url);
+      resolve(ok);
+    };
+    image.onload=()=>finish(Boolean(image.naturalWidth));
+    image.onerror=()=>finish(false);
+    image.src=url+(force?'?retry='+Date.now():'');
   });
-  faceLabelThemeReadiness.set(theme,promise);
+  faceLabelThemeReadiness.set(url,promise);
   return promise;
 }
+async function faceLabelThemeStatus(theme, force=false){
+  const urls=faceLabelPlateUrls(theme);
+  if(!urls.length)return {complete:true,missing:[]};
+  const results=await Promise.all(urls.map(url=>faceLabelResourceReady(url,force)));
+  return {complete:results.every(Boolean),missing:urls.filter((url,index)=>!results[index])};
+}
+function noteFaceLabelFallback(theme,missing){
+  const status=$('#face-style-status');
+  if(!status)return;
+  const names={ivory:'素笺',tea:'茶棕'};
+  status.hidden=false;
+  status.textContent=(names[theme]||theme)+'底板暂不可用，当前临时显示默认外观；选择已保留。';
+}
+function clearFaceLabelFallbackNote(){
+  const status=$('#face-style-status');
+  if(status){status.hidden=true;status.textContent='';}
+}
 function ensureFaceLabelThemeAvailable(theme){
-  if(!FACE_LABEL_PLATES[theme])return;
-  faceLabelThemeReady(theme).then(ready=>{
-    if(ready||viewer.faceStyle?.theme!==theme)return;
-    console.warn(`人名标签主题 ${theme} 的底图缺失，已恢复默认样式`);
-    viewer.faceStyle={...DEFAULT_FACE_STYLE};
-    applyFaceStyle();
-    saveViewerPrefs();
-    if(state.detail)requestAnimationFrame(()=>renderFaceNames(state.detail));
+  const request=++viewer.faceThemeProbe;
+  if(!FACE_LABEL_PLATES[theme]){
+    faceLabelEffectiveThemes.set(theme,theme);
+    const root=$('#detail-dialog')||document.documentElement;
+    root.dataset.faceThemeEffective=theme;
+    clearFaceLabelFallbackNote();
+    return;
+  }
+  faceLabelThemeStatus(theme).then(status=>{
+    if(request!==viewer.faceThemeProbe||viewer.faceStyle?.theme!==theme)return;
+    const effective=status.complete?theme:'classic';
+    faceLabelEffectiveThemes.set(theme,effective);
+    const root=$('#detail-dialog')||document.documentElement;
+    root.dataset.faceThemeEffective=effective;
+    if(status.complete)clearFaceLabelFallbackNote();
+    else noteFaceLabelFallback(theme,status.missing);
+    if(state.detail)renderFaceNames(state.detail);
   });
+}
+function restoreFaceAppearanceDefaults(){
+  const defaults=faceLabels.appearanceDefaults?faceLabels.appearanceDefaults():{faceStyle:{...DEFAULT_FACE_STYLE},faceUnnamedMarker:'plus'};
+  viewer.faceStyle={...defaults.faceStyle};
+  viewer.faceUnnamedMarker=defaults.faceUnnamedMarker||'plus';
+  applyFaceStyle();
+  saveViewerPrefs();
+  syncFaceLabelResetButton();
+  if(viewer.faceNames!==false&&state.detail)renderFaceNames(state.detail);
 }
 function applyFaceStyle(){
   const root=$('#detail-dialog')||document.documentElement;
@@ -873,12 +894,23 @@ function applyFaceStyle(){
   root.style.setProperty('--face-padding-y',`${s.paddingY}px`);
   root.style.setProperty('--face-shadow',s.shadow?'0 1px 10px rgba(0,0,0,.65)':'none');
   const themePlate=FACE_LABEL_PLATES[theme];
-  if(themePlate)root.style.setProperty('--face-label-image',`url("${themePlate}")`);
+  if(themePlate){
+    root.style.setProperty('--face-label-image-vertical',`url("${themePlate.vertical}")`);
+    root.style.setProperty('--face-label-image-horizontal',`url("${themePlate.horizontal}")`);
+    root.style.setProperty('--face-label-image',`url("${themePlate.vertical}")`);
+  }else{
+    root.style.removeProperty('--face-label-image');
+    root.style.removeProperty('--face-label-image-vertical');
+    root.style.removeProperty('--face-label-image-horizontal');
+  }
 
   const themeSelect=$('#face-theme'),fontSize=$('#face-font-size'),family=$('#face-font-family'),position=$('#face-label-position'),marker=$('#face-unnamed-marker'),text=$('#face-text-color'),bg=$('#face-bg-color'),op=$('#face-bg-opacity'),radius=$('#face-radius'),shadow=$('#face-shadow');
   if(themeSelect)themeSelect.value=theme;
   document.querySelectorAll('[data-face-theme-choice]').forEach(button=>{
-    button.setAttribute('aria-pressed',String(button.dataset.faceThemeChoice===theme));
+    const requested=button.dataset.faceThemeChoice===theme;
+    const effective=faceLabelEffectiveThemes.get(theme)||theme;
+    button.setAttribute('aria-pressed',String(requested));
+    button.dataset.faceThemeState=requested?(effective===theme?'active':'fallback'):'idle';
   });
   if(fontSize){
     fontSize.min=themePlate?'12':'10';
@@ -923,24 +955,23 @@ function applyFaceStyle(){
   }
   if($('#face-style-preview-caption')){
     const themeName={classic:'默认',ivory:'素笺',tea:'茶棕',accent:'暗朱'}[theme]||'默认';
-    const themedFont=theme==='tea'||theme==='accent';
-    const fontName=themedFont?family?.selectedOptions?.[0]?.textContent?.replace('（默认）','')?.split(' · ')[0]:'实际比例';
-    $('#face-style-preview-caption').textContent=`${themeName} · ${fontName||'实际比例'}`;
+    const rawFont=(family&&family.selectedOptions&&family.selectedOptions[0]?family.selectedOptions[0].textContent:'')||'';
+    const fontName=rawFont.replace(/（默认）/g,'').split('·')[0].trim();
+    $('#face-style-preview-caption').textContent=themeName+(fontName?' · '+fontName:'')+' · 基础比例预览；照片中随显示尺寸缩放';
   }
   const preview=$('#face-style-preview-label');
   if(preview){
-    const currentFaces=typeof state!=='undefined'?namedFaces(state.detail):[];
-    preview.textContent=currentFaces[0]?.name||'示例姓名';
+    const sample=typeof state!=='undefined'?namedFaces(state.detail).map(face=>faceLabelState(face)).find(item=>item.displayText&&item.displayText!=='+'):null;
+    preview.textContent=sample&&sample.displayText?sample.displayText:'示例姓名';
     applyFaceLabelProfile(preview,preview.textContent);
-    preview.style.fontSize=themePlate?'':`${s.fontSize}px`;
-    preview.style.fontFamily=themePlate?'':faceFontStack(s.fontFamily,s.customFontFamily);
-    preview.style.color=themePlate?'':s.textColor;
-    preview.style.backgroundColor=themePlate?'':hexToRgba(s.backgroundColor,s.backgroundOpacity);
-    preview.style.borderRadius=themePlate?'':s.radius>=999?'999px':`${s.radius}px`;
-    preview.style.textShadow=themePlate?'':s.shadow?'0 1px 10px rgba(0,0,0,.65)':'none';
+    preview.style.fontSize='';
+    preview.style.fontFamily='';
+    preview.style.color='';
+    preview.style.backgroundColor='';
+    preview.style.borderRadius='';
+    preview.style.textShadow='';
     const previewVertical=faceLabelVerticalFor(preview.textContent);
-    preview.style.writingMode=previewVertical?'vertical-rl':'horizontal-tb';
-    preview.style.textOrientation=previewVertical?'upright':'mixed';
+    preview.dataset.faceDirection=previewVertical?'vertical':'horizontal';
     preview.classList.toggle('is-horizontal', !previewVertical);
   }
   ensureFaceLabelThemeAvailable(theme);
@@ -1520,7 +1551,12 @@ $('#photo-signature').addEventListener('click',event=>{
  applySignatureStyle();
  updateZoom();
 });
-function namedFaces(photo){return (photo&&photo.faces||[]).filter(f=>f.name&&!f.ignored);}
+function faceLabelState(face, aliasMode=faceAliasMode()){
+  return faceLabels.resolveFaceLabelState
+    ? faceLabels.resolveFaceLabelState(face, aliasMode)
+    : {kind:face?.ignored?'passerby':(face?.name?'named':'pending'),isNamed:Boolean(face?.name&&!face?.ignored),displayText:String(face?.name||'+'),accessibleText:String(face?.name||'待命名'),faceId:Number(face?.id)||null,personId:Number(face?.person_id)||null};
+}
+function namedFaces(photo){return (photo&&photo.faces||[]).filter(face=>faceLabelState(face).isNamed);}
 function visibleFaces(photo){return (photo&&photo.faces||[]);}
 function viewerImageSrc(photo, file, id){
  const w=Number(photo&&photo.width)||0, h=Number(photo&&photo.height)||0;
@@ -1548,15 +1584,8 @@ function faceAliasMode(){
   return (mode==='off'||mode==='with'||mode==='only')?mode:'off';
 }
 function faceLabelText(face, alias){
-  if(face.ignored) return '+';
-  const name=String(face.name||'').trim();
-  const aka=String(face.alias||'').trim();
-  const mode=alias===true?'with':(alias===false?'off':faceAliasMode());
-  if(!name && !aka) return '+';
-  if(mode==='only') return aka || name || '+';
-  if(mode==='with' && aka && name && aka!==name) return name+' / '+aka;
-  if(mode==='with' && aka && !name) return aka;
-  return name || aka || '+';
+  const mode=alias===true?'with':(alias===false?'off':(alias||faceAliasMode()));
+  return faceLabelState(face,mode).displayText;
 }
 const faceLabelCommittedPositions=new Map();
 const faceLabelOptimisticPositions=new Map();
@@ -1872,16 +1901,20 @@ function layoutFaceNameButtons(layer, faces, alias){
     const fy=oy+box.y1/box.h*imgH;
     const fw=box.width/box.w*imgW;
     const fh=box.height/box.h*imgH;
-    const passerby=Boolean(face.ignored);
-    const kind=faceKind(face);
-    items.push({face, passerby, kind, named:!passerby&&Boolean(face.name), label:faceLabelText(face,alias), fx, fy, fw, fh, cx:fx+fw/2, cy:fy+fh/2});
+    const stateInfo=faceLabelState(face, alias);
+    const passerby=stateInfo.kind==='passerby';
+    const kind=stateInfo.kind;
+    items.push({face, passerby, kind, named:stateInfo.isNamed, label:stateInfo.displayText, fx, fy, fw, fh, cx:fx+fw/2, cy:fy+fh/2});
   });
   items.sort((a,b)=>a.cy-b.cy||a.cx-b.cx);
   layer.innerHTML=items.map(it=>{
-    const hint=it.named?`${it.label}；拖动调整位置，双击管理这张脸`:(it.passerby?'路人；拖动调整位置，单击或双击可重新命名':'拖动调整位置，单击或双击命名人物');
-    return `<button type="button" class="face-name${it.named?'':' unnamed'}${it.passerby?' passerby':''}" data-face-id="${Number(it.face.id)||''}" data-face-person="${it.face.person_id}" data-face-kind="${it.kind}" title="${esc(hint)}" aria-label="${esc(hint)}">${esc(it.label)}</button>`;
+    const label=it.label;
+    const named=it.named;
+    const vertical=named&&faceLabelVerticalFor(label);
+    it.vertical=vertical;
+    const hint=named?`${label}；拖动调整位置，双击管理这张脸`:(it.passerby?'路人；拖动调整位置，单击或双击可重新命名':'拖动调整位置，单击或双击命名人物');
+    return `<button type="button" class="face-name${named?'':' unnamed'}${it.passerby?' passerby':''}${named&&!vertical?' is-horizontal':''}" data-face-id="${Number(it.face.id)||''}" data-face-person="${it.face.person_id}" data-face-kind="${it.kind}" data-face-direction="${vertical?'vertical':'horizontal'}" aria-label="${esc(hint)}">${esc(label)}</button>`;
   }).join('')+'<svg class="face-hover-guide" aria-hidden="true"><path></path><circle r="2.6"></circle></svg><span class="face-hover-box" aria-hidden="true"></span>';
-  items.forEach(it=>{ it.vertical = it.passerby || !it.named ? false : faceLabelVerticalFor(it.label); });
   const buttons=[...layer.querySelectorAll('.face-name')];
   const vertical=faceLabelsVertical();
   const placed=[];
@@ -1907,6 +1940,7 @@ function layoutFaceNameButtons(layer, faces, alias){
       const scale=it.vertical?uniformScale:faceLabelScaleForHeight(sourceHeight, imgH);
       btn.style.setProperty('--face-scale',scale.toFixed(3));
       btn.dataset.faceScale=scale.toFixed(3);
+      btn.dataset.faceDirection=it.vertical?'vertical':'horizontal';
       btn.classList.toggle('is-horizontal', it.vertical===false);
     }
     const w=Math.max(18, btn.offsetWidth);
@@ -2039,25 +2073,49 @@ function showFaceGuide(button){
   const dot=guide.querySelector('circle');dot.setAttribute('cx',end.x.toFixed(1));dot.setAttribute('cy',end.y.toFixed(1));
   layer.querySelectorAll('.face-name.is-linked').forEach(item=>item.classList.remove('is-linked'));
   button.classList.add('is-linked');layer.classList.add('is-linking');
+  showFaceNameTip(button, layer);
+}
+function showFaceNameTip(button, layer){
+  const face=faceForLabel(button);
+  const stateInfo=face?faceLabelState(face):null;
+  let tip=layer.querySelector('.face-name-tip');
+  if(!stateInfo || !stateInfo.isNamed){if(tip)tip.remove();return;}
+  if(!tip){
+    tip=document.createElement('span');
+    tip.className='face-name-tip';
+    tip.setAttribute('role','tooltip');
+    layer.appendChild(tip);
+  }
+  tip.textContent=stateInfo.displayText;
+  const layerRect=layer.getBoundingClientRect(), labelRect=button.getBoundingClientRect();
+  const left=Math.max(8, Math.min(layer.clientWidth-220, labelRect.left-layerRect.left));
+  const top=Math.max(8, labelRect.top-layerRect.top-36);
+  tip.style.left=Math.round(left)+'px';
+  tip.style.top=Math.round(top)+'px';
+  button.removeAttribute('title');
+
 }
 function hideFaceGuide(force=false){
   if(!force&&viewer.faceAction)return;
   const layer=$('#face-name-layer');if(!layer)return;
   layer.classList.remove('is-linking');layer.querySelectorAll('.face-name.is-linked').forEach(item=>item.classList.remove('is-linked'));
+  const tip=layer.querySelector('.face-name-tip');
+  if(tip)tip.remove();
 }
 function renderFaceNames(photo){
  const layer=$('#face-name-layer'); if(!layer)return;
  if(faceLabelDrag)return;
  const show=viewer.faceNames!==false;
  const alias=faceAliasMode();
-  const vertical=faceLabelsVertical();
+ const generation=++viewer.faceRenderGeneration;
+ const photoId=Number(photo&&photo.id)||0;
  layer.hidden=!show;
  layer.classList.toggle('horizontal', faceDirMode()==='horizontal');
   if(!show){layer.innerHTML='';syncViewerTools();updatePhotoPeoplePopover();return;}
   const faces=visibleFaces(photo);
   if(!$('#detail-img')?.naturalWidth || !layer.clientWidth){
     layer.innerHTML='';
-    requestAnimationFrame(()=>{ if(state.detail===photo) layoutFaceNameButtons(layer, faces, alias); });
+    requestAnimationFrame(()=>{ if(generation!==viewer.faceRenderGeneration||Number(state.detail&&state.detail.id)!==photoId)return; layoutFaceNameButtons(layer, faces, alias); });
   }else layoutFaceNameButtons(layer, faces, alias);
   syncViewerTools();
   updatePhotoPeoplePopover();

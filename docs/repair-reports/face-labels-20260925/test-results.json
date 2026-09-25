@@ -1,0 +1,32 @@
+{
+  "task_id": "FL-20260925",
+  "reference_commit": "ad20f676fc069bafb095a3cfec30e002a82f0a2d",
+  "tested_commit": "uncommitted-task-worktree",
+  "working_tree_dirty": true,
+  "environment": {
+    "browser": "Chrome 153.0.8010.54",
+    "viewport_css_px": [1440, 900],
+    "narrow_viewport_css_px": [390, 844],
+    "device_pixel_ratio": 1,
+    "browser_zoom": "100%",
+    "data_isolated": true,
+    "production_pid_unchanged": 28992
+  },
+  "cases": [
+    {"id": "FL-MODEL", "status": "PASS", "expected": "State, migration, scale, font, and plate contracts hold", "actual": "9 focused tests passed", "evidence": ["validation/test_face_label_model.py", "validation/test_face_label_config.py"]},
+    {"id": "FL-025", "status": "PASS", "expected": "Appearance reset persists without clearing manual coordinates", "actual": "Reset returned to classic and the manual class remained before the explicit photo reset", "evidence": ["validation/work/face-labels-20260925/private/20260925-125238/checks.json"]},
+    {"id": "FL-042", "status": "NOT_RUN", "expected": "Opacity changes the plate rather than text opacity", "actual": "No separate opacity sweep was executed in this pass", "evidence": []},
+    {"id": "FL-080", "status": "PASS", "expected": "Four themes export with names, direction, colors, plates, and current position", "actual": "classic, ivory, tea, and accent returned PNG and JPEG with renderer same-origin-fonts-v1", "evidence": ["validation/work/face-labels-20260925/private/20260925-125238/exports"]},
+    {"id": "FL-081", "status": "NOT_RUN", "expected": "A frozen snapshot ignores a later theme or photo change", "actual": "Freeze happens immediately before each request, but no delayed theme switch during an in-flight render was injected", "evidence": []},
+    {"id": "FL-082", "status": "PASS", "expected": "Manual layout and mixed Chinese/Latin names survive export", "actual": "Both names were present in every frozen snapshot; explicit reset was separately verified", "evidence": ["validation/work/face-labels-20260925/private/20260925-125238/checks.json"]},
+    {"id": "FL-083", "status": "PASS", "expected": "Tooltip, focus, and export controls stay out of the snapshot", "actual": "Frozen HTML excluded face-name-tip and photo-export-control; inspected PNGs showed no control chrome", "evidence": ["validation/work/face-labels-20260925/private/20260925-125238/exports"]},
+    {"id": "FL-084", "status": "PASS", "expected": "Original image dimensions and source hash stay unchanged without widening resource access", "actual": "Exports were at least 1400x900 from 1600x1000 sources; source hashes matched; external and extra style variables were rejected", "evidence": ["validation/test_annotated_export_fix.py"]},
+    {"id": "FL-NARROW", "status": "PASS", "expected": "390px style panel stays inside the viewport", "actual": "Panel bounds were inside 392 CSS pixels", "evidence": ["validation/work/face-labels-20260925/private/20260925-125238/shots/panel-390.png"]},
+    {"id": "FL-RESOURCE", "status": "PASS", "expected": "A missing horizontal plate keeps the requested theme and falls back visually", "actual": "Ivory request remained ivory while effective theme became classic", "evidence": ["validation/work/face-labels-20260925/private/20260925-125238/checks.json"]},
+    {"id": "FL-SMOKE", "status": "PASS", "expected": "Static guards pass against the shared stylesheet", "actual": "24 checks passed and 0 were skipped", "evidence": ["validation/smoke.py"]}
+  ],
+  "deployment": {
+    "production_changed": false,
+    "status": "not_deployed"
+  }
+}

@@ -23,7 +23,7 @@ _BAD = re.compile(
     r"|@import|expression\s*\(|-moz-binding|behavior\s*:",
     re.I,
 )
-_STYLE_NAME = re.compile(r"^--(?:face-(?:font-size|font-family|text-color|bg-color|bg-opacity|bg-rgba|radius|padding-x|padding-y|shadow|label-[sml]-image)|viewer-signature-h|viewer-image-inset|signature-tone)$")
+_STYLE_NAME = re.compile(r"^--(?:face-(?:font-size|font-family|text-color|bg-color|bg-opacity|bg-rgba|radius|padding-x|padding-y|shadow|label-(?:[sml]-image|image(?:-(?:vertical|horizontal))?))|viewer-signature-h|viewer-image-inset|signature-tone)$")
 _LABEL_URL = re.compile(r"^/api/face-label-bg/[1-9]\.png$", re.I)
 _URL_VALUE = re.compile(r"url\(\s*(['\"]?)(.*?)\1\s*\)", re.I)
 _CAMERA_BRANDS = (
@@ -233,10 +233,10 @@ def render_annotated_image(
     # available only for the same controlled local webfonts and SVG defaults.
     css = "\n".join(
         (web_root / name).read_text(encoding="utf-8")
-        for name in ("style.css", "appearance.css", "viewer-overrides.css")
+        for name in ("style.css", "appearance.css", "viewer-overrides.css", "face-labels.css")
     )
     html = f'''<!doctype html><html lang="zh-CN"><head><base href="{base_url}"><style>{css}</style>
-    <style>html,body{{margin:0;padding:0;background:transparent;overflow:hidden}}body{{zoom:{scale}}}#detail-dialog{{display:block!important;position:relative!important;width:max-content!important;height:max-content!important;overflow:visible!important;background:transparent!important}}#detail-dialog .dialog-shell,#detail-dialog .detail-image,#detail-dialog .viewer-body,#detail-dialog .viewer-stage,#detail-dialog #image-viewport,#detail-dialog #image-canvas{{position:relative!important;inset:auto!important;width:max-content!important;height:max-content!important;overflow:visible!important;padding:0!important}}#detail-dialog #photo-mat{{margin:0!important;width:{mat_w}px!important;height:{mat_h}px!important}}#detail-dialog #detail-img{{width:{css_w}px!important;height:{css_h}px!important;display:block!important}}#detail-dialog .viewer-photo-close,#detail-dialog .photo-favorite,#detail-dialog .photo-place-map,#detail-dialog .photo-export-control,#detail-dialog .face-hover-guide,#detail-dialog .face-hover-box,#detail-dialog .signature-switch{{display:none!important}}</style></head><body><dialog id="detail-dialog" {dialog_attrs}><div class="dialog-shell"><div class="detail-image"><div class="viewer-body"><div class="viewer-stage"><div id="image-viewport"><div id="image-canvas">{mat}</div></div></div></div></div></div></dialog></body></html>'''
+    <style>html,body{{margin:0;padding:0;background:transparent;overflow:hidden}}body{{zoom:{scale}}}#detail-dialog{{display:block!important;position:relative!important;width:max-content!important;height:max-content!important;overflow:visible!important;background:transparent!important}}#detail-dialog .dialog-shell,#detail-dialog .detail-image,#detail-dialog .viewer-body,#detail-dialog .viewer-stage,#detail-dialog #image-viewport,#detail-dialog #image-canvas{{position:relative!important;inset:auto!important;width:max-content!important;height:max-content!important;overflow:visible!important;padding:0!important}}#detail-dialog #photo-mat{{margin:0!important;width:{mat_w}px!important;height:{mat_h}px!important}}#detail-dialog #detail-img{{width:{css_w}px!important;height:{css_h}px!important;display:block!important}}#detail-dialog .viewer-photo-close,#detail-dialog .photo-favorite,#detail-dialog .photo-place-map,#detail-dialog .photo-export-control,#detail-dialog .face-hover-guide,#detail-dialog .face-hover-box,#detail-dialog .face-name-tip,#detail-dialog .signature-switch{{display:none!important}}</style></head><body><dialog id="detail-dialog" {dialog_attrs}><div class="dialog-shell"><div class="detail-image"><div class="viewer-body"><div class="viewer-stage"><div id="image-viewport"><div id="image-canvas">{mat}</div></div></div></div></div></div></dialog></body></html>'''
     # Force the controlled original endpoint after sanitised frozen markup is in place.
     html = re.sub(r'<img\b[^>]*\bid=["\']detail-img["\'][^>]*>', f'<img id="detail-img" src="{base_url}api/original/{aid}" alt="照片">', html, count=1, flags=re.I)
     try:

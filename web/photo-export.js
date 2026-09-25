@@ -4,7 +4,7 @@
   const $=window.$||((selector)=>document.querySelector(selector));
   const EXPECTED_RENDERER='same-origin-fonts-v1';
   const exportButton=()=>document.querySelector('#export-annotated-photo');
-  const EXPORT_STYLE_VARS=['--face-font-size','--face-font-family','--face-text-color','--face-bg-color','--face-bg-opacity','--face-bg-rgba','--face-radius','--face-padding-x','--face-padding-y','--face-shadow','--face-label-image','--viewer-signature-h','--viewer-image-inset','--signature-tone'];
+  const EXPORT_STYLE_VARS=['--face-font-size','--face-font-family','--face-text-color','--face-bg-color','--face-bg-opacity','--face-bg-rgba','--face-radius','--face-padding-x','--face-padding-y','--face-shadow','--face-label-image','--face-label-image-vertical','--face-label-image-horizontal','--viewer-signature-h','--viewer-image-inset','--signature-tone'];
   const FROZEN_STYLE_PROPS=[
     'display','visibility','position','inset','left','top','right','bottom','z-index',
     'width','height','min-width','min-height','max-width','max-height','box-sizing',
@@ -96,7 +96,7 @@
     const id=Number(window.__ourTimeApp.state.detail.id);
     const clone=mat.cloneNode(true);
     freezeTree(mat,clone);
-    clone.querySelectorAll('.viewer-photo-close,.photo-favorite,.photo-place-map,.photo-export-control,.face-hover-guide,.face-hover-box,.signature-switch').forEach(node=>node.remove());
+    clone.querySelectorAll('.viewer-photo-close,.photo-favorite,.photo-place-map,.photo-export-control,.face-hover-guide,.face-hover-box,.face-name-tip,.signature-switch').forEach(node=>node.remove());
     clone.querySelectorAll('#photo-people-hud,.photo-people-hud,#photo-people-popover,.people-manage-popover,.face-action-popover,.face-style-popover').forEach(node=>node.remove());
     clone.querySelectorAll('.is-linked,.is-linking').forEach(node=>node.classList.remove('is-linked','is-linking'));
     clone.querySelector('#detail-img')?.classList.remove('viewer-photo-arriving','viewer-photo-forward','viewer-photo-backward');

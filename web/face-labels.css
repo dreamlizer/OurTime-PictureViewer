@@ -1,0 +1,195 @@
+/* Shared named-label appearance. Live buttons and the preview span use the same rules. */
+#detail-dialog .face-name:not(.unnamed),
+#detail-dialog #face-style-preview-label,
+#detail-dialog #local-font-preview-label{
+  --face-scale:1;
+  position:relative;
+  display:inline-grid;
+  place-items:center;
+  box-sizing:border-box;
+  width:max-content;
+  height:max-content;
+  max-width:none;
+  max-height:none;
+  border:1px solid transparent;
+  border-radius:calc(var(--face-radius) * var(--face-scale));
+  background:var(--face-bg-rgba);
+  color:var(--face-text-color);
+  font-family:var(--face-font-family);
+  font-size:calc(var(--face-font-size) * var(--face-scale, 1));
+  font-weight:400;
+  line-height:1.2;
+  letter-spacing:.08em;
+  writing-mode:vertical-rl;
+  text-orientation:upright;
+  white-space:nowrap;
+  overflow:visible;
+  padding:calc(var(--face-padding-y) * var(--face-scale)) calc(var(--face-padding-x) * var(--face-scale));
+  text-shadow:var(--face-shadow);
+}
+#detail-dialog .face-name:not(.unnamed){position:absolute}
+#detail-dialog .face-name.is-horizontal:not(.unnamed),
+#detail-dialog #face-style-preview-label.is-horizontal,
+#detail-dialog #local-font-preview-label.is-horizontal{
+  writing-mode:horizontal-tb;
+  text-orientation:mixed;
+  letter-spacing:.04em;
+}
+#detail-dialog[data-face-theme="classic"] .face-name:not(.unnamed),
+#detail-dialog[data-face-theme="classic"] #face-style-preview-label,
+#detail-dialog[data-face-theme="classic"] #local-font-preview-label{
+  background:var(--face-bg-rgba);
+  border-color:transparent;
+  box-shadow:0 1px 2px rgba(0,0,0,.08);
+  backdrop-filter:blur(2px);
+  -webkit-backdrop-filter:blur(2px);
+}
+#detail-dialog[data-face-theme="ivory"] .face-name:not(.unnamed),
+#detail-dialog[data-face-theme="tea"] .face-name:not(.unnamed),
+#detail-dialog[data-face-theme="ivory"] #face-style-preview-label,
+#detail-dialog[data-face-theme="tea"] #face-style-preview-label,
+#detail-dialog[data-face-theme="ivory"] #local-font-preview-label,
+#detail-dialog[data-face-theme="tea"] #local-font-preview-label{
+  --face-plate-corner:calc(8px * var(--face-scale, 1));
+  --face-plate-edge:calc(5px * var(--face-scale, 1));
+  --face-plate-pad-block:calc(9px * var(--face-scale, 1));
+  --face-plate-pad-inline:calc(6px * var(--face-scale, 1));
+  --face-plate-slice:210 330 fill;
+  isolation:isolate;
+  padding:var(--face-plate-pad-block) var(--face-plate-pad-inline);
+  border:0;
+  border-radius:0;
+  background:transparent;
+  line-height:1.08;
+  letter-spacing:.08em;
+  box-shadow:none;
+  text-shadow:none;
+  backdrop-filter:none;
+  -webkit-backdrop-filter:none;
+}
+#detail-dialog[data-face-theme="ivory"] .face-name:not(.unnamed),
+#detail-dialog[data-face-theme="ivory"] #face-style-preview-label,
+#detail-dialog[data-face-theme="ivory"] #local-font-preview-label{
+  color:#5a2f28;
+  font-family:"LXGW WenKai GB Screen","STKaiti","Kaiti SC","KaiTi",serif;
+  --face-label-image:url("/api/face-label-bg/1.png");
+}
+#detail-dialog[data-face-theme="tea"] .face-name:not(.unnamed),
+#detail-dialog[data-face-theme="tea"] #face-style-preview-label,
+#detail-dialog[data-face-theme="tea"] #local-font-preview-label{
+  color:#f7ead8;
+  font-family:var(--face-font-family);
+  --face-plate-slice:170 310 fill;
+  --face-label-image:url("/api/face-label-bg/4.png");
+}
+#detail-dialog[data-face-theme="ivory"] .face-name:not(.unnamed)::before,
+#detail-dialog[data-face-theme="tea"] .face-name:not(.unnamed)::before,
+#detail-dialog[data-face-theme="ivory"] #face-style-preview-label::before,
+#detail-dialog[data-face-theme="tea"] #face-style-preview-label::before,
+#detail-dialog[data-face-theme="ivory"] #local-font-preview-label::before,
+#detail-dialog[data-face-theme="tea"] #local-font-preview-label::before{
+  content:"";
+  position:absolute;
+  inset:0;
+  z-index:-1;
+  pointer-events:none;
+  border-style:solid;
+  border-color:transparent;
+  border-width:var(--face-plate-corner) var(--face-plate-edge);
+  /* PNG owns the single outline and decorative corners. */
+  border-image-source:var(--face-label-image);
+  border-image-slice:var(--face-plate-slice);
+  border-image-width:var(--face-plate-corner) var(--face-plate-edge);
+  border-image-repeat:stretch;
+  opacity:var(--face-bg-opacity);
+}
+#detail-dialog[data-face-theme="ivory"] .face-name:not(.unnamed)::before,
+#detail-dialog[data-face-theme="ivory"] #face-style-preview-label::before,
+#detail-dialog[data-face-theme="ivory"] #local-font-preview-label::before{background:rgba(250,244,229,.72)}
+#detail-dialog[data-face-theme="tea"] .face-name:not(.unnamed)::before,
+#detail-dialog[data-face-theme="tea"] #face-style-preview-label::before,
+#detail-dialog[data-face-theme="tea"] #local-font-preview-label::before{background:rgba(72,48,35,.58)}
+#detail-dialog[data-face-theme="ivory"] .face-name.is-horizontal:not(.unnamed),
+#detail-dialog[data-face-theme="tea"] .face-name.is-horizontal:not(.unnamed),
+#detail-dialog[data-face-theme="ivory"] #face-style-preview-label.is-horizontal,
+#detail-dialog[data-face-theme="tea"] #face-style-preview-label.is-horizontal,
+#detail-dialog[data-face-theme="ivory"] #local-font-preview-label.is-horizontal,
+#detail-dialog[data-face-theme="tea"] #local-font-preview-label.is-horizontal{
+  letter-spacing:.02em;
+  --face-plate-corner:calc(5px * var(--face-scale, 1));
+  --face-plate-edge:calc(8px * var(--face-scale, 1));
+  --face-plate-pad-block:calc(6px * var(--face-scale, 1));
+  --face-plate-pad-inline:calc(10px * var(--face-scale, 1));
+  padding:var(--face-plate-pad-block) var(--face-plate-pad-inline);
+}
+#detail-dialog[data-face-theme="ivory"] .face-name.is-horizontal:not(.unnamed),
+#detail-dialog[data-face-theme="ivory"] #face-style-preview-label.is-horizontal,
+#detail-dialog[data-face-theme="ivory"] #local-font-preview-label.is-horizontal{
+  --face-label-image:url("/api/face-label-bg/7.png");
+  --face-plate-slice:330 210 fill;
+}
+#detail-dialog[data-face-theme="tea"] .face-name.is-horizontal:not(.unnamed),
+#detail-dialog[data-face-theme="tea"] #face-style-preview-label.is-horizontal,
+#detail-dialog[data-face-theme="tea"] #local-font-preview-label.is-horizontal{
+  --face-label-image:url("/api/face-label-bg/8.png");
+  --face-plate-slice:310 180 fill;
+}
+#detail-dialog[data-face-theme="accent"] .face-name:not(.unnamed),
+#detail-dialog[data-face-theme="accent"] #face-style-preview-label,
+#detail-dialog[data-face-theme="accent"] #local-font-preview-label{
+  background:
+    repeating-linear-gradient(105deg,rgba(255,244,219,.04) 0 1px,transparent 1px 6px),
+    linear-gradient(180deg,rgba(255,238,207,.035),rgba(40,9,7,.055)),
+    var(--face-bg-rgba);
+  border-color:rgba(237,203,158,.38);
+  line-height:1.15;
+  letter-spacing:.16em;
+  box-shadow:
+    inset 2px 0 0 rgba(238,200,151,.62),
+    inset -1px 0 0 rgba(238,200,151,.22),
+    0 2px 7px rgba(36,15,12,.16);
+  text-shadow:none;
+  backdrop-filter:blur(2px) saturate(.92);
+  -webkit-backdrop-filter:blur(2px) saturate(.92);
+}
+#detail-dialog[data-face-theme="accent"] .face-name.is-horizontal:not(.unnamed),
+#detail-dialog[data-face-theme="accent"] #face-style-preview-label.is-horizontal,
+#detail-dialog[data-face-theme="accent"] #local-font-preview-label.is-horizontal{
+  letter-spacing:.045em;
+  padding-block:calc(6px * var(--face-scale));
+  padding-inline:calc(10px * var(--face-scale));
+  box-shadow:
+    inset 0 -2px 0 rgba(238,200,151,.62),
+    inset 0 1px 0 rgba(238,200,151,.18),
+    0 2px 7px rgba(36,15,12,.16);
+}
+#detail-dialog[data-face-theme-effective="classic"][data-face-theme="ivory"] .face-name:not(.unnamed),
+#detail-dialog[data-face-theme-effective="classic"][data-face-theme="tea"] .face-name:not(.unnamed),
+#detail-dialog[data-face-theme-effective="classic"][data-face-theme="ivory"] #face-style-preview-label,
+#detail-dialog[data-face-theme-effective="classic"][data-face-theme="tea"] #face-style-preview-label{
+  background:var(--face-bg-rgba);
+  color:var(--face-text-color);
+  font-family:var(--face-font-family);
+  border:1px solid transparent;
+  border-radius:calc(var(--face-radius) * var(--face-scale));
+  box-shadow:0 1px 2px rgba(0,0,0,.08);
+}
+#detail-dialog[data-face-theme-effective="classic"] .face-name:not(.unnamed)::before,
+#detail-dialog[data-face-theme-effective="classic"] #face-style-preview-label::before{content:none}
+#detail-dialog .face-name-tip{
+  position:absolute;
+  z-index:8;
+  max-width:min(280px, calc(100% - 16px));
+  padding:6px 8px;
+  border:1px solid rgba(255,255,255,.35);
+  border-radius:8px;
+  background:rgba(20,24,18,.92);
+  color:#f6f1e6;
+  font:400 14px/1.35 "Microsoft YaHei UI","Microsoft YaHei",sans-serif;
+  letter-spacing:0;
+  writing-mode:horizontal-tb;
+  white-space:normal;
+  overflow-wrap:anywhere;
+  pointer-events:none;
+  box-shadow:0 6px 16px rgba(0,0,0,.18);
+}

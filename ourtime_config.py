@@ -109,6 +109,9 @@ def _face_label_candidates() -> list[Path]:
 def resolve_face_label_dir() -> Path:
     candidates = _face_label_candidates()
     for folder in candidates:
+        if all((folder / name).is_file() for name in FACE_LABEL_FILES):
+            return folder
+    for folder in candidates:
         if any((folder / name).is_file() for name in FACE_LABEL_FILES):
             return folder
     return candidates[0]

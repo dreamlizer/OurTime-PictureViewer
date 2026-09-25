@@ -96,6 +96,30 @@ class AnnotatedExportFixTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "不允许的图片资源"):
             _snapshot_html(snapshot)
 
+    def test_directional_plate_variables_stay_inside_the_existing_allowlist(self):
+        snapshot = {
+            "snapshot_version": 2,
+            "geometry": {"image_width": 800, "image_height": 500, "mat_width": 800, "mat_height": 610},
+            "dialog_attrs": {"data-face-theme": "ivory"},
+            "dialog_style": (
+                '--face-label-image:url("/api/face-label-bg/1.png");'
+                '--face-label-image-vertical:url("/api/face-label-bg/1.png");'
+                '--face-label-image-horizontal:url("/api/face-label-bg/7.png")'
+            ),
+            "mat_html": '<figure id="photo-mat" style="position:relative;width:800px;height:610px"><img id="detail-img" style="width:800px;height:500px"><button class="face-name">陈宁</button></figure>',
+        }
+        _, attrs = _snapshot_html(snapshot)
+        self.assertIn("--face-label-image-vertical", attrs)
+        self.assertIn("--face-label-image-horizontal", attrs)
+
+        snapshot["dialog_style"] += ';--face-label-image-extra:url("/api/face-label-bg/1.png")'
+        with self.assertRaisesRegex(ValueError, "样式不符合导出安全限制"):
+            _snapshot_html(snapshot)
+
+        snapshot["dialog_style"] = '--face-label-image-vertical:url("https://example.invalid/1.png")'
+        with self.assertRaisesRegex(ValueError, "样式不符合导出安全限制"):
+            _snapshot_html(snapshot)
+
     def test_frozen_v2_snapshot_renders_jpeg_by_default_and_optional_png(self):
         with tempfile.TemporaryDirectory() as folder:
             temp = Path(folder)
