@@ -1,8 +1,8 @@
 {
   "task_id": "FL-20260925",
   "reference_commit": "ad20f676fc069bafb095a3cfec30e002a82f0a2d",
-  "tested_commit": "uncommitted-task-worktree",
-  "working_tree_dirty": true,
+  "tested_commit": "f7bf5bd",
+  "working_tree_dirty": false,
   "environment": {
     "browser": "Chrome 153.0.8010.54",
     "viewport_css_px": [1440, 900],

@@ -4,7 +4,7 @@
 
 P0 through P4 were carried through in the isolated worktree. The shared label model, four themes, direction, preference migration, preview/live component, and export path are present. The final isolated browser run passed, including four-theme PNG/JPEG export and unchanged source hashes.
 
-Code status: changes are in the task worktree and are not yet the final commit recorded by this report. They are not pushed, not merged, and not deployed. Production PID 28992 and its production data directory were unchanged after verification.
+Code status: local task commit f7bf5bd on fix/face-label-system-20260925. It is not pushed, not merged, and not deployed. Production PID 28992 and its production data directory were unchanged after verification.
 
 Visual status: the four exported PNGs and the 1440px screenshots were opened and inspected locally. This is synthetic-sample visual acceptance, not a real private-photo gallery review.
 
