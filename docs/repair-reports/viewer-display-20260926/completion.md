@@ -40,7 +40,8 @@
 | 状态/票据 | `node validation/test_viewer_display_state.js` | **PASS** |
 | 控制器合同 | `python validation/test_viewer_display_state.py` | **PASS** |
 | 日常 smoke | `python validation/smoke.py` | **PASS** 28 checks |
-| 真浏览器 VD 矩阵 | （见 runbook） | **NOT_RUN**（本阶段无隔离库 fixture 全量） |
+| 真浏览器 VD 矩阵 | （见 runbook） | **PARTIAL**：真实入口开图/关闭 PASS；VD-01–42 未逐条 |
+| 真实入口开图/关闭 | `test_viewer_display_browser.py` | **PASS** |
 | 隔离后端收藏/导出联调 | — | **NOT_RUN** |
 
 ## 明确未做（非阻断 / 按卡不扩scope）
