@@ -504,6 +504,28 @@ def main():
     ok("viewer-loading-corner")
 
     if (
+        "#detail-dialog.viewer-closing" not in viewer_overrides
+        or "viewer-photo-arriving" not in viewer
+        or "@keyframes viewer-photo-forward" not in viewer_overrides
+        or "@keyframes viewer-photo-backward" not in viewer_overrides
+    ):
+        fail("大图切换/关闭缺少渐隐渐入动画，不能是硬切")
+    if (
+        "#home-view.is-switching" not in appearance
+        or "opacity: 0" not in appearance
+        or "#photo-grid.is-updating" not in appearance
+        or "opacity: .55" not in appearance
+    ):
+        fail("大页面切换缺少 is-switching/is-updating 透明度过渡")
+    if "if(preserve)g.classList.add('is-swapping')" not in waterfall and "waterfall.seenPhotos.add" not in waterfall:
+        fail("照片流换源缺少防闪屏处理（is-swapping 或 seenPhotos 预标记）")
+    if "if(!samePhotoStream)preparePanel" not in app and "if(samePhotoStream&&panel)" not in app:
+        fail("公众人物/全部照片同源切换不应整页淡出，需跳过 preparePanel 硬切")
+    if "state.detail=null" not in viewer or "dataset.photoId" not in viewer:
+        fail("退出大图后未清理 state.detail / photoId，人名标签可能残留")
+    ok("切换动效：大图渐隐渐入、页面渐入、照片流换源防残留")
+
+    if (
         'placeholder="搜索已记录地点"' not in html
         or 'class="place-search-results"' not in html
         or "没有找到已记录的地点" not in app

@@ -1343,7 +1343,11 @@ function updateZoom(reset=false){
   $('#zoom-level').textContent=Math.round(viewer.scale*100)+'%';
   positionSignatureInfo();
   if(reset){area.scrollTop=0;area.scrollLeft=0;}
-  if(state.detail&&viewer.faceNames!==false)requestAnimationFrame(()=>renderFaceNames(state.detail));
+  if(state.detail&&viewer.faceNames!==false){
+   const detailId=Number(state.detail.id)||0;
+   const shownId=Number($('#detail-dialog').dataset.photoId)||0;
+   if(detailId&&detailId===shownId)requestAnimationFrame(()=>renderFaceNames(state.detail));
+  }
 }
 function renderSignature(a,file){
  const signature=$('#photo-signature');if(!signature)return;
@@ -2225,9 +2229,9 @@ function renderFaceNames(photo){
  const alias=faceAliasMode();
  const generation=++viewer.faceRenderGeneration;
  const photoId=Number(photo&&photo.id)||0;
- layer.hidden=!show;
+ if(!show||!photoId){layer.innerHTML='';layer.hidden=true;syncViewerTools();updatePhotoPeoplePopover();return;}
+ layer.hidden=false;
  layer.classList.toggle('horizontal', faceDirMode()==='horizontal');
-  if(!show){layer.innerHTML='';syncViewerTools();updatePhotoPeoplePopover();return;}
   const faces=visibleFaces(photo);
   if(!$('#detail-img')?.naturalWidth || !layer.clientWidth){
     layer.innerHTML='';
@@ -2330,7 +2334,7 @@ async function loadViewerSequence(id,nextContext,generation){
 }
 async function openPhoto(id,context=null){
  const wasOpen=$('#detail-dialog').open;
- if(!wasOpen){viewer.returnScroll=scrollY;viewer.openedPhotoId=null;viewer.openedAbsolute=null;viewer.openedContext=null;viewer.openedWaterfallGeneration=null;viewer.exit=null;clearFaceNames();if(!seedViewerFromThumb(id))clearViewerImage();}
+ if(!wasOpen){viewer.returnScroll=scrollY;viewer.openedPhotoId=null;viewer.openedAbsolute=null;viewer.openedContext=null;viewer.openedWaterfallGeneration=null;viewer.exit=null;clearFaceNames();state.detail=null;delete $('#detail-dialog').dataset.photoId;if(!seedViewerFromThumb(id))clearViewerImage();}
  stopSlides();
  const alreadyOpen=wasOpen;
  const generation=++viewer.generation;
@@ -2457,7 +2461,15 @@ $('#zoom-in').addEventListener('click',()=>zoomTo(viewer.scale*1.25));
 $('#zoom-out').addEventListener('click',()=>zoomTo(viewer.scale/1.25));
 $('#zoom-fit').addEventListener('click',()=>{viewer.fit=true;updateZoom(true);});
 $('#zoom-actual').addEventListener('click',()=>zoomTo(1));
-$('#detail-img').addEventListener('load',()=>{updateSignaturePalette();updateZoom(true);renderFaceNames(state.detail);});
+$('#detail-img').addEventListener('load',()=>{
+  updateSignaturePalette();
+  updateZoom(true);
+  // Seed thumbs can load before displayPhoto commits. Never paint labels from a
+  // stale state.detail (previous photo) onto the image now on screen.
+  const detailId=Number(state.detail&&state.detail.id)||0;
+  const shownId=Number($('#detail-dialog').dataset.photoId)||0;
+  if(detailId&&detailId===shownId)renderFaceNames(state.detail);
+});
 const faceLayer=$('#face-name-layer');
 let faceLabelEditTimer=null;
 function clearFaceLabelEditTimer(){
@@ -2580,7 +2592,7 @@ $('#viewer-info').addEventListener('click',toggleInfo);
 $('#close-info').addEventListener('click',toggleInfo);
 $('#viewer-play').addEventListener('click',()=>{if(viewer.playing){stopSlides();syncViewerTools();return;}const current=Number.isFinite(viewer.absolute)?viewer.absolute:(viewer.offset||0)+(viewer.target||0);if(current>=(viewer.total||viewer.ids.length)-1){viewerMessage('已经是最后一张，请先返回前面的照片。');return;}viewer.playing=true;syncViewerTools();scheduleSlide();});
 $('#slide-delay').addEventListener('change',()=>{saveViewerPrefs();if(viewer.timer)scheduleSlide();});
-$('#detail-dialog').addEventListener('close',()=>{clearFaceLabelEditTimer();viewer.exit={photoId:Number(state.detail?.id)||0,absolute:Number(viewer.absolute),context:viewer.context?{...viewer.context}:null,fallbackScroll:viewer.returnScroll,openedPhotoId:Number(viewer.openedPhotoId)||0,openedAbsolute:Number(viewer.openedAbsolute),openedContext:viewer.openedContext?{...viewer.openedContext}:null,waterfallGeneration:viewer.openedWaterfallGeneration};clearTimeout(viewer.closingTimer);viewer.closingTimer=null;$('#detail-dialog').classList.remove('viewer-closing');stopSlides();toggleFaceStylePopover(false);togglePhotoPeoplePopover(false);closeFaceActionPopover();clearFaceNames();viewer.lastPasserbyBatch=null;viewer.generation++;viewer.presentation++;viewer.queued=null;viewer.goal=null;viewer.sequencePromise=null;renderPhoto.ticket++;if(viewer.loaderCancel)viewer.loaderCancel();setViewerLoading(false);if(document.fullscreenElement)document.exitFullscreen().catch(()=>{});});
+$('#detail-dialog').addEventListener('close',()=>{clearFaceLabelEditTimer();viewer.exit={photoId:Number(state.detail?.id)||0,absolute:Number(viewer.absolute),context:viewer.context?{...viewer.context}:null,fallbackScroll:viewer.returnScroll,openedPhotoId:Number(viewer.openedPhotoId)||0,openedAbsolute:Number(viewer.openedAbsolute),openedContext:viewer.openedContext?{...viewer.openedContext}:null,waterfallGeneration:viewer.openedWaterfallGeneration};clearTimeout(viewer.closingTimer);viewer.closingTimer=null;$('#detail-dialog').classList.remove('viewer-closing');stopSlides();toggleFaceStylePopover(false);togglePhotoPeoplePopover(false);closeFaceActionPopover();clearFaceNames();state.detail=null;delete $('#detail-dialog').dataset.photoId;viewer.lastPasserbyBatch=null;viewer.generation++;viewer.presentation++;viewer.queued=null;viewer.goal=null;viewer.sequencePromise=null;renderPhoto.ticket++;if(viewer.loaderCancel)viewer.loaderCancel();setViewerLoading(false);if(document.fullscreenElement)document.exitFullscreen().catch(()=>{});});
 $('#detail-dialog').addEventListener('cancel',e=>{e.preventDefault();closePhotoViewer();});
 document.addEventListener('visibilitychange',()=>{if(document.hidden)stopSlides();});
 document.addEventListener('keydown',action(async e=>{

@@ -1505,6 +1505,31 @@
 #detail-dialog #photo-signature[data-style="tone"] .caption-camera{font:10px/1.4 var(--sans)}
 #detail-dialog[data-signature-small="true"] #photo-signature[data-style="gallery"] .signature-designed{padding-top:18px}
 
+/* Photo switch and viewer close: quiet directional fade, no hard cuts. */
+#detail-dialog.viewer-closing{
+  opacity:0;
+  transform:scale(.992);
+  transition:opacity 140ms ease,transform 140ms ease;
+}
+#detail-dialog #detail-img.viewer-photo-arriving.viewer-photo-forward{
+  animation:viewer-photo-forward 150ms cubic-bezier(.2,.72,.3,1);
+}
+#detail-dialog #detail-img.viewer-photo-arriving.viewer-photo-backward{
+  animation:viewer-photo-backward 150ms cubic-bezier(.2,.72,.3,1);
+}
+@keyframes viewer-photo-forward{
+  from{opacity:.58;transform:translateX(8px) scale(.997)}
+  to{opacity:1;transform:none}
+}
+@keyframes viewer-photo-backward{
+  from{opacity:.58;transform:translateX(-8px) scale(.997)}
+  to{opacity:1;transform:none}
+}
+@media(prefers-reduced-motion:reduce){
+  #detail-dialog.dialog-enter,#detail-dialog.dialog-open,#detail-dialog.viewer-closing{opacity:1;transform:none;transition:none}
+  #detail-dialog #detail-img.viewer-photo-arriving{animation:none}
+}
+
 @media(max-width:979px){
   #detail-dialog .face-style-popover,
   #detail-dialog .people-manage-popover{left:12px;right:12px;width:auto;top:auto;bottom:64px;transform:none}

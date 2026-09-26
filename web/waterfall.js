@@ -263,6 +263,16 @@ async function loadPhotos(options={}){if((state.view==='timeline'||state.view===
  const g=$('#photo-grid');
  if(!g){if(external)external.removeEventListener('abort',abortFromExternal);return false;}
  if(first){
+  if(preserve){
+   const page=waterfall.cache.get(0);
+   if(page&&waterfall.seenPhotos){
+    for(const p of page.layout){
+     const key=p.a&&p.a.shelf?'shelf':Number(p.a&&p.a.id);
+     if(p.a&&p.a.shelf)waterfall.seenPhotos.add('shelf');
+     else if(Number.isFinite(key))waterfall.seenPhotos.add(key);
+    }
+   }
+  }
   g.replaceChildren();
   if(options.scrollTop)scrollTo({top:0,behavior:'instant'});
   streamPaint();

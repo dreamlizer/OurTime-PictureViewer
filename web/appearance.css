@@ -1021,6 +1021,9 @@ body.is-home-view .chrome-row {
 
 .person-card{transition:opacity .18s ease, transform .18s ease, margin .18s ease;}
 .person-card.removing{opacity:0;transform:scale(.98);pointer-events:none;}
+#person-dialog.person-swap .person-chrome,
+#person-dialog.person-swap .person-body{animation:person-swap-in 150ms ease-out}
+@keyframes person-swap-in{from{opacity:.4;transform:translateY(3px)}to{opacity:1;transform:none}}
 
 
 .folder-trail{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:8px 0 4px;}
@@ -1052,29 +1055,33 @@ body.is-home-view .chrome-row {
 
 
 /* Light page-switch and dialog motion. Keep durations under 160ms. */
-#people-view, #passersby-view, #folders-view, #places-view, #groups-view,
+#home-view, #people-view, #passersby-view, #folders-view, #places-view, #groups-view,
 #timeline-view, #scan-view, #library-view {
   transition: opacity 140ms ease, transform 140ms ease;
 }
-#people-view.is-switching, #passersby-view.is-switching, #folders-view.is-switching,
-#places-view.is-switching, #groups-view.is-switching, #timeline-view.is-switching,
-#scan-view.is-switching, #library-view.is-switching {
+#home-view.is-switching, #people-view.is-switching, #passersby-view.is-switching,
+#folders-view.is-switching, #places-view.is-switching, #groups-view.is-switching,
+#timeline-view.is-switching, #scan-view.is-switching, #library-view.is-switching {
+  opacity: 0;
+  transform: translateY(2px);
   pointer-events: none;
 }
-#people-view.is-pending, #passersby-view.is-pending, #folders-view.is-pending,
-#places-view.is-pending, #groups-view.is-pending, #timeline-view.is-pending,
-#scan-view.is-pending, #library-view.is-pending {
+#home-view.is-pending, #people-view.is-pending, #passersby-view.is-pending,
+#folders-view.is-pending, #places-view.is-pending, #groups-view.is-pending,
+#timeline-view.is-pending, #scan-view.is-pending, #library-view.is-pending {
+  opacity: .55;
   pointer-events: none;
 }
-#people-view.is-ready, #passersby-view.is-ready, #folders-view.is-ready,
-#places-view.is-ready, #groups-view.is-ready, #timeline-view.is-ready,
-#scan-view.is-ready, #library-view.is-ready {
+#home-view.is-ready, #people-view.is-ready, #passersby-view.is-ready,
+#folders-view.is-ready, #places-view.is-ready, #groups-view.is-ready,
+#timeline-view.is-ready, #scan-view.is-ready, #library-view.is-ready {
   opacity: 1;
   transform: none;
 }
-#photo-grid.is-updating { pointer-events: none; }
+#photo-grid.is-updating { opacity: .55; pointer-events: none; transition: opacity 140ms ease; }
 #people-grid.is-switching, #passersby-grid.is-switching, #folders-list.is-switching,
 #places-list.is-switching, #groups-list.is-switching, #timeline-list.is-switching {
+  opacity: 0;
   min-height: 240px;
   pointer-events: none;
 }
