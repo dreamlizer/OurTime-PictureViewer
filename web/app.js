@@ -1571,9 +1571,9 @@ if(scanCard){
 
 document.querySelectorAll("dialog").forEach(el=>{if(el.open)el.close();});
 const renderPhotoImplementation=renderPhoto;
-renderPhoto=async function(id){
+renderPhoto=async function(id,prepared=null){
  const session=entitySessions.open('photo',Number(id));entitySession.photo=session;
- const rendered=await renderPhotoImplementation(id);
+ const rendered=await renderPhotoImplementation(id,prepared);
  if(!rendered||!entitySessions.current(session))return false;
  const message=state.detail&&state.detail.face_status_message;
  if(message){const facts=$('#detail-facts');if(facts)facts.insertAdjacentHTML('beforeend',`<div class="fact"><span>人脸识别状态</span><p>${esc(message)}</p></div>`);}
