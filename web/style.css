@@ -36,8 +36,8 @@
 body{overflow-anchor:none}
 #photo-grid{display:block;position:relative;overflow-anchor:none;min-height:0;transition:opacity 140ms ease}
 #photo-grid .public-figure-frame{display:flex;align-items:center;justify-content:center;background:var(--ui-soft);border:1px solid var(--ui-selected-border);color:var(--green);overflow:hidden}
-#photo-grid .public-figure-mark{display:grid;place-items:center;width:46%;height:46%;min-width:72px;min-height:72px;max-width:120px;max-height:120px;border-radius:22px;background:var(--panel);border:1px solid var(--line);box-shadow:var(--ui-shadow-control);color:var(--green)}
-#photo-grid .public-figure-mark svg{width:46%;height:46%}
+#photo-grid .public-figure-mark{display:flex;align-items:center;justify-content:center;width:84%;height:88%;background:none;border:0;box-shadow:none}
+#photo-grid .public-figure-card .public-figure-mark img,#photo-grid .public-figure-card.stream-motion .public-figure-mark img{width:100%;height:100%;object-fit:contain;opacity:1;transform:none}
 #photo-grid .public-figure-card:hover .public-figure-frame{background:#e4ede7;border-color:#91a99a}
 #photo-grid .public-figure-card.stream-motion{opacity:1;transform:none}
 #photo-grid .photo-card{position:absolute;margin:0;animation:none;contain:layout style}
