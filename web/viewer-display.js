@@ -9,6 +9,7 @@
     let sessionEpoch = 0;
     let requestSeq = 0;
     let commitSeq = 0;
+    let lastRequestSeq = 0;
     let lifecycle = 'closed';
     let content = 'empty';
     let committed = null;
@@ -26,6 +27,7 @@
 
     function nextRequestToken(targetKey) {
       requestSeq += 1;
+      lastRequestSeq = requestSeq;
       return Object.freeze({
         sessionEpoch,
         requestSeq,
@@ -72,6 +74,7 @@
       sessionEpoch += 1;
       requestSeq = 0;
       commitSeq = 0;
+      lastRequestSeq = 0;
       pending = null;
       committed = null;
       content = 'empty';
@@ -173,8 +176,12 @@
         emit('stale-commit', { reason: 'session' });
         return { ok: false, status: 'stale', adopted: false };
       }
-      if (pending && ticket.requestSeq != null && pending.token.requestSeq !== ticket.requestSeq) {
+      if (ticket.requestSeq != null && ticket.requestSeq !== lastRequestSeq) {
         emit('stale-commit', { reason: 'request-seq' });
+        return { ok: false, status: 'stale', adopted: false };
+      }
+      if (pending && ticket.requestSeq != null && pending.token.requestSeq !== ticket.requestSeq) {
+        emit('stale-commit', { reason: 'pending-mismatch' });
         return { ok: false, status: 'stale', adopted: false };
       }
       if (!candidate || !candidate.photoKey) {

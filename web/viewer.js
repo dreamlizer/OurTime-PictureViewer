@@ -1203,15 +1203,24 @@ async function togglePhotoFavorite(){
  const id=Number(state.detail?.id);if(!id)throw new Error('没有可收藏的照片');
  const button=$('#photo-favorite');if(!button||button.disabled)return;
  const favorite=!Boolean(state.detail?.favorite);
+ const lease=viewerDisplay?viewerDisplay.currentLease():null;
+ if(viewerDisplay&&lease)viewerDisplay.setDisabledReason('entity-write',true);
  button.disabled=true;
  try{
   const result=await api('/api/photos/'+id+'/favorite',{method:'PUT',body:JSON.stringify({favorite})});
-  if(Number(state.detail?.id)===id){state.detail.favorite=Boolean(result.favorite);syncPhotoFavorite(state.detail);}
+  const stillSame=Number(state.detail?.id)===id;
+  if(stillSame){state.detail.favorite=Boolean(result.favorite);}
   if(state.status?.stats)state.status.stats.favorite_photos=Number(result.favorite_count)||0;
   setText('#favorites-count',fmt(result.favorite_count));
   if(state.view==='favorites')state.favoriteViewDirty=true;
+  const leaseOk=!viewerDisplay||!lease||viewerDisplay.isLiveLease(lease);
+  if(stillSame&&leaseOk)syncPhotoFavorite(state.detail);
   toast(result.favorite?'已收藏这张照片':'已取消收藏');
- }finally{if(Number(state.detail?.id)===id&&button)button.disabled=false;}
+ }finally{
+  if(viewerDisplay)viewerDisplay.setDisabledReason('entity-write',false);
+  const leaseOk=!viewerDisplay||!lease||viewerDisplay.isLiveLease(lease);
+  if(Number(state.detail?.id)===id&&leaseOk&&button)button.disabled=false;
+ }
 }
 function syncPhotoFavorite(photo=state.detail){
  const button=$('#photo-favorite');if(!button)return;
@@ -1353,7 +1362,16 @@ function updateZoom(reset=false){
   if(state.detail&&viewer.faceNames!==false){
    const detailId=Number(state.detail.id)||0;
    const shownId=Number($('#detail-dialog').dataset.photoId)||0;
-   if(detailId&&detailId===shownId)requestAnimationFrame(()=>renderFaceNames(state.detail));
+   const lease=viewerDisplay?viewerDisplay.currentLease():null;
+   const leaseOk=!viewerDisplay||viewerDisplay.isLiveLease(lease);
+   if(detailId&&detailId===shownId&&leaseOk){
+    if(viewerDisplay&&lease)viewerDisplay.requestDisplayRefresh('geometry',lease,['labels','geometry']);
+    requestAnimationFrame(()=>{
+     const live=!viewerDisplay||viewerDisplay.isLiveLease(viewerDisplay.currentLease());
+     if(!live)return;
+     if(Number(state.detail&&state.detail.id)===detailId)renderFaceNames(state.detail);
+    });
+   }
   }
 }
 function renderSignature(a,file){
@@ -2538,11 +2556,11 @@ $('#zoom-actual').addEventListener('click',()=>zoomTo(1));
 $('#detail-img').addEventListener('load',()=>{
   updateSignaturePalette();
   updateZoom(true);
-  // Seed thumbs can load before displayPhoto commits. Never paint labels from a
-  // stale state.detail (previous photo) onto the image now on screen.
   const detailId=Number(state.detail&&state.detail.id)||0;
   const shownId=Number($('#detail-dialog').dataset.photoId)||0;
-  if(detailId&&detailId===shownId)renderFaceNames(state.detail);
+  const lease=viewerDisplay?viewerDisplay.currentLease():null;
+  const leaseOk=!viewerDisplay||viewerDisplay.isLiveLease(lease);
+  if(detailId&&detailId===shownId&&leaseOk)renderFaceNames(state.detail);
 });
 const faceLayer=$('#face-name-layer');
 let faceLabelEditTimer=null;

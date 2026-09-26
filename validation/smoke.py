@@ -537,6 +537,19 @@ def main():
         fail("后端时间轴缺少缓存或预热")
     ok("时间筛选年份预取与缓存")
 
+    display_js = read(WEB / "viewer-display.js")
+    if (
+        "createViewerDisplay" not in display_js
+        or "commitDisplay" not in display_js
+        or "src=\"/viewer-display.js\"" not in html
+    ):
+        fail("缺少 viewer-display 控制器或 index 未挂载")
+    if "renderPhotoImplementation(id,prepared)" not in app and "renderPhotoImplementation(id, prepared)" not in app:
+        fail("renderPhoto 包装仍丢弃 prepared，会二次取数")
+    if "viewerDisplay.commitDisplay" not in viewer or "viewerDisplay.beginClose" not in viewer:
+        fail("viewer.js 未接入 commitDisplay / beginClose")
+    ok("显示控制器：commitDisplay 唯一采用 + 清单接线")
+
     if (
         'placeholder="搜索已记录地点"' not in html
         or 'class="place-search-results"' not in html
