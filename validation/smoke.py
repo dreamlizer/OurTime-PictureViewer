@@ -525,6 +525,18 @@ def main():
         fail("退出大图后未清理 state.detail / photoId，人名标签可能残留")
     ok("切换动效：大图渐隐渐入、页面渐入、照片流换源防残留")
 
+    home_ui = read(WEB / "home-query-ui.js")
+    if (
+        "ensureTimeline" not in home_ui
+        or "正在读取年份" not in home_ui
+        or "ot-timeline" not in home_ui
+        or "void ensureTimeline()" not in home_ui
+    ):
+        fail("时间筛选缺少预取/缓存，打开时可能长时间空白")
+    if "invalidate_timeline_cache" not in backend and "build_timeline_payload" not in backend:
+        fail("后端时间轴缺少缓存或预热")
+    ok("时间筛选年份预取与缓存")
+
     if (
         'placeholder="搜索已记录地点"' not in html
         or 'class="place-search-results"' not in html

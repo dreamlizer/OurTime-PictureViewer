@@ -1921,6 +1921,28 @@ function faceLabelEyeRegion(item){
   // Only bounding boxes are stored; this is an estimated eye band, not landmarks.
   return {x:item.fx+item.fw*.18,y:item.fy+item.fh*.22,w:item.fw*.64,h:item.fh*.30};
 }
+function faceLabelSideSpace(item, items, side, bounds){
+  let space=side==='left'?item.fx-bounds.x:bounds.x+bounds.w-(item.fx+item.fw);
+  for(const other of items){
+    if(other===item)continue;
+    if(other.fy>=item.fy+item.fh||other.fy+other.fh<=item.fy)continue;
+    const gap=side==='left'?item.fx-(other.fx+other.fw):other.fx-(item.fx+item.fw);
+    if(gap>=-item.fw*.25)space=Math.min(space,Math.max(0,gap));
+  }
+  return space;
+}
+function faceLabelClearance(faceW, faceH, labelW, sideSpace){
+  const face=Math.min(Math.max(1,faceW),Math.max(1,faceH));
+  // The detector box ends at the cheek. Hair continues past it, so the
+  // comfortable seat is about a fifth of the face outside that box: enough
+  // to clear the face and only graze hair. A nearer neighbour pulls the
+  // plate inward, but not onto the face.
+  const hairline=Math.min(40,Math.max(6,face*.22));
+  const cheek=Math.max(4,face*.10);
+  if(!Number.isFinite(sideSpace))return hairline;
+  const room=Math.max(0,(sideSpace-Math.max(0,labelW))*.42);
+  return Math.min(hairline,Math.max(cheek,Math.min(hairline,room||cheek)));
+}
 function placeSmartVerticalLabels(geometries, items, placed, bounds){
   const faces=items.map(it=>({x:it.fx,y:it.fy,w:it.fw,h:it.fh}));
   const eyeRegions=items.map(faceLabelEyeRegion);
@@ -1928,15 +1950,17 @@ function placeSmartVerticalLabels(geometries, items, placed, bounds){
   const pending=geometries.filter(g=>g.smart);
   const candidates=new Map();
   for(const g of pending){
-    const it=g.it,head=heads[g.index];
-    const idealGap=Math.max(8,Math.min(20,it.fw*.18));
+    const it=g.it;
     const list=[];
-    // Keep labels near the head row; avoid distant above/below detours.
-    // Additional gaps retract toward the owner: flush to the face box, then
-    // at most 10% / 18% into its edge, still outside the central facial area.
-    const gaps=[idealGap,4,-it.fw*.12,-it.fw*.22,-it.fw*.30];
-    for(const side of ['left','right'])for(const gap of gaps)for(const shift of [0,-.3,.3,-.6,.6]){
-      const rect={x:side==='left'?head.x-g.w-gap:head.x+head.w+gap,
+    // Each side has its own free gap. Candidates stay outside the face box;
+    // the tightest one only comes in to the outer hair, never across the cheek.
+    for(const side of ['left','right']){
+      const sideSpace=faceLabelSideSpace(it,items,side,bounds);
+      const idealGap=faceLabelClearance(it.fw,it.fh,g.w,sideSpace);
+      const cheek=Math.max(4,Math.min(it.fw,it.fh)*.10);
+      const gaps=[idealGap,Math.max(cheek,idealGap*.7),cheek];
+      for(const gap of gaps)for(const shift of [0,-.3,.3,-.6,.6]){
+      const rect={x:side==='left'?it.fx-g.w-gap:it.fx+it.fw+gap,
         y:it.cy+it.fh*.1-g.h/2+shift*it.fh,w:g.w,h:g.h,side,btn:g.btn};
       rect.outside=rect.x<bounds.x||rect.x+rect.w>bounds.x+bounds.w;
       rect.shift=Math.abs(shift);
@@ -1954,13 +1978,17 @@ function placeSmartVerticalLabels(geometries, items, placed, bounds){
       // Keep breathing room when available. In a narrow gap, protect the
       // neighbour more strongly than the owner's cheek edge and retract until
       // the label is at least as close to its owner as to another face.
+      rect.ambiguity=ambiguity;
+      rect.nearerOther=others.length?own>=Math.min(...others):false;
       rect.attachment=8*otherArea/(g.w*g.h)+ownArea/(g.w*g.h)
-        +4*ambiguity/it.fw+.25*Math.abs(gap-idealGap)/it.fw;
+        +(rect.nearerOther?1.25+ambiguity/Math.max(10,g.w):0)
+        +.2*Math.abs(gap-idealGap)/Math.max(12,g.w);
       rect.eyeArea=eyeRegions.reduce((s,f)=>s+rectOverlapArea(rect,f),0);
       rect.faceRatio=Math.max(0,...faces.map(f=>rectOverlapArea(rect,f)/(f.w*f.h)));
       rect.base=[faceArea,headArea,ambiguity,
         Math.abs(rect.y+g.h/2-(it.cy+it.fh*.1))*.2+Math.abs(gap-idealGap)+(side==='left'?0:6)];
       list.push(rect);
+      }
     }
     candidates.set(g,list);
   }
@@ -1975,7 +2003,7 @@ function placeSmartVerticalLabels(geometries, items, placed, bounds){
     const excess=Math.max(0,labelRatio-FACE_LABEL_OVERLAP_LIMIT);
     return [excess>0?1:0,excess,rect.eyeArea>0?1:0,rect.eyeArea,
       Math.max(0,rect.faceRatio-FACE_LABEL_FACE_OVERLAP_LIMIT),Number(rect.outside),
-      rect.side==='left'?0:1,rect.shift,rect.attachment,rect.base[0]+overlap,rect.base[1],rect.base[3]];
+      rect.nearerOther?1:0,rect.side==='left'?0:1,rect.shift,rect.attachment,rect.base[0]+overlap,rect.base[1],rect.base[3]];
   }
   for(let pass=0;pass<8;pass++)for(const g of pending){
     let best=null,bestScore=null;
@@ -2007,7 +2035,7 @@ function placeSmartVerticalLabels(geometries, items, placed, bounds){
     for(const state of beam)for(const rect of safe.get(g)){
       if([...state.rects.values()].some(o=>rectOverlapRatio(rect,o)>FACE_LABEL_OVERLAP_LIMIT))continue;
       const preferred=preferRight.has(g)?'right':'left';
-      const cost=state.cost+(rect.side===preferred?0:4)+rect.shift*10+rect.attachment;
+      const cost=state.cost+(rect.nearerOther?6:0)+(rect.side===preferred?0:4)+rect.shift*10+rect.attachment;
       next.push({rects:new Map([...state.rects,[g,rect]]),cost});
     }
     next.sort((a,b)=>a.cost-b.cost);

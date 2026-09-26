@@ -72,6 +72,8 @@ def register(app, runtime):
             if existing:return existing
             items=apply(c,ids,changes)
             invalidate_home_cache(c)
+            if service('invalidate_status_cache'):
+                service('invalidate_status_cache')()
             return service('finish_operation')(c,op,{'updated':len(items)},undo={'assets':items})
 
     @app.post('/api/organize/photos/{aid}/nearby-place')
@@ -88,6 +90,8 @@ def register(app, runtime):
                 ids=[row['id'] for row in rows if (row['manual_place'] or '')!=place]
                 items=apply(c,ids,{'manual_place':place})
                 invalidate_home_cache(c)
+                if service('invalidate_status_cache'):
+                    service('invalidate_status_cache')()
                 return service('finish_operation')(c,op,{'name':place,'radius_m':body.radius_m,
                     'matched':len(rows),'updated':len(items),'anchor':anchor,
                     'message':f'已把 {len(rows)} 张照片标为“{place}”，可在最近操作中撤销'},undo={'assets':items} if items else None)
@@ -140,4 +144,6 @@ def register(app, runtime):
             if conflicts:raise service('ApiProblem')(409,'相关资料已有后续修改，未执行撤销','undo_conflict',conflicts=conflicts)
             for item in items:apply(c,[item['id']],item['before'])
             invalidate_home_cache(c)
+            if service('invalidate_status_cache'):
+                service('invalidate_status_cache')()
             return service('finish_operation')(c,operation_id,{**json.loads(row['result_json']),'undone':True,'undo_photos':len(items)},status='undone',undo=record)

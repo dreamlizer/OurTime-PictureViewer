@@ -106,6 +106,8 @@
     let destroyed = false, busy = false, lastScope = null, lastFocus = null, openKind = '', openAnchor = null;
     let people = [], peopleLabels = new Map(), places = [], timeline = { years: [], months: [] };
     let peopleTimer = null, placeTimer = null, peopleController = null, placeController = null, folderPending = false, timeYear = '';
+    let timelinePromise = null, timelineLoading = false;
+    timeline = readTimelineCache() || timeline;
     function listen(el, event, handler) { if (el) el.addEventListener(event, handler, { signal: life.signal }); }
     function snapshot() {
       const raw = adapter.readState();
@@ -312,8 +314,16 @@
         button.dataset.time = value; button.textContent = label; list.appendChild(button);
       };
       add('全部时间', '', !s.query.dateFrom && !s.query.dateTo);
-      if (!timeYear) for (const item of years.slice(0, 24)) add(item.year + '年', 'y:' + item.year, s.query.dateFrom === item.year);
-      else {
+      if (!timeYear) {
+        if (!years.length) {
+          const wait = document.createElement('p');
+          wait.className = 'ot-home-empty';
+          wait.textContent = timelineLoading ? '正在读取年份…' : '还没有记录年份';
+          list.appendChild(wait);
+          return;
+        }
+        for (const item of years.slice(0, 24)) add(item.year + '年', 'y:' + item.year, s.query.dateFrom === item.year);
+      } else {
         add('返回年份', 'back', false);
         add(timeYear + '年全年', 'y:' + timeYear, s.query.dateFrom === timeYear);
         const have = new Set(months.map(item => item.month));
@@ -323,6 +333,48 @@
           add(timeYear + '年' + month + '月', 'm:' + key, s.query.dateFrom === key);
         }
       }
+    }
+    function readTimelineCache() {
+      try {
+        const raw = window.sessionStorage.getItem('ot-timeline');
+        if (!raw) return null;
+        const data = JSON.parse(raw);
+        return data && Array.isArray(data.years) ? data : null;
+      } catch (_) { return null; }
+    }
+    function writeTimelineCache(data) {
+      try {
+        window.sessionStorage.setItem('ot-timeline', JSON.stringify({ years: data.years || [], months: data.months || [] }));
+      } catch (_) { /* quota or private mode */ }
+    }
+    function ensureTimeline() {
+      if (timeline && Array.isArray(timeline.years) && timeline.years.length) return Promise.resolve(timeline);
+      if (timelinePromise) return timelinePromise;
+      const cached = readTimelineCache();
+      if (cached && cached.years.length) {
+        timeline = cached;
+        renderTime();
+      } else {
+        timelineLoading = true;
+      }
+      timelinePromise = Promise.resolve(typeof adapter.getTimeline === 'function' ? adapter.getTimeline({ signal: life.signal }) : { years: [], months: [] })
+        .then(data => {
+          if (data && Array.isArray(data.years)) {
+            timeline = data;
+            writeTimelineCache(data);
+          }
+          return timeline;
+        })
+        .catch(error => {
+          if (error && error.name !== 'AbortError') report(error);
+          return timeline;
+        })
+        .finally(() => {
+          timelinePromise = null;
+          timelineLoading = false;
+          renderTime();
+        });
+      return timelinePromise;
     }
     async function applyTime(token) {
       const s = snapshot();
@@ -343,10 +395,8 @@
       listen(popover.querySelector('[data-ot="time-list"]'), 'click', event => {
         const button = event.target.closest('[data-time]'); if (button) void applyTime(button.dataset.time);
       });
-      if (typeof adapter.getTimeline === 'function') {
-        try { timeline = await adapter.getTimeline({ signal: life.signal }) || timeline; } catch (error) { if (error.name !== 'AbortError') report(error); }
-      }
       renderTime();
+      void ensureTimeline().then(() => renderTime());
     }
     function openGroup(anchor) {
       const s = snapshot();
@@ -465,6 +515,7 @@
     listen(document, 'keydown', event => { if (event.key === 'Escape' && openKind) { event.stopPropagation(); closePopover(); } });
     listen(document, 'mousedown', event => { if (openKind && !popover.contains(event.target) && !root.contains(event.target)) closePopover(); });
     snapshot(); host.appendChild(root); document.body.appendChild(popover);
+    void ensureTimeline();
     const controller = Object.freeze({
       sync,
       rememberPersonLabel: rememberLabel,

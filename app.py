@@ -353,6 +353,7 @@ def initialize_application():
         public_figure_shelf.start()
         start_ui_idle_watch()
         start_home_catalog_warmup()
+        start_timeline_warmup()
 
 
 def shutdown_application(timeout=15.0):
@@ -445,6 +446,7 @@ def invalidate_status_cache():
     with STATUS_CACHE_LOCK:
         STATUS_CACHE['payload']=None
         STATUS_CACHE['at']=0
+    invalidate_timeline_cache()
 
 def asset_lock_index(digest):
     return int(digest[:8],16)%len(ASSET_LOCKS)
@@ -2031,6 +2033,7 @@ def exclude_assets_locked(body,request,operation_id):
                     )
     with STATUS_CACHE_LOCK:
         STATUS_CACHE['payload']=None; STATUS_CACHE['at']=0
+    invalidate_timeline_cache()
     if body.excluded and body.display_only:
         message='已排除显示，原照片和识别信息保留'
     elif body.excluded:
@@ -2890,25 +2893,69 @@ def public_figure_media(rel: str):
         raise HTTPException(404, '这张照片已经不在公众人物文件夹里')
     return FileResponse(path)
 
-@app.get('/api/timeline')
-def timeline():
+_TIMELINE_CACHE = {'payload': None, 'epoch': 0}
+_TIMELINE_LOCK = threading.Lock()
+
+
+def invalidate_timeline_cache() -> None:
+    with _TIMELINE_LOCK:
+        _TIMELINE_CACHE['epoch'] += 1
+        _TIMELINE_CACHE['payload'] = None
+
+
+def start_timeline_warmup() -> None:
+    def run():
+        try:
+            build_timeline_payload()
+        except Exception:
+            return
+    threading.Thread(target=run, daemon=True, name='timeline-warm').start()
+
+
+def build_timeline_payload() -> dict:
+    with _TIMELINE_LOCK:
+        epoch = _TIMELINE_CACHE['epoch']
     _mode, shelf_ids = public_figure_shelf.photo_scope('timeline', False)
     shelf_clause = ''
-    shelf_params = []
+    shelf_params: list = []
     if shelf_ids:
         shelf_clause = ' AND a.id NOT IN (' + ','.join('?' for _ in shelf_ids) + ')'
         shelf_params = list(shelf_ids)
+    year_counts: dict[str, int] = {}
+    month_counts: dict[str, int] = {}
     with db() as c:
-        rows=c.execute('''SELECT substr(coalesce(a.manual_date,a.captured_at),1,4) year, count(*) n
-            FROM assets a WHERE '''+ACTIVE_ASSET+shelf_clause+'''
-            GROUP BY year ORDER BY year DESC''', shelf_params).fetchall()
-        month_rows=c.execute('''SELECT substr(coalesce(a.manual_date,a.captured_at),1,7) month, count(*) n
-            FROM assets a WHERE '''+ACTIVE_ASSET+shelf_clause+'''
-            AND substr(coalesce(a.manual_date,a.captured_at),1,7) GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'
-            GROUP BY month ORDER BY month DESC''', shelf_params).fetchall()
-    years=[{'year':r['year'] or 'unknown','count':r['n']} for r in rows]
-    months=[{'month':r['month'],'count':r['n']} for r in month_rows]
-    return {'years':years,'months':months,'dated':sum(x['count'] for x in years if x['year']!='unknown')}
+        rows = c.execute(
+            '''SELECT coalesce(a.manual_date,a.captured_at) stamp FROM assets a WHERE '''
+            + ACTIVE_ASSET + shelf_clause,
+            shelf_params,
+        )
+        for row in rows:
+            stamp = row['stamp'] or ''
+            year = (stamp[:4] if len(stamp) >= 4 else '') or 'unknown'
+            year_counts[year] = year_counts.get(year, 0) + 1
+            month = stamp[:7]
+            if len(month) == 7 and month[4] == '-' and month[:4].isdigit() and month[5:].isdigit():
+                month_counts[month] = month_counts.get(month, 0) + 1
+    years = [{'year': year, 'count': count} for year, count in sorted(year_counts.items(), reverse=True)]
+    months = [{'month': month, 'count': count} for month, count in sorted(month_counts.items(), reverse=True)]
+    payload = {
+        'years': years,
+        'months': months,
+        'dated': sum(item['count'] for item in years if item['year'] != 'unknown'),
+    }
+    with _TIMELINE_LOCK:
+        if _TIMELINE_CACHE['epoch'] == epoch:
+            _TIMELINE_CACHE['payload'] = payload
+    return payload
+
+
+@app.get('/api/timeline')
+def timeline():
+    with _TIMELINE_LOCK:
+        cached = _TIMELINE_CACHE['payload']
+    if cached is not None:
+        return cached
+    return build_timeline_payload()
 
 @app.get('/api/groups')
 def groups():
@@ -3232,6 +3279,7 @@ def edit_photos(body:EditRequest):
             c.execute('INSERT INTO edits(created_at,target,before_json,after_json) VALUES (?,?,?,?)',
                       (now(),f'asset:{aid}',json.dumps({k:before[k] for k in changes},ensure_ascii=False),json.dumps(changes,ensure_ascii=False)))
         invalidate_home_cache(c)
+        invalidate_timeline_cache()
     return {'updated':len(ids)}
 
 @app.get('/api/people')
