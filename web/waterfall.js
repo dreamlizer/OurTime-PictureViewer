@@ -5,8 +5,9 @@ const streamEntrance=new IntersectionObserver(entries=>{
  for(const entry of entries)if(entry.isIntersecting){entry.target.classList.add('stream-entered');streamEntrance.unobserve(entry.target);}
 },{threshold:0,rootMargin:'0px 0px 40px 0px'});
 function streamMountMotion(card){
- const id=Number(card.dataset.photo);const seen=waterfall.seenPhotos&&waterfall.seenPhotos.has(id);if(!seen){card.classList.add('stream-motion');if(waterfall.seenPhotos)waterfall.seenPhotos.add(id);}else{card.classList.add('stream-image-ready');}
+ const key=card.dataset.photo==='shelf'?'shelf':Number(card.dataset.photo);const seen=waterfall.seenPhotos&&waterfall.seenPhotos.has(key);if(!seen){card.classList.add('stream-motion');if(waterfall.seenPhotos)waterfall.seenPhotos.add(key);}else{card.classList.add('stream-image-ready','stream-entered');}
  const img=card.querySelector('img');
+ if(!img){card.classList.add('stream-image-ready','stream-entered');return;}
  const ready=()=>{if(card.isConnected)card.classList.add('stream-image-ready');};
  const failed=()=>{if(card.isConnected){card.classList.add('stream-image-error');card.querySelector('.photo-frame').setAttribute('data-preview-message','预览暂不可用');}};
  img.addEventListener('load',ready,{once:true});img.addEventListener('error',failed,{once:true});
@@ -35,13 +36,15 @@ function streamPlace(shapes,startEnds,metrics=streamMetrics()){
  return {points,ends,range:{top,bottom},height:Math.max(0,Math.max(...ends,0)-gap)};
 }
 function streamLayout(items,index,metrics=streamMetrics()){
+ const rows=items.slice();
  const shapes=items.map(streamShape);
+ if(index===0&&typeof shouldShowPublicShelf==='function'&&shouldShowPublicShelf()){shapes.unshift(0.82);rows.unshift({id:'shelf',shelf:true,width:4,height:5,path:'公众人物'});}
  waterfall.shapes[index]=shapes;
  const placed=streamPlace(shapes,waterfall.pageEnds[index],metrics);
  waterfall.pageEnds[index+1]=placed.ends.slice();
  waterfall.ranges[index]=placed.range;
  waterfall.heights[index]=Math.max(0,placed.range.bottom-placed.range.top);
- return {layout:placed.points.map((point,i)=>({...point,a:items[i]})),height:placed.height,range:placed.range,ends:placed.ends};
+ return {layout:placed.points.map((point,i)=>({...point,a:rows[i]})),height:placed.height,range:placed.range,ends:placed.ends};
 }
 function streamReflow(metrics=streamMetrics()){
  let ends=Array(metrics.columns).fill(0);
@@ -62,10 +65,12 @@ function streamReflow(metrics=streamMetrics()){
   }
  }
 }
-function streamCard(p,offset){const a=p.a;const date=(a.effective_date||'').replace('T',' ').replace(/:\d\d$/,'')||'时间未知';const showQuickExclude=state.view==='timeline'||String(state.view||'').startsWith('group:');const groupExclude=showQuickExclude?`<div class="group-card-exclude"><button type="button" class="group-exclude-trigger" data-group-exclude-arm aria-label="排除显示这张照片">排除</button><div class="group-exclude-confirm" role="group" aria-label="确认排除显示"><button type="button" data-group-exclude-cancel>取消</button><button type="button" data-group-exclude-confirm>确认</button></div></div>`:'';return `<article class="photo-card ${state.selected.has(a.id)?'selected':''}" data-photo="${a.id}" data-position="${offset}" tabindex="0" role="button" aria-label="查看 ${esc(basename(a.path))}" style="left:${p.x}px;top:${p.y}px;width:${p.width}px"><div class="photo-frame" style="height:${p.picture}px">${state.selecting?`<input class="photo-check" type="checkbox" aria-label="选择照片" ${state.selected.has(a.id)?'checked':''}>`:''}<img loading="lazy" decoding="async" src="/api/thumb/${a.id}?v=${state.thumbRevision}" alt="${esc(basename(a.path))}">${a.copies>1?`<span class="copy-badge">${a.copies} 个位置</span>`:''}${groupExclude}</div><div class="card-caption"><div class="card-meta"><b>${esc(a.effective_place||basename(a.path))}</b><span>${esc(date)}</span></div></div></article>`;}
+function publicShelfCard(p,offset){const shelf=state.publicFigures||{};const count=Number(shelf.count)||0;const countLabel=!shelf.ready&&!count?'正在整理':count+'张';return `<article class="photo-card public-figure-card" data-photo="shelf" data-position="${offset}" tabindex="0" role="button" aria-label="打开公众人物，${countLabel}" style="left:${p.x}px;top:${p.y}px;width:${p.width}px"><div class="photo-frame public-figure-frame" style="height:${p.picture}px"><span class="public-figure-mark" aria-hidden="true"><svg viewBox="0 0 24 24" class="ui-icon"><path d="M3 7h6l2 2h10v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/><path d="M3 10h18"/></svg></span></div><div class="card-caption"><div class="card-meta"><b>公众人物</b><span>${countLabel}</span></div></div></article>`}
+function streamCard(p,offset){const a=p.a;if(a&&a.shelf)return publicShelfCard(p,offset);const preview=a&&a.public_rel?("/api/public-figures/media?rel="+encodeURIComponent(a.public_rel)):("/api/thumb/"+a.id+"?v="+state.thumbRevision);const date=(a.effective_date||'').replace('T',' ').replace(/:\d\d$/,'')||'时间未知';const showQuickExclude=state.view==='timeline'||String(state.view||'').startsWith('group:');const groupExclude=showQuickExclude?`<div class="group-card-exclude"><button type="button" class="group-exclude-trigger" data-group-exclude-arm aria-label="排除显示这张照片">排除</button><div class="group-exclude-confirm" role="group" aria-label="确认排除显示"><button type="button" data-group-exclude-cancel>取消</button><button type="button" data-group-exclude-confirm>确认</button></div></div>`:'';return `<article class="photo-card ${state.selected.has(a.id)?'selected':''}" data-photo="${a.id}"${a.public_rel?` data-public-rel="${esc(a.public_rel)}"`:""} data-position="${offset}" tabindex="0" role="button" aria-label="查看 ${esc(basename(a.path))}" style="left:${p.x}px;top:${p.y}px;width:${p.width}px"><div class="photo-frame" style="height:${p.picture}px">${state.selecting?`<input class="photo-check" type="checkbox" aria-label="选择照片" ${state.selected.has(a.id)?'checked':''}>`:''}<img loading="lazy" decoding="async" src="${preview}" alt="${esc(basename(a.path))}">${a.copies>1?`<span class="copy-badge">${a.copies} 个位置</span>`:''}${groupExclude}</div><div class="card-caption"><div class="card-meta"><b>${esc(a.effective_place||basename(a.path))}</b><span>${esc(date)}</span></div></div></article>`;}
 function streamSchedule(){if(!waterfall.raf)waterfall.raf=requestAnimationFrame(()=>{waterfall.raf=0;streamPaint();});}
 function streamSelection(){
  for(const card of $$('#photo-grid [data-photo]')){
+  if(card.dataset.photo==='shelf')continue;
   const selected=state.selected.has(Number(card.dataset.photo));card.classList.toggle('selected',selected);
   let check=card.querySelector('.photo-check');
   if(state.selecting&&!check){check=document.createElement('input');check.type='checkbox';check.className='photo-check';check.setAttribute('aria-label','选择照片');card.querySelector('.photo-frame').prepend(check);}
@@ -73,7 +78,7 @@ function streamSelection(){
  }
  updateBatch();
 }
-function streamVisibleIds(){return $$('#photo-grid [data-photo]').filter(c=>{const b=c.getBoundingClientRect();return b.bottom>0&&b.top<innerHeight;}).map(c=>Number(c.dataset.photo));}
+function streamVisibleIds(){return $$('#photo-grid [data-photo]').filter(c=>{const b=c.getBoundingClientRect();return b.bottom>0&&b.top<innerHeight;}).map(c=>Number(c.dataset.photo)).filter(id=>id>0);}
 function restoreScrollInstant(top){scrollTo({top:Math.max(0,Number(top)||0),behavior:'instant'});}
 function waitWaterfallFrames(count=2){return new Promise(resolve=>{const next=()=>count--<=0?resolve():requestAnimationFrame(next);next();});}
 async function streamRemovePhotos(ids,positionHints=[]){
@@ -231,7 +236,7 @@ function streamPaint(){
   streamPage(waterfall.shapes.length);
  }
 }
-async function loadPhotos(options={}){
+async function loadPhotos(options={}){if((state.view==='timeline'||state.view==='public-figures'||state.view==='years')&&typeof syncPublicFigures==='function')await syncPublicFigures(false);
  const oldTop=$('#photo-grid').getBoundingClientRect().top;
  waterfall.abort?.abort();waterfall.abort=new AbortController();waterfall.generation++;
  const external=options&&options.signal,abortFromExternal=()=>waterfall.abort?.abort();
@@ -249,9 +254,9 @@ async function loadPhotos(options={}){
  };
  waterfall.pending.clear();waterfall.cache=new Map();waterfall.heights=[];waterfall.shapes=[];waterfall.ranges=[];waterfall.pageEnds=[];waterfall.total=0;waterfall.maxId=0;waterfall.error=false;
  const mapFilter=state.placeMapFilter;
- waterfall.query={q:state.q,filter:mapFilter?'all':(state.homeSnapshotId?'all':state.view),person:state.person,directory:state.directory,sort:state.sort,date_from:state.dateFrom||'',date_to:state.dateTo||'',place:state.place||'',...(state.homeSnapshotId?{recommendation_snapshot:state.homeSnapshotId}:{}),...(mapFilter?{map_cell:mapFilter.cell,map_lat_bucket:mapFilter.lat_bucket,map_lng_bucket:mapFilter.lng_bucket,...('map_west' in mapFilter?{map_west:mapFilter.map_west,map_south:mapFilter.map_south,map_east:mapFilter.map_east,map_north:mapFilter.map_north}:{})}:{})};
+ waterfall.query={q:state.q,filter:mapFilter?'all':(state.homeSnapshotId?'all':state.view),person:state.person,directory:state.directory,sort:state.sort,date_from:state.dateFrom||'',date_to:state.dateTo||'',place:state.place||'',...(state.view==='public-figures'?{group:state.publicGroup||''}:{}),...(state.homeSnapshotId?{recommendation_snapshot:state.homeSnapshotId}:{}),...(mapFilter?{map_cell:mapFilter.cell,map_lat_bucket:mapFilter.lat_bucket,map_lng_bucket:mapFilter.lng_bucket,...('map_west' in mapFilter?{map_west:mapFilter.map_west,map_south:mapFilter.map_south,map_east:mapFilter.map_east,map_north:mapFilter.map_north}:{})}:{})};
  waterfall.width=streamMetrics().width;waterfall.columns=streamMetrics().columns;state.offset=0;
- const grid=$('#photo-grid');waterfall.seenPhotos=new Set();streamEntrance.disconnect();grid.replaceChildren();grid.classList.add('is-updating');grid.style.minHeight='';grid.style.height='';$('#stream-status').textContent='正在加载照片…';$('#stream-retry').hidden=true;$('#no-results').hidden=true;$('#empty').hidden=true;$('#result-count').textContent='加载中';
+ const grid=$('#photo-grid');const preserve=Boolean(options.preserveUntilReady)&&grid.childElementCount>0;waterfall.seenPhotos=new Set();streamEntrance.disconnect();if(!preserve){grid.replaceChildren();grid.style.minHeight='';grid.style.height='';}else{const keep=grid.getBoundingClientRect().height;if(keep>80)grid.style.minHeight=keep+'px';}grid.classList.add('is-updating');$('#stream-status').textContent='正在加载照片…';$('#stream-retry').hidden=true;$('#no-results').hidden=true;$('#empty').hidden=true;$('#result-count').textContent='加载中';
  if(typeof syncGroupResultCount==='function') syncGroupResultCount(state.view,{clear:true});
   const first=await streamPage(0);
  if(ticket!==waterfall.generation){if(external)external.removeEventListener('abort',abortFromExternal);return false;}
@@ -259,9 +264,10 @@ async function loadPhotos(options={}){
  if(!g){if(external)external.removeEventListener('abort',abortFromExternal);return false;}
  if(first){
   g.replaceChildren();
+  if(options.scrollTop)scrollTo({top:0,behavior:'instant'});
   streamPaint();
   g.style.minHeight='';
-  g.classList.remove('is-updating');
+  requestAnimationFrame(()=>{g.classList.remove('is-updating','is-swapping');streamPaint();});
  }else{
   waterfall.cache=previous.cache;
   waterfall.heights=previous.heights;
@@ -271,7 +277,7 @@ async function loadPhotos(options={}){
   waterfall.total=previous.total;
   waterfall.maxId=previous.maxId;
   waterfall.query=previous.query;
-  g.classList.remove('is-updating');
+  g.classList.remove('is-updating','is-swapping');
   g.style.minHeight='';
   if(waterfall.shapes.length) streamPaint();
  }

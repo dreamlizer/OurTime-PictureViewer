@@ -128,6 +128,14 @@ def validate_archive(zip_path: Path) -> None:
                 data_files.append(normalized)
         check(not bad, "ZIP 内没有绝对路径或越界路径")
         check(not data_files, "ZIP 的 Data 目录为空，不含正式资料库或照片")
+        public_in_data = [
+            normalized
+            for normalized in (
+                info.filename.replace("\\", "/") for info in archive.infolist()
+            )
+            if normalized.startswith("Data/") and "public-faces" in normalized
+        ]
+        check(not public_in_data, "ZIP 的用户 Data 不含公众人物资源")
         names = {item.filename.replace("\\", "/") for item in archive.infolist()}
         check(
             not any(name.endswith("/config.local.json") for name in names),
@@ -155,6 +163,30 @@ def verify_manifest(root: Path) -> None:
         sha256(root / "App" / "web" / "app.js")
         == sha256(SOURCE_ROOT / "web" / "app.js"),
         "包内 app.js 与当前被测源码一致",
+    )
+    source_modules = sorted(path.name for path in SOURCE_ROOT.glob("*.py") if path.is_file())
+    missing_modules = [name for name in source_modules if not (root / "App" / name).is_file()]
+    check(not missing_modules, "包内含全部根目录应用模块：" + ", ".join(source_modules))
+    for name in ("1.png", "4.png", "7.png", "8.png"):
+        check(
+            (root / "App" / "web" / "assets" / "face-labels" / name).is_file(),
+            f"包内含人名标签底板 {name}",
+        )
+    check(
+        (root / "App" / "resources" / "public-faces" / "public-faces.sqlite3").is_file(),
+        "公众人物人脸特征在程序资源里",
+    )
+    check(
+        not (root / "App" / "resources" / "public-faces" / "references").exists(),
+        "公众人物参考照片不打进绿色包",
+    )
+    check(
+        not (root / "App" / "resources" / "public-faces" / "SEED-REPORT.json").exists(),
+        "不把生成审计报告打进用户可见包",
+    )
+    check(
+        not any((root / "Data").rglob("public-faces*")),
+        "用户 Data 不含公众人物资源副本",
     )
 
 
@@ -238,8 +270,65 @@ def validate_real_start(root: Path, full: bool) -> None:
     check(status["stats"]["assets"] == 0, "首次启动是空白资料库")
     check(capabilities.get("face_model") is True, "InsightFace buffalo_l 模型可见")
     check(capabilities.get("geo") is True, "离线地名数据可见")
+    check(capabilities.get("face_labels") is True, "人名标签底板随包可见")
     check(capabilities.get("export_renderer") is True, "带标签导出浏览器可见")
     check(capabilities.get("objects_enabled") is False, "未打包已停用的物体识别业务")
+
+    module_output = run_packed_python(
+        root,
+        env,
+        (
+            "import json;"
+            "import home_recommendations, memory_curation, face_split_batch, recent_operations;"
+            "print(json.dumps({'home': home_recommendations.ALGORITHM_VERSION,"
+            " 'curation': hasattr(memory_curation, 'curate_highlights'),"
+            " 'split': callable(face_split_batch.suggest_split_batch)}, ensure_ascii=False))"
+        ),
+        timeout=90,
+    )
+    module_state = json.loads(module_output.splitlines()[-1])
+    check(
+        bool(module_state.get("home"))
+        and module_state.get("curation") is True
+        and module_state.get("split") is True,
+        "首页推荐、回忆精选与人脸拆分模块在包内可导入",
+    )
+    catalog = request_json(port, "/api/home/catalog")
+    check(isinstance(catalog, dict), "首页故事目录接口可响应")
+
+    shelf = request_json(port, "/api/public-figures")
+    check(isinstance(shelf, dict), "公众人物货架接口可响应")
+    shelf_output = run_packed_python(
+        root,
+        env,
+        (
+            "import json,sqlite3;"
+            "from pathlib import Path;"
+            "from ourtime_config import PUBLIC_FIGURES_PACK, PUBLIC_FIGURES_SHELF, DATA;"
+            "p=Path(PUBLIC_FIGURES_PACK);"
+            "con=sqlite3.connect(p);"
+            "people=con.execute('select count(*) from people').fetchone()[0];"
+            "samples=con.execute('select count(*) from samples').fetchone()[0];"
+            "abs_paths=con.execute(\"select count(*) from samples where relative_path like '%:%' or relative_path like '/%'\").fetchone()[0];"
+            "con.close();"
+            "print(json.dumps({'shelf':PUBLIC_FIGURES_SHELF,'pack':str(p),'under_app': 'resources' in p.parts and 'public-faces' in p.parts,"
+            " 'people':people,'samples':samples,'abs_paths':abs_paths,"
+            " 'data_has_pack':any(Path(DATA).rglob('public-faces*'))},ensure_ascii=False))"
+        ),
+        timeout=60,
+    )
+    shelf_state = json.loads(shelf_output.splitlines()[-1])
+    check(shelf_state.get("shelf") is True, f"绿色包默认启用公众人物货架：{shelf_state}")
+    check(
+        shelf_state.get("under_app") is True and shelf_state.get("data_has_pack") is False,
+        f"公众人物资源在 App、用户 Data 仍只放私人识别：{shelf_state}",
+    )
+    check(
+        int(shelf_state.get("people") or 0) >= 1
+        and int(shelf_state.get("samples") or 0) >= 1
+        and int(shelf_state.get("abs_paths") or 0) == 0,
+        f"公众人物库有特征且无绝对路径：{shelf_state}",
+    )
 
     if full:
         app = root / "App"
@@ -330,29 +419,45 @@ def validate_real_start(root: Path, full: bool) -> None:
                 "b=p.chromium.launch(executable_path=str(CHROMIUM_PATH),headless=True);"
                 "page=b.new_page(viewport={'width':1280,'height':800});"
                 f"page.goto('http://127.0.0.1:{port}/');"
-                "page.wait_for_selector('#photo-grid [data-photo]',timeout=30000);"
-                "page.locator('#photo-grid [data-photo]').first.click();"
+                "page.wait_for_selector('button[data-view=home].active',timeout=30000);"
+                "page.click('button[data-view=timeline]');"
+                "page.wait_for_selector('#photo-grid [data-photo]:not([data-photo=shelf]):not([data-public-rel])',timeout=30000);"
+                "page.locator('#photo-grid [data-photo]:not([data-photo=shelf]):not([data-public-rel])').first.click();"
                 "page.wait_for_selector('#detail-dialog[open] #export-annotated-photo',timeout=30000);"
-                "page.evaluate('setViewerLoading(true,987654)');"
-                "page.wait_for_timeout(300);"
-                "result=page.evaluate(\"\"\"()=>({"
-                "exportDisplay:getComputedStyle(document.querySelector('.photo-export-control')).display,"
-                "loadingDisplay:getComputedStyle(document.querySelector('#viewer-loading')).display,"
-                "loadingText:document.querySelector('#viewer-loading').textContent"
-                "})\"\"\");"
+                "result=page.evaluate(\"\"\"async()=>{"
+                "  const dialog=document.querySelector('#detail-dialog');"
+                "  const prev=window.setViewerLoading;"
+                "  window.setViewerLoading=(loading,token=0)=>{if(!loading)return;return prev(loading,token);};"
+                "  window.setViewerLoading(true,987654);"
+                "  await new Promise(r=>setTimeout(r,400));"
+                "  const result={"
+                "    exportDisplay:getComputedStyle(document.querySelector('.photo-export-control')).display,"
+                "    exportCount:document.querySelectorAll('#export-annotated-photo').length,"
+                "    loadingDisplay:getComputedStyle(document.querySelector('#viewer-loading')).display,"
+                "    loadingHidden:document.querySelector('#viewer-loading').hidden,"
+                "    loadingText:document.querySelector('#viewer-loading').textContent,"
+                "    isLoading:dialog.classList.contains('is-loading'),"
+                "    exportBlocked:(()=>{try{window.__ourTimeAnnotatedExport.freeze();return false}catch(e){return String(e.message||e)}})()"
+                "  };"
+                "  window.setViewerLoading=prev;"
+                "  window.setViewerLoading(false);"
+                "  return result;"
+                "}\"\"\");"
                 "print(json.dumps(result,ensure_ascii=False));"
                 "b.close();p.stop()"
             ),
             timeout=60,
         )
         viewer_state = json.loads(viewer_output.splitlines()[-1])
+        check(viewer_state.get("loadingText") == "加载中", f"翻图加载态文案是“加载中”：{viewer_state}")
+        check(viewer_state.get("loadingHidden") is False, f"加载指示在等待后可见：{viewer_state}")
+        check(viewer_state.get("loadingDisplay") not in {"none", ""}, f"加载指示实际显示：{viewer_state}")
+        check(viewer_state.get("exportCount") == 1, f"只保留一个导出按钮：{viewer_state}")
         check(
-            viewer_state == {
-                "exportDisplay": "none",
-                "loadingDisplay": "grid",
-                "loadingText": "加载中…",
-            },
-            "翻图加载态只显示“加载中”，不露出额外导出按钮",
+            isinstance(viewer_state.get("exportBlocked"), str)
+            and bool(viewer_state.get("exportBlocked"))
+            and "准备中" in viewer_state.get("exportBlocked", ""),
+            f"加载中禁止导出并给出准备中提示：{viewer_state}",
         )
 
         conn = sqlite3.connect(data / "library.sqlite3")

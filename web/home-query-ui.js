@@ -115,7 +115,7 @@
       const scopeKey = text(raw.scopeKey);
       return {
         active: raw.active === true, scopeKey: text(raw.scopeKey), query: queryOf(raw.query), sort,
-        group: scopeKey.startsWith('group:') ? scopeKey.slice(6) : '',
+        group: scopeKey.startsWith('group:') ? scopeKey.slice(6) : (scopeKey.startsWith('public-figures:') ? scopeKey.slice(15) : ''),
         selecting: raw.selecting === true,
         selectedCount: Number.isFinite(Number(raw.selectedCount)) ? Math.max(0, Math.floor(Number(raw.selectedCount))) : 0,
         selectionKind: raw.selectionKind === 'restore' ? 'restore' : 'exclude',
@@ -263,6 +263,7 @@
           return { id, label, photoCount: Number(item && item.photoCount || 0) };
         }).filter(item => item.id) : [];
         renderPeople();
+        if (status) status.textContent = '';
       } catch (error) { if (error.name !== 'AbortError' && status) status.textContent = '人物列表暂时无法读取。'; }
     }
     function renderPeople() {

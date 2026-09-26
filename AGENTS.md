@@ -18,6 +18,7 @@ FastAPI + uvicorn + SQLite WAL；前端是 `web/` 静态 HTML/CSS/JS，无构建
 
 - 后台 `app.py`，元数据 `metadata_reader.py`，地名 `geo_labels.py`。
 - 正式库：`data/library.sqlite3`、`data/thumbs/`、`data/faces/`；备份 `data/backups/`；PID/日志在 `data/`。
+- 公众人物参考图和人脸特征在 `resources/public-faces/`。这是**程序资源**，不是正式库、不是用户隐私；生成时只复制，不删除来源，也不写入私人路径或私人人物编号。绿色包只打 `App/resources/public-faces/public-faces.sqlite3`（姓名/别名/人脸特征），**不打 `references/` 参考照片**，也不打 `SEED-REPORT.json`；用户私人识别只在 `Data/`。源码可在 `config.local.json` 打开 `public_figures_shelf`；绿色包配置默认打开。
 - 验证脚本在 `validation/`，证据在 `validation/reports/`；`validation/work/` 是隔离测试场。
 - 导入 `app` 不应初始化数据库或恢复任务；初始化/关闭只走 FastAPI lifespan 或显式 `initialize_application()` / `shutdown_application()`。
 - 扫描末尾缺失核对必须用目录谓词在 SQL 内限定当前 root；磁盘 `stat` 不放在数据库事务中，确认缺失后用路径、大小和 mtime 防并发覆盖地短事务更新。
@@ -57,5 +58,5 @@ smoke 至少要拦住这些：
 当前源码已支持国内地点的省/市/区县/街道层级、地图总览稳定父子聚合、跨世界经度视野，以及 `打包拾光.cmd` / `tools/packaging/smoke_packed.py` 的绿色包流程。`tools/relabel_place_hierarchy.py` 只在隔离库验证过，正式库地点尚未批量重标。
 2026-09-22 设计与体验优化（配色可读性、回忆暂停、人物详情主次、大图工具分组、首页精修）核心实施已完成，实际结果与未覆盖的穷举验收项见 `docs/repair-reports/DESIGN-EXPERIENCE-20260922.md`。
 2026-09-25 人名标签整备（FL-20260925）已合并推送到 master：任务卡 `docs/OurTime_FaceLabels_Repair_TaskCard_2026-09-25.md`，复验链与收口材料见 `docs/OurTime_FaceLabels_*.md` 和 `docs/repair-reports/face-labels-20260925/`。0c74ffe 通过四项主复验但留两个收尾项；最新 68381fe（补录时间铅笔与回退缺口）尚无复验记录，整卡未宣布全部完成。
-本机 `dist/拾光相册-绿色版/` 是 2026-09-15 生成的本地草稿（清单 `source_dirty=true`，来源 `4d27c31`），2026-09-25 复核仍未重建、未完成绿色包验收；不把它当作发布物或当前正式运行态。正式后端已于 2026-09-25 加载到与 HEAD 一致的 Python。下一步仍是人工核对人物，以及完成绿色包验收。
+2026-09-25 绿色包已重建并闭环验收通过（`tools/packaging/smoke_packed.py` 输出 `GREEN_PACKAGE_ACCEPTANCE_OK`）：补齐 `home_recommendations.py` / `memory_curation.py` / `face_split_batch.py`，根目录应用模块改为整目录打包防再漂移，人名标签底板打进 `App/web/assets/face-labels/`，包内导入自检，smoke 覆盖模块导入、人名标签能力、首页故事目录，以及默认发现首页→全部照片后的加载态合同。本机 `dist/拾光相册-绿色版/` 与同名 ZIP 来源 `88fc24d`（打包脚本改动尚未提交，清单 `source_dirty=true`），仍不是对外发布物。正式后端已于 2026-09-25 加载到与 HEAD 一致的 Python。下一步仍是人工核对人物。
 浏览器的全部照片、文件夹、地点、合影、收藏和人物档案视图统一固定顶栏、标题和工具区；390px 等窄屏不得横向溢出。大图左下角、资料栏上方的收藏状态写入 SQLite，不回写原照片。大图“素笺”主题使用 `web/vendor/fonts/` 内置屏幕阅读版文楷；“茶棕”主题只提供同目录内置的 Ma Shan Zheng、Long Cang、Liu Jian Mao Cao 三款毛笔字体并默认 Ma Shan Zheng；“暗朱”主题只提供 ZCOOL XiaoWei、Noto Serif SC、Zhi Mang Xing 三款题签字体并默认 ZCOOL XiaoWei。图片标签的字号和底牌透明度可调，其他主题和固定样式控件按 `viewer.js` 的主题合同执行；人名标签的脸高系数为 1–1.6 倍，再随显示照片高度缩放，照片缩小时可低于 1 倍、下限 0.12；底牌、字号和留白同一倍率。素笺竖牌是 1.png、茶棕竖牌是 4.png，横排分别是 7.png、8.png；不再按字数准备多张底板。纯英文名横排，角花不变形；智能与自定义排版切换不删除手动位置。

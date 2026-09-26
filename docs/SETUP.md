@@ -15,15 +15,9 @@
 
 ## 生成绿色包
 
-维护者双击项目根目录的 `打包拾光.cmd`。脚本优先使用 `PHOTO_PYTHON`、项目 `.venv` 或 `config.local.json` 中的 Python，并从本机配置读取人脸模型和地名资源。成品输出到 `dist/拾光相册-绿色版/` 和同名 ZIP；只创建空白 `Data/`，不会复制当前资料库。
+维护者双击项目根目录的 `打包拾光.cmd`（或 `pack-green.cmd`）。脚本优先使用 `PHOTO_PYTHON`、项目 `.venv` 或 `config.local.json` 中的 Python，并从本机配置读取人脸模型和地名资源。成品输出到 `dist/拾光相册-绿色版/` 和同名 ZIP；只创建空白 `Data/`，不会复制当前资料库。包内 `App/` 含代码、识别模型、离线地名、公众人物人脸特征（不含参考照片）和导出用 Chromium。
 
-打包完成后运行：
-
-```powershell
-python tools/packaging/smoke_packed.py "dist/拾光相册-绿色版.zip"
-```
-
-该检查会把 ZIP 解压到两个全新临时目录，用随机端口从成品 `拾光.exe` 启动，实际验证 InsightFace、离线地名、Chromium 导出链、扫描入库、重复启动和真实端口占用。地图底图仍需联网。
+同一次运行会接着执行 `tools/packaging/smoke_packed.py` 闭环验收：把 ZIP 解压到两个全新临时目录，用随机端口从成品 `拾光.exe` 启动，实际验证 InsightFace、离线地名、公众人物特征、Chromium 导出链、扫描入库、重复启动和真实端口占用。地图底图仍需联网。只要打包不验收时，先设 `PHOTO_PACK_SKIP_SMOKE=1`。
 
 ## 启动失败
 

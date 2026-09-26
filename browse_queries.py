@@ -215,7 +215,8 @@ def people_query(ignored=0, q='', offset=0, limit=48, ids='', named=0, sort='pho
     }
 
 
-def photo_conditions(q='', filter='all', person='', directory='', max_id=0, date_from='', date_to='', place=''):
+def photo_conditions(q='', filter='all', person='', directory='', max_id=0, date_from='', date_to='', place='',
+                     shelf_mode='', shelf_ids=()):
     conditions = ['NOT (' + ACTIVE_ASSET + ')' if filter == 'excluded' else ACTIVE_ASSET]
     conditions.append('EXISTS(SELECT 1 FROM files f WHERE f.asset_id=a.id)')
     values = []
@@ -337,6 +338,18 @@ def photo_conditions(q='', filter='all', person='', directory='', max_id=0, date
         for pid in ids:
             conditions.append('EXISTS(SELECT 1 FROM faces x WHERE x.asset_id=a.id AND x.person_id=?)')
             values.append(pid)
+    if shelf_mode not in ('', 'only', 'exclude', None):
+        raise ValueError('不支持的公众人物范围')
+    shelf_values = [int(item) for item in (shelf_ids or ())]
+    if shelf_mode == 'only':
+        if not shelf_values:
+            conditions.append('0')
+        else:
+            conditions.append('a.id IN (' + ','.join('?' for _ in shelf_values) + ')')
+            values.extend(shelf_values)
+    elif shelf_mode == 'exclude' and shelf_values:
+        conditions.append('a.id NOT IN (' + ','.join('?' for _ in shelf_values) + ')')
+        values.extend(shelf_values)
     where = ' AND '.join(conditions)
     path_sql = '(SELECT path FROM files WHERE ' + path_condition + ' ORDER BY excluded,exists_now DESC,id LIMIT 1)'
     return {
@@ -444,12 +457,14 @@ def nearby_photo_spec(conn, anchor_id, radius_m):
 def fetch_photos(conn, *, q='', filter='all', person='', offset=0, limit=60, directory='', sort='date_desc',
                  sequence=False, max_id=0, around=0, tail=False, date_from='', date_to='', place='',
                  nearby=0, radius_m=100, map_cell=0, map_lat_bucket=None, map_lng_bucket=None,
-                 map_west=None, map_south=None, map_east=None, map_north=None):
+                 map_west=None, map_south=None, map_east=None, map_north=None,
+                 shelf_mode='', shelf_ids=()):
     if sort not in PHOTO_ORDERS:
         raise ValueError('未知的照片排序方式')
     spec = photo_conditions(
         q=q, filter=filter, person=person, directory=directory, max_id=max_id,
         date_from=date_from, date_to=date_to, place=place,
+        shelf_mode=shelf_mode, shelf_ids=shelf_ids,
     )
     bounds_raw=(map_west,map_south,map_east,map_north)
     bounds_supplied=[value is not None for value in bounds_raw]

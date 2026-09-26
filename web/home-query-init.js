@@ -26,7 +26,7 @@
   const legacy = [collectionHeading, ...['.filters', '.directory-filter', '#batch-bar', '#timeline-tools', '.browse-options']
     .map(selector => document.querySelector(selector))].filter(Boolean);
   const originalHidden = new Map(legacy.map(element => [element, element.hidden]));
-  const isHomeView = source => source && (source.view === 'timeline' || String(source.view || '').startsWith('group:'));
+  const isHomeView = source => source && (source.view === 'timeline' || source.view === 'public-figures' || String(source.view || '').startsWith('group:'));
   function syncLegacyControls() {
     const active = isHomeView(app.state);
     if (homeYearsLink) homeYearsLink.hidden = true;
@@ -50,6 +50,7 @@
     scopeKey: source => {
       if (!source) return '';
       if (source.view === 'timeline') return 'home';
+      if (source.view === 'public-figures') return source.publicGroup ? 'public-figures:' + source.publicGroup : 'public-figures';
       if (String(source.view || '').startsWith('group:')) return source.view;
       return '';
     },
@@ -61,16 +62,45 @@
       });
     },
     getPeople: async ({ signal, q } = {}) => {
-      const ids = String(app.state.person || '').split(',').filter(Boolean).join(',');
-      const page = await app.api(app.peopleQuery({ offset: 0, limit: 40, named: 1, q: q || '', ids }), { signal });
-      return (page.items || []).map(person => ({
-        id: String(person.id),
-        label: app.personLabel(person),
-        photoCount: Number(person.photo_count || 0)
-      }));
+      if (app.state.view === 'public-figures') {
+        const page = await app.api('/api/public-figures/people?limit=40' + (q ? '&q=' + encodeURIComponent(q) : ''), { signal });
+        return (page.items || []).map(person => {
+          const id = String(person.id);
+          const label = person.label || id;
+          app.state.personLabels = app.state.personLabels || {};
+          app.state.personLabels[id] = label;
+          return { id, label, photoCount: Number(person.photo_count || 0) };
+        });
+      }
+      const ids = String(app.state.person || '').split(',').filter(Boolean).filter(id => !id.startsWith('pf:')).join(',');
+      const query = q ? '&q=' + encodeURIComponent(q) : '';
+      const [page, publics] = await Promise.all([
+        app.api(app.peopleQuery({ offset: 0, limit: 40, named: 1, q: q || '', ids }), { signal }),
+        app.api('/api/public-figures/people?limit=40' + query, { signal }).catch(() => ({ items: [] }))
+      ]);
+      const remember = (id, label) => {
+        app.state.personLabels = app.state.personLabels || {};
+        app.state.personLabels[id] = label;
+      };
+      const privatePeople = (page.items || []).map(person => {
+        const id = String(person.id);
+        const label = app.personLabel(person);
+        remember(id, label);
+        return { id, label, photoCount: Number(person.photo_count || 0) };
+      });
+      const publicPeople = (publics.items || []).map(person => {
+        const id = String(person.id);
+        const label = person.label || id;
+        remember(id, label);
+        return { id, label, photoCount: Number(person.photo_count || 0) };
+      });
+      const pool = q ? privatePeople.concat(publicPeople) : privatePeople.slice(0, 24).concat(publicPeople.slice(0, 16));
+      return pool.sort((a, b) => b.photoCount - a.photoCount || a.label.localeCompare(b.label, 'zh')).slice(0, 40);
     },
     getPlaces: async ({ signal, q } = {}) => {
-      const page = await app.api('/api/places?limit=40' + (q ? '&q=' + encodeURIComponent(q) : ''), { signal });
+      const scoped = app.state.view === 'public-figures';
+      const path = (scoped ? '/api/public-figures/places?limit=40' : '/api/places?limit=40') + (q ? '&q=' + encodeURIComponent(q) : '');
+      const page = await app.api(path, { signal });
       return (page.places || []).map(item => ({
         place: item.place,
         label: app.prettyPlace ? app.prettyPlace(item.place) : item.place,
@@ -80,6 +110,12 @@
     getTimeline: async ({ signal } = {}) => app.api('/api/timeline', { signal }),
     applyGroup: async (group, { signal } = {}) => {
       if (signal && signal.aborted) throw new DOMException('Aborted', 'AbortError');
+      if (app.state.view === 'public-figures') {
+        app.state.publicGroup = group || '';
+        const ok = await global.loadPhotos({ signal });
+        if (!ok && !(signal && signal.aborted)) throw new Error('photo query failed');
+        return ok;
+      }
       await app.setView(group ? 'group:' + group : 'timeline');
     },
     setSelecting: async on => {

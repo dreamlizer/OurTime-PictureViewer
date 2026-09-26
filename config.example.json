@@ -7,5 +7,6 @@
   "object_model_dir": "resources/objects",
   "chromium_path": "",
   "folder_only_drive": "",
-  "objects_enabled": false
+  "objects_enabled": false,
+  "public_figures_shelf": false
 }

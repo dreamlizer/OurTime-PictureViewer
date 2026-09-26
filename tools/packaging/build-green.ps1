@@ -34,14 +34,49 @@ function Find-PackPython {
     return $null
 }
 
+function Find-PackageZip {
+    $distDir = Join-Path $projectRoot 'dist'
+    if (-not (Test-Path -LiteralPath $distDir)) {
+        return $null
+    }
+    $zips = @(Get-ChildItem -LiteralPath $distDir -Filter '*.zip' -File -ErrorAction SilentlyContinue)
+    if ($zips.Count -eq 0) {
+        return $null
+    }
+    return ($zips | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName
+}
+
 $pythonExe = Find-PackPython
 if (-not $pythonExe) {
     throw 'Python 3.12 was not found. Set PHOTO_PYTHON or install dependencies in the project .venv.'
 }
 
-Write-Output '[1/2] Building the OurTime green package...'
+# Keep this script ASCII-only: Windows PowerShell 5.1 reads .ps1 without BOM as ANSI.
+# Layout: launcher exes + App/ (program) + Data/ (empty user library).
+$env:PYTHONUTF8 = '1'
+$env:NO_ALBUMENTATIONS_UPDATE = '1'
+
+Write-Output '[1/2] Building the green package (App + empty Data)...'
 & $pythonExe (Join-Path $projectRoot 'tools\pack_green.py') @args
 if ($LASTEXITCODE -ne 0) {
     throw "Packaging failed with exit code $LASTEXITCODE."
 }
-Write-Output '[2/2] Packaging completed.'
+
+$zipPath = Find-PackageZip
+if (-not $zipPath) {
+    throw "Expected package zip was not created under dist\."
+}
+
+if ($env:PHOTO_PACK_SKIP_SMOKE -eq '1') {
+    Write-Output '[2/2] Skipping acceptance (PHOTO_PACK_SKIP_SMOKE=1).'
+    Write-Output "Package: $zipPath"
+    exit 0
+}
+
+Write-Output '[2/2] Running green-package acceptance (fresh extract, isolated Data)...'
+& $pythonExe (Join-Path $projectRoot 'tools\packaging\smoke_packed.py') $zipPath
+if ($LASTEXITCODE -ne 0) {
+    throw "Green-package acceptance failed with exit code $LASTEXITCODE."
+}
+Write-Output 'GREEN_PACKAGE_OK'
+Write-Output "Package: $zipPath"

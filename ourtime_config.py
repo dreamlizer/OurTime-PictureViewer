@@ -86,6 +86,13 @@ OBJECTS_ENABLED = _as_bool(_configured("PHOTO_OBJECTS_ENABLED", "objects_enabled
 FOLDER_ONLY_DRIVE = normalize_drive(
     _configured("PHOTO_FOLDER_ONLY_DRIVE", "folder_only_drive")
 )
+PUBLIC_FIGURES_SHELF = _as_bool(
+    _configured("PHOTO_PUBLIC_FIGURES_SHELF", "public_figures_shelf"), False
+)
+PUBLIC_FIGURES_PACK = _as_path(
+    _configured("PHOTO_PUBLIC_FIGURES_PACK", "public_figures_pack"),
+    BASE / "resources" / "public-faces" / "public-faces.sqlite3",
+)
 
 
 def _face_label_candidates() -> list[Path]:

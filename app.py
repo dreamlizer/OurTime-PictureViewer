@@ -67,6 +67,7 @@ from map_area_service import (
     select_map_area_rows,
 )
 from face_split_batch import suggest_split_batch
+from public_figures import shelf as public_figure_shelf
 from ourtime_config import (
     APP_NAME,
     APP_VERSION,
@@ -78,6 +79,8 @@ from ourtime_config import (
     GEO_ROOT,
     MODEL_ROOT,
     OBJECTS_ENABLED,
+    PUBLIC_FIGURES_PACK,
+    PUBLIC_FIGURES_SHELF,
     export_renderer_available,
     face_labels_available,
     face_model_available,
@@ -346,6 +349,8 @@ def initialize_application():
             raise
         APP_OWNER=owner
         APP_INITIALIZED=True
+        public_figure_shelf.configure(DB, PUBLIC_FIGURES_PACK, PUBLIC_FIGURES_SHELF)
+        public_figure_shelf.start()
         start_ui_idle_watch()
         start_home_catalog_warmup()
 
@@ -2227,10 +2232,227 @@ def asset_dict(row):
     d.pop('metadata',None)
     return d
 
+
+
+
+def _photos_with_public_people(*, filter, private_person, public_person, q, offset, limit, directory, sort, sequence, max_id, around, tail, date_from, date_to, place, nearby, radius_m, map_cell, map_lat_bucket, map_lng_bucket, map_west, map_south, map_east, map_north):
+    public_result = public_figure_photo_result(0, 500, False, person=public_person, q=q, date_from=date_from, date_to=date_to, place=place, directory=directory)
+    public_items = list(public_result.get("items") or [])
+    private_items = []
+    private_total = 0
+    private_max_id = 0
+    if private_person:
+        with db() as c:
+            shelf_mode, shelf_ids = public_figure_shelf.photo_scope(filter, True)
+            private = fetch_photos(
+                c, q=q, filter=filter, person=private_person, offset=0, limit=500,
+                directory=directory, sort=sort, sequence=False, max_id=max_id, around=around, tail=tail,
+                date_from=date_from, date_to=date_to, place=place, nearby=nearby, radius_m=radius_m,
+                map_cell=map_cell, map_lat_bucket=map_lat_bucket, map_lng_bucket=map_lng_bucket,
+                map_west=map_west, map_south=map_south, map_east=map_east, map_north=map_north,
+                shelf_mode=shelf_mode, shelf_ids=shelf_ids,
+            )
+        private_total = int(private.get("total") or 0)
+        private_max_id = int(private.get("max_id") or 0)
+        private_items = [dict(asset_dict(item), path=item.get("path")) for item in private.get("items") or []]
+        if private_total > len(private_items):
+            with db() as c:
+                shelf_mode, shelf_ids = public_figure_shelf.photo_scope(filter, True)
+                page = fetch_photos(
+                    c, q=q, filter=filter, person=private_person, offset=offset, limit=limit,
+                    directory=directory, sort=sort, sequence=sequence, max_id=max_id, around=around, tail=tail,
+                    date_from=date_from, date_to=date_to, place=place, nearby=nearby, radius_m=radius_m,
+                    map_cell=map_cell, map_lat_bucket=map_lat_bucket, map_lng_bucket=map_lng_bucket,
+                    map_west=map_west, map_south=map_south, map_east=map_east, map_north=map_north,
+                    shelf_mode=shelf_mode, shelf_ids=shelf_ids,
+                )
+            if sequence:
+                ids = list(page.get("ids") or [])
+                if offset == 0:
+                    ids = [item.get("id") for item in public_items if isinstance(item.get("id"), int)] + ids
+                return {"ids": ids, "total": private_total + len(public_items), "offset": page.get("offset") or 0, "max_id": page.get("max_id") or 0, "has_more": page.get("has_more")}
+            items = [dict(asset_dict(item), path=item.get("path")) for item in page.get("items") or []]
+            if offset == 0:
+                seen = {item.get("id") for item in items}
+                extra = [item for item in public_items if item.get("id") not in seen]
+                items = sorted(items + extra, key=_photo_time_key, reverse=True)[:limit]
+            return {"total": private_total + len(public_items), "items": items, "max_id": page.get("max_id") or 0}
+    seen = set()
+    merged = []
+    for item in private_items + public_items:
+        ident = item.get("id")
+        if ident in seen:
+            continue
+        seen.add(ident)
+        merged.append(item)
+    merged.sort(key=_photo_time_key, reverse=True)
+    if sequence:
+        ids = [item.get("id") for item in merged if isinstance(item.get("id"), int)]
+        return {"ids": ids, "total": len(ids), "offset": 0, "max_id": private_max_id, "has_more": False}
+    page = merged[max(0, int(offset)):max(0, int(offset)) + max(1, int(limit))]
+    return {"total": len(merged), "items": page, "max_id": private_max_id}
+
+
+def _split_person_filter(person):
+    private = []
+    public = []
+    for token in str(person or "").split(","):
+        token = token.strip()
+        if not token:
+            continue
+        if token.startswith("pf:"):
+            public.append(token)
+        else:
+            private.append(token)
+    return ",".join(private), ",".join(public)
+
+
+def _photo_time_key(item):
+    raw = str(item.get("effective_date") or "")
+    ident = item.get("id")
+    try:
+        number = int(ident)
+    except (TypeError, ValueError):
+        number = 0
+    return (raw, number)
+
+
+def _public_group_bounds(key):
+    key = str(key or "")
+    if not key:
+        return None
+    if key == "10plus":
+        return (10, None)
+    if key.endswith("plus") and key[:-4].isdigit():
+        return (int(key[:-4]), None)
+    if key.startswith("upto") and key[4:].isdigit():
+        return (None, int(key[4:]))
+    if "-" in key:
+        left, right = key.split("-", 1)
+        if left.isdigit() and right.isdigit():
+            return (int(left), int(right))
+    if key.isdigit():
+        return (int(key), int(key))
+    return None
+
+
+def _public_text_hit(needle, *parts):
+    folded = str(needle or "").strip().casefold()
+    if not folded:
+        return True
+    for part in parts:
+        text_value = str(part or "")
+        if text_value and folded in text_value.casefold():
+            return True
+    return False
+
+
+def _public_under_directory(path, directory):
+    if not directory:
+        return True
+    if not path:
+        return False
+    left = os.path.normcase(os.path.normpath(str(path)))
+    right = os.path.normcase(os.path.normpath(str(directory)))
+    return left == right or left.startswith(right + os.sep)
+
+
+def public_figure_photo_result(offset, limit, sequence, person="", q="", date_from="", date_to="", place="", directory="", group=""):
+    records = public_figure_shelf.narrow(public_figure_shelf.visible_records(), person=person, q=q, directory=directory)
+    asset_ids = [int(item["asset_id"]) for item in records if item.get("asset_id")]
+    assets = {}
+    face_counts = {}
+    if asset_ids:
+        marks = ",".join("?" for _ in asset_ids)
+        with db() as c:
+            rows = c.execute(
+                "SELECT " + ASSET_LIST_COLUMNS + " FROM assets a WHERE a.id IN (" + marks + ")",
+                asset_ids,
+            ).fetchall()
+            for row in rows:
+                located = c.execute(
+                    "SELECT path FROM files WHERE asset_id=? AND coalesce(exists_now,1)=1 AND coalesce(excluded,0)=0 ORDER BY id LIMIT 1",
+                    (row["id"],),
+                ).fetchone()
+                if not located:
+                    continue
+                assets[row["id"]] = dict(asset_dict(row), path=located["path"], public_rel=None)
+            if group:
+                counted = c.execute(
+                    "SELECT asset_id, count(*) n FROM faces WHERE asset_id IN (" + marks + ") GROUP BY asset_id",
+                    asset_ids,
+                ).fetchall()
+                face_counts = {int(row["asset_id"]): int(row["n"]) for row in counted}
+    bounds = _public_group_bounds(group)
+    kept = []
+    for item in records:
+        asset = assets.get(item.get("asset_id"))
+        dated = str((asset or {}).get("effective_date") or "")
+        if date_from and not dated.startswith(str(date_from)):
+            continue
+        if date_to and not dated.startswith(str(date_to)):
+            continue
+        if place and str((asset or {}).get("effective_place") or "") != str(place):
+            continue
+        if item.get("_needs_directory") and not _public_under_directory((asset or {}).get("path"), item.get("_needs_directory")):
+            continue
+        if bounds:
+            count = face_counts.get(int(item["asset_id"]), 0) if item.get("asset_id") else 0
+            low, high = bounds
+            if low is not None and count < low:
+                continue
+            if high is not None and count > high:
+                continue
+        kept.append(item)
+    total = len(kept)
+    if sequence:
+        ids = [int(item["asset_id"]) for item in kept if item.get("asset_id")]
+        return {"ids": ids, "total": len(ids), "items": []}
+    offset = max(0, int(offset))
+    limit = max(1, int(limit))
+    page = kept[offset:offset + limit]
+    items = []
+    for item in page:
+        asset = assets.get(item.get("asset_id"))
+        if asset:
+            copied = dict(asset)
+            copied["public_rel"] = item["relative_path"]
+            items.append(copied)
+            continue
+        items.append({
+            "id": "pf-" + item["sha256"][:16],
+            "public_rel": item["relative_path"],
+            "path": item["filename"],
+            "width": item["width"],
+            "height": item["height"],
+            "effective_date": None,
+            "effective_place": item["filename"],
+            "copies": 1,
+            "favorite": 0,
+        })
+    return {"ids": [], "total": total, "items": items}
+
+
 @app.get('/api/photos')
-def photos(q:str='',filter:str='all',person:str='',offset:int=0,limit:int=60,directory:str='',sort:str='date_desc',sequence:bool=False,max_id:int=0,around:int=0,tail:bool=False,date_from:str='',date_to:str='',place:str='',nearby:int=0,radius_m:int=100,map_cell:float=0,map_lat_bucket:float|None=None,map_lng_bucket:float|None=None,map_west:float|None=None,map_south:float|None=None,map_east:float|None=None,map_north:float|None=None,recommendation_snapshot:str=''):
+def photos(q:str='',filter:str='all',person:str='',offset:int=0,limit:int=60,directory:str='',sort:str='date_desc',sequence:bool=False,max_id:int=0,around:int=0,tail:bool=False,date_from:str='',date_to:str='',place:str='',nearby:int=0,radius_m:int=100,map_cell:float=0,map_lat_bucket:float|None=None,map_lng_bucket:float|None=None,map_west:float|None=None,map_south:float|None=None,map_east:float|None=None,map_north:float|None=None,recommendation_snapshot:str='',group:str=''):
     if offset<0 or limit<1 or limit>500 or max_id<0 or around<0 or nearby<0:
         raise ApiProblem(400,'分页或照片编号参数无效','invalid_request')
+    private_person, public_person = _split_person_filter(person)
+    if filter=='public-figures':
+        result=public_figure_photo_result(offset, limit, sequence, person=public_person, q=q, date_from=date_from, date_to=date_to, place=place, directory=directory, group=group)
+        if sequence:
+            return {'ids':result['ids'],'total':result['total'],'offset':0,'max_id':0,'has_more':False}
+        return {'total':result['total'],'items':result['items'],'max_id':0}
+    if public_person:
+        return _photos_with_public_people(
+            filter=filter, private_person=private_person, public_person=public_person,
+            q=q, offset=offset, limit=limit, directory=directory, sort=sort, sequence=sequence,
+            max_id=max_id, around=around, tail=tail, date_from=date_from, date_to=date_to, place=place,
+            nearby=nearby, radius_m=radius_m, map_cell=map_cell, map_lat_bucket=map_lat_bucket,
+            map_lng_bucket=map_lng_bucket, map_west=map_west, map_south=map_south, map_east=map_east,
+            map_north=map_north,
+        )
+    person = private_person
     try:
         with db() as c:
             if recommendation_snapshot:
@@ -2239,12 +2461,19 @@ def photos(q:str='',filter:str='all',person:str='',offset:int=0,limit:int=60,dir
                     raise ApiProblem(400,'推荐快照不能与普通筛选叠加','invalid_request')
                 result=fetch_snapshot_photos(c, recommendation_snapshot, offset=offset, limit=limit, sequence=sequence, around=around, tail=tail)
             else:
+                narrowed=any([
+                    q, person, directory, date_from, date_to, place, nearby,
+                    map_cell, map_west is not None, map_south is not None,
+                    map_east is not None, map_north is not None,
+                ])
+                shelf_mode, shelf_ids = public_figure_shelf.photo_scope(filter, narrowed)
                 result=fetch_photos(
                     c, q=q, filter=filter, person=person, offset=offset, limit=limit,
                     directory=directory, sort=sort, sequence=sequence, max_id=max_id, around=around, tail=tail,
                     date_from=date_from, date_to=date_to, place=place, nearby=nearby, radius_m=radius_m,
                     map_cell=map_cell, map_lat_bucket=map_lat_bucket, map_lng_bucket=map_lng_bucket,
                     map_west=map_west, map_south=map_south, map_east=map_east, map_north=map_north,
+                    shelf_mode=shelf_mode, shelf_ids=shelf_ids,
                 )
     except RecommendationError as exc:
         raise ApiProblem(exc.status_code, exc.detail, exc.error_code) from exc
@@ -2612,16 +2841,71 @@ def set_photo_favorite(aid:int, body:FavoriteRequest):
         STATUS_CACHE['payload']=None; STATUS_CACHE['at']=0
     return {'id':aid,'favorite':favorite,'favorite_count':count,'changed':before!=favorite}
 
+@app.get('/api/public-figures')
+def public_figures_status():
+    return public_figure_shelf.status()
+
+@app.get('/api/public-figures/people')
+def public_figure_people(q:str='', limit:int=40):
+    if limit<1 or limit>80:
+        raise ApiProblem(400,'invalid people limit','invalid_request')
+    return {'items': public_figure_shelf.search_people(q, limit)}
+
+
+@app.get('/api/public-figures/places')
+def public_figure_places(q:str='', limit:int=40):
+    if limit<1 or limit>80:
+        raise ApiProblem(400,'invalid place limit','invalid_request')
+    ids = public_figure_shelf.asset_ids()
+    if not ids:
+        return {'places':[],'total':0}
+    needle = (q or '').strip()
+    counts = {}
+    with db() as c:
+        for start in range(0, len(ids), 400):
+            chunk = ids[start:start+400]
+            marks = ",".join("?" for _ in chunk)
+            rows = c.execute(
+                "SELECT a.manual_place, a.place FROM assets a WHERE a.id IN (" + marks + ")",
+                list(chunk),
+            )
+            comma = chr(0xFF0C)
+            folded = needle.casefold()
+            for row in rows:
+                name = ((row["manual_place"] or row["place"] or "")).replace(comma, "").strip()
+                if not name:
+                    continue
+                if folded and folded not in name.casefold():
+                    continue
+                counts[name] = counts.get(name, 0) + 1
+    places = [{"place": name, "count": count} for name, count in counts.items()]
+    places.sort(key=lambda item: (-item["count"], item["place"]))
+    return {"places": places[:limit], "total": len(places)}
+
+
+@app.get('/api/public-figures/media')
+def public_figure_media(rel: str):
+    path = public_figure_shelf.resolve(rel)
+    if path is None:
+        raise HTTPException(404, '这张照片已经不在公众人物文件夹里')
+    return FileResponse(path)
+
 @app.get('/api/timeline')
 def timeline():
+    _mode, shelf_ids = public_figure_shelf.photo_scope('timeline', False)
+    shelf_clause = ''
+    shelf_params = []
+    if shelf_ids:
+        shelf_clause = ' AND a.id NOT IN (' + ','.join('?' for _ in shelf_ids) + ')'
+        shelf_params = list(shelf_ids)
     with db() as c:
         rows=c.execute('''SELECT substr(coalesce(a.manual_date,a.captured_at),1,4) year, count(*) n
-            FROM assets a WHERE '''+ACTIVE_ASSET+'''
-            GROUP BY year ORDER BY year DESC''').fetchall()
+            FROM assets a WHERE '''+ACTIVE_ASSET+shelf_clause+'''
+            GROUP BY year ORDER BY year DESC''', shelf_params).fetchall()
         month_rows=c.execute('''SELECT substr(coalesce(a.manual_date,a.captured_at),1,7) month, count(*) n
-            FROM assets a WHERE '''+ACTIVE_ASSET+'''
+            FROM assets a WHERE '''+ACTIVE_ASSET+shelf_clause+'''
             AND substr(coalesce(a.manual_date,a.captured_at),1,7) GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'
-            GROUP BY month ORDER BY month DESC''').fetchall()
+            GROUP BY month ORDER BY month DESC''', shelf_params).fetchall()
     years=[{'year':r['year'] or 'unknown','count':r['n']} for r in rows]
     months=[{'month':r['month'],'count':r['n']} for r in month_rows]
     return {'years':years,'months':months,'dated':sum(x['count'] for x in years if x['year']!='unknown')}

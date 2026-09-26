@@ -26,12 +26,16 @@ EXCLUDE_DISTS = {
     "transformers", "modelscope", "PyQt5", "pandas", "scikit-learn", "sklearn",
     "sympy", "google-api-python-client", "tensorboard", "jupyter",
 }
-APP_PY = [
+# Every root-level application module ships. Keep the historical names as a
+# floor so a future import refactor cannot silently drop a known dependency.
+APP_PY_REQUIRED = {
     "app.py", "ourtime_config.py", "browse_queries.py", "geo_labels.py",
-    "library_db.py", "map_area_service.py", "metadata_reader.py", "recent_operations.py",
-    "object_labels.py", "photo_export.py", "requirements.txt", "Logo.png",
-    "AppIcon.png",
-]
+    "library_db.py", "map_area_service.py", "metadata_reader.py",
+    "recent_operations.py", "object_labels.py", "photo_export.py",
+    "home_recommendations.py", "memory_curation.py", "face_split_batch.py",
+}
+APP_STATIC = ["requirements.txt", "Logo.png", "AppIcon.png"]
+FACE_LABEL_FILES = ("1.png", "4.png", "7.png", "8.png")
 GEO_FILES = [
     "geonames/cities500.zip",
     "geonames/countryInfo.txt",
@@ -60,6 +64,31 @@ def load_local_settings() -> dict:
 
 
 SETTINGS = load_local_settings()
+
+
+def app_python_names() -> list[str]:
+    names = sorted(path.name for path in ROOT.glob("*.py") if path.is_file())
+    missing = sorted(APP_PY_REQUIRED - set(names))
+    if missing:
+        raise RuntimeError("缺少应用模块：" + ", ".join(missing))
+    return names
+
+
+def face_label_source() -> Path | None:
+    configured = os.environ.get("OURTIME_PACKAGE_FACE_LABEL_DIR") or SETTINGS.get("face_label_dir")
+    candidates: list[Path] = []
+    if configured:
+        path = Path(str(configured))
+        if not path.is_absolute():
+            path = ROOT / path
+        candidates.append(path)
+    candidates.append(ROOT / "data" / "人名标签")
+    candidates.append(ROOT / "web" / "assets" / "face-labels")
+    for folder in candidates:
+        if all((folder / name).is_file() for name in FACE_LABEL_FILES):
+            return folder
+    return None
+
 
 
 def configured_path(env_name: str, setting_name: str, default: Path) -> Path:
@@ -217,11 +246,44 @@ def copy_runtime(dest_app: Path) -> None:
                 copy_file(name, dest / name.name)
 
 
+def verify_app_imports(python_exe: Path, app_dir: Path) -> None:
+    log("Verifying packed application imports...")
+    modules = [Path(name).stem for name in app_python_names()]
+    code = "import " + ", ".join(modules)
+    env = os.environ.copy()
+    env["PYTHONHOME"] = str(app_dir / "python")
+    env["PYTHONPATH"] = str(app_dir)
+    env["PYTHONUTF8"] = "1"
+    env["NO_ALBUMENTATIONS_UPDATE"] = "1"
+    proc = subprocess.run(
+        [str(python_exe), "-c", code],
+        cwd=str(app_dir),
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    if proc.returncode != 0:
+        raise RuntimeError("packed app import failed:\n" + (proc.stderr or proc.stdout or ""))
+    log("app imports ok")
+
+
 def fill_packed_imports(python_exe: Path, dest_site: Path) -> None:
     log("Filling missing imports...")
     check = "import fastapi, uvicorn, insightface, onnxruntime, cv2, PIL, playwright"
+    env = os.environ.copy()
+    env.setdefault("PYTHONUTF8", "1")
+    env.setdefault("NO_ALBUMENTATIONS_UPDATE", "1")
     for _ in range(25):
-        proc = subprocess.run([str(python_exe), "-c", check], capture_output=True, text=True)
+        proc = subprocess.run(
+            [str(python_exe), "-c", check],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=env,
+        )
         if proc.returncode == 0:
             log("imports ok")
             return
@@ -285,6 +347,27 @@ def compile_launcher(app_root: Path, ico: Path) -> None:
     shutil.copy2(out_start, app_root / "停止拾光.exe")
 
 
+def copy_public_faces(app_dir: Path) -> None:
+    """Ship public-figure embeddings only.
+
+    Reference photos stay out of the green package: the pack is face
+    identity data (names + embeddings), not a photo gallery. User personal
+    faces remain exclusively under Data/.
+    """
+    src = ROOT / "resources" / "public-faces" / "public-faces.sqlite3"
+    if not src.is_file():
+        log("WARNING: resources/public-faces/public-faces.sqlite3 missing; public-figure pack not included")
+        return
+    dest = app_dir / "resources" / "public-faces"
+    dest.mkdir(parents=True, exist_ok=True)
+    log("Copying public-figure face embeddings (no reference photos)...")
+    copy_file(src, dest / "public-faces.sqlite3")
+    readme = ROOT / "resources" / "public-faces" / "README.md"
+    if readme.is_file():
+        copy_file(readme, dest / "README.md")
+    log("  public-faces.sqlite3 only")
+
+
 def write_config(app_dir: Path) -> None:
     (app_dir / "config.json").write_text(
         """{
@@ -294,7 +377,9 @@ def write_config(app_dir: Path) -> None:
   "face_label_dir": "web/assets/face-labels",
   "chromium_path": "browsers/chromium-1200/chrome-win64/chrome.exe",
   "folder_only_drive": "",
-  "objects_enabled": false
+  "objects_enabled": false,
+  "public_figures_shelf": true,
+  "public_figures_pack": "resources/public-faces/public-faces.sqlite3"
 }
 """,
         encoding="utf-8",
@@ -308,7 +393,8 @@ def write_pack_readme(root: Path) -> None:
         + "启动没有黑框。第一次没有照片时，会弹出窗口：把文件夹拖进去或点选。" + chr(10)
         + "关掉网页后约 8 秒后台会退出；正在扫描时会等扫描告一段落。也可双击 停止拾光.exe。" + chr(10)
         + "原照片不会移动。资料在 Data 文件夹。" + chr(10)
-        + "人物识别、离线地名和带标签导出已随包提供；地图底图仍需联网。" + chr(10),
+        + "人物识别、离线地名、公众人物人脸特征和带标签导出已随包提供；地图底图仍需联网。" + chr(10)
+        + "App 里是随程序提供的公众人物人脸特征，不含参考照片；你的私人人物、人脸裁剪和缩略图只在 Data。" + chr(10),
         encoding="utf-8",
     )
 
@@ -338,11 +424,21 @@ def write_manifest(root: Path) -> None:
         "拾光.exe",
         "停止拾光.exe",
         "App/app.py",
+        "App/home_recommendations.py",
+        "App/memory_curation.py",
+        "App/face_split_batch.py",
         "App/web/app.js",
+        "App/web/vendor/fonts/lxgw-wenkai-screen/LXGWWenKaiGBScreen.ttf",
         "App/AppIcon.png",
         "App/resources/models/models/buffalo_l/det_10g.onnx",
         "App/resources/models/models/buffalo_l/w600k_r50.onnx",
         "App/resources/geo/geonames/cities500.zip",
+        "App/resources/geo/china-admin/extracted/ok_data_level4.csv",
+        "App/resources/public-faces/public-faces.sqlite3",
+        "App/web/assets/face-labels/1.png",
+        "App/web/assets/face-labels/4.png",
+        "App/web/assets/face-labels/7.png",
+        "App/web/assets/face-labels/8.png",
         "App/browsers/chromium-1200/chrome-win64/chrome.exe",
     ]
     manifest = {
@@ -406,9 +502,21 @@ def main() -> int:
     fill_packed_imports(app_dir / "python" / "python.exe", dest_site)
 
     log("Copying application files...")
-    for name in APP_PY:
+    for name in app_python_names():
+        copy_file(ROOT / name, app_dir / name)
+        log("  " + name)
+    for name in APP_STATIC:
         copy_file(ROOT / name, app_dir / name)
     copy_tree(ROOT / "web", app_dir / "web", skip_names={"__pycache__"})
+    label_src = face_label_source()
+    if label_src:
+        log("Copying face-label plates from " + str(label_src))
+        label_dst = app_dir / "web" / "assets" / "face-labels"
+        label_dst.mkdir(parents=True, exist_ok=True)
+        for name in FACE_LABEL_FILES:
+            copy_file(label_src / name, label_dst / name)
+    else:
+        log("WARNING: face-label plates not found; classic fallback only")
     copy_runtime(app_dir)
     if (ROOT / "tools" / "exiftool").is_dir():
         copy_tree(ROOT / "tools" / "exiftool", app_dir / "tools" / "exiftool")
@@ -421,11 +529,13 @@ def main() -> int:
             copy_file(src, app_dir / "resources" / "geo" / rel)
         else:
             raise RuntimeError("缺少地名数据：" + str(src))
+    copy_public_faces(app_dir)
 
     log("Copying Chromium for annotated export...")
     copy_tree(CHROMIUM_SRC, app_dir / "browsers" / "chromium-1200")
 
     write_config(app_dir)
+    verify_app_imports(app_dir / "python" / "python.exe", app_dir)
     for doc in ("README.md", "THIRD_PARTY_NOTICES.md", "docs/SETUP.md", "docs/PRIVACY-AND-DATA.md"):
         src = ROOT / doc
         if src.is_file():

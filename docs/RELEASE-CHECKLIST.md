@@ -7,9 +7,9 @@
 - 作者本机用未提交的 config.local.json 保留原环境。
 - 当前仅有源码候选；没有 GitHub Release、安装器或已发布版本。
 
-## 本机绿色包草稿（非发布物）
+## 本机绿色包（非发布物）
 
-本机存在被 `.gitignore` 忽略的 `dist/拾光相册-绿色版/` 和同名 ZIP。它们是 2026-09-15 生成的本地草稿，`PACKAGE-MANIFEST.json` 标记 `source_dirty=true`，来源为 `4d27c31`；当前工作树随后仍有未提交修改，因此不能当作当前源码的完整构建物，也未在本轮收口中标记为绿色包验收通过。
+本机存在被 `.gitignore` 忽略的 `dist/拾光相册-绿色版/` 和同名 ZIP。2026-09-25 已用当前源码重建，并通过 `tools/packaging/smoke_packed.py` 闭环验收（`GREEN_PACKAGE_ACCEPTANCE_OK`）。`PACKAGE-MANIFEST.json` 仍可能标记 `source_dirty=true`（打包脚本改动未提交前），不能当作对外发布物。
 
 目标形态：
 
@@ -18,6 +18,6 @@
   程序文件（app.py、web、runtime、resources、tools）
   data/   （首次运行新建；迁移时整夹带走）
 
-禁止打进包：作者库、WAL/SHM、faces/thumbs、个人模板、日志、.git、config.local.json。
+禁止打进包：作者库、WAL/SHM、私人 faces/thumbs、个人模板、日志、.git、config.local.json、公众人物 `references/` 参考照片、`SEED-REPORT.json`。`resources/public-faces/public-faces.sqlite3` 是程序资源（公众人物姓名与人脸特征），打进 `App/resources/public-faces/`，不进用户 `Data/`。
 
 构建入口是 `打包拾光.cmd`；构建后用 `tools/packaging/smoke_packed.py` 在临时目录和随机端口执行真实验收。`tools/release_inventory.py` 仍可做源码候选的只读清单检查。
