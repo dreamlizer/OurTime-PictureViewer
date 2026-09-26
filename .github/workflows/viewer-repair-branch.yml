@@ -14,24 +14,34 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-      - name: Snapshot only tracked source, never photos or databases
+      - name: Download test-only Python wheels
+        run: python3 -m pip download --only-binary=:all: --no-deps pypinyin==0.55.0 pillow-heif==1.1.1 -d test-wheels
+      - name: Snapshot tracked source and UI test resources
         shell: bash
         run: |
           python3 - <<'PY'
           import pathlib, subprocess, zipfile
-          files = subprocess.check_output(['git','ls-files','-z']).decode().split('\0')
+          files=subprocess.check_output(['git','ls-files','-z']).decode().split('\0')
           with zipfile.ZipFile('viewer-source.zip','w',zipfile.ZIP_DEFLATED) as z:
               for name in files:
-                  p = pathlib.Path(name)
+                  p=pathlib.Path(name)
                   if not name or not p.is_file(): continue
-                  source = (len(p.parts) == 1 and p.suffix in ('.py','.md','.txt')) or (p.parts[0] in ('web','validation','tools') and p.suffix in ('.js','.css','.html','.py','.json','.ps1'))
-                  if source and not any(s in p.parts for s in ('reports','work','data','Data','node_modules','.venv')):
-                      z.write(p,name)
-          print('Source revision:',subprocess.check_output(['git','rev-parse','HEAD']).decode().strip())
+                  source=(len(p.parts)==1 and p.suffix in ('.py','.md','.txt')) or (p.parts[0] in ('web','validation','tools') and p.suffix in ('.js','.css','.html','.py','.json','.ps1'))
+                  if source and not any(s in p.parts for s in ('reports','work','data','Data','node_modules','.venv')): z.write(p,name)
+          with zipfile.ZipFile('viewer-test-resources.zip','w',zipfile.ZIP_DEFLATED) as z:
+              for name in files:
+                  p=pathlib.Path(name)
+                  if not name or not p.is_file(): continue
+                  if name.startswith('web/vendor/fonts/') or name.startswith('web/assets/face-labels/'): z.write(p,name)
+              for p in pathlib.Path('test-wheels').glob('*.whl'): z.write(p,str(p))
           PY
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: viewer-source
           path: viewer-source.zip
           retention-days: 1
-          if-no-files-found: error
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: viewer-test-resources
+          path: viewer-test-resources.zip
+          retention-days: 1
