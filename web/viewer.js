@@ -158,6 +158,7 @@ const viewer={
 const viewerDisplay=(window.OurTimeViewerDisplay&&typeof window.OurTimeViewerDisplay.createViewerDisplay==='function')
   ?window.OurTimeViewerDisplay.createViewerDisplay()
   :null;
+window.__ourTimeViewerDisplay=viewerDisplay;
 function displayTicketFromRequest(token){
   return token?{sessionEpoch:token.sessionEpoch,requestSeq:token.requestSeq,targetKey:token.targetKey}:null;
 }

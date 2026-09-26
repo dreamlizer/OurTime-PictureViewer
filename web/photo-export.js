@@ -29,11 +29,19 @@
   ];
   const ready=()=>{
     const dialog=$('#detail-dialog'),image=$('#detail-img'),detail=window.__ourTimeApp?.state?.detail;
+    const display=window.__ourTimeViewerDisplay||null;
+    const lease=display?display.currentLease():null;
+    const leaseOk=!display||display.isLiveLease(lease);
+    const stableMotion=!dialog?.classList.contains('viewer-closing')
+      && !image?.classList.contains('viewer-photo-arriving')
+      && !dialog?.classList.contains('is-loading');
     return Boolean(
       dialog?.open
-      && !dialog.classList.contains('is-loading')
+      && leaseOk
+      && stableMotion
       && detail?.id
       && Number(dialog.dataset.photoId)===Number(detail.id)
+      && (!lease || String(lease.photoKey)===String(detail.id))
       && image?.complete
       && image.naturalWidth
       && !image.hidden
@@ -129,11 +137,26 @@
   async function run(requestedFormat){
     const button=exportButton();
     const format=String(requestedFormat||'jpeg').toLowerCase();
+    const display=window.__ourTimeViewerDisplay||null;
+    const leaseAtClick=display?display.currentLease():null;
+    const idAtClick=Number(window.__ourTimeApp?.state?.detail?.id)||0;
     let frozen;
     try{
       if(document.fonts?.ready)await document.fonts.ready;
       await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+      if(display&&leaseAtClick&&!display.isLiveLease(leaseAtClick)){
+        window.viewerMessage?.('画面已切换，本次导出已取消');
+        return;
+      }
+      if(idAtClick&&Number(window.__ourTimeApp?.state?.detail?.id)!==idAtClick){
+        window.viewerMessage?.('画面已切换，本次导出已取消');
+        return;
+      }
       frozen=freeze();
+      if(idAtClick&&frozen.id!==idAtClick){
+        window.viewerMessage?.('画面已切换，本次导出已取消');
+        return;
+      }
     }catch(error){
       window.viewerMessage?.(error.message);
       return;

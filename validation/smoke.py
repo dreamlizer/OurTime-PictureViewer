@@ -550,6 +550,13 @@ def main():
         fail("viewer.js 未接入 commitDisplay / beginClose")
     ok("显示控制器：commitDisplay 唯一采用 + 清单接线")
 
+    export_js = read(WEB / "photo-export.js")
+    if "currentLease" not in export_js or "本次导出已取消" not in export_js:
+        fail("导出未绑定显示租约，换图中可能导出中间态")
+    if "isLiveLease" not in viewer:
+        fail("viewer 未使用显示租约")
+    ok("导出冻结绑定 FrameLease")
+
     if (
         'placeholder="搜索已记录地点"' not in html
         or 'class="place-search-results"' not in html
